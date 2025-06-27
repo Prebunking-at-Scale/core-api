@@ -38,6 +38,11 @@ jobs:
     name: Build & Push
     needs: test
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: "read"
+      id-token: "write"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
