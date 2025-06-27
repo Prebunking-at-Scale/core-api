@@ -1,0 +1,27 @@
+
+services:
+
+  pas-postgres:
+    image: pgvector/pgvector:pg17
+    ports:
+      - 5433:5432
+    volumes:
+      - ./postgresql/data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_PASSWORD=s3cret
+      - POSTGRES_USER=pas
+      - POSTGRES_DB=pas
+
+
+  core-api:
+    image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api:dev
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    container_name: "core-api"
+    depends_on:
+      - pas-postgres
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URI=postgresql://pas:s3cret@pas-postgres:5432/pas

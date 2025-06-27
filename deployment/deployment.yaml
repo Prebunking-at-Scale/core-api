@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: core-api
+  labels:
+    app: core-api
+spec:
+  selector:
+    matchLabels:
+      app: core-api
+      tier: web
+  template:
+    metadata:
+      labels:
+        app: core-api
+        tier: web
+    spec:
+      containers:
+        - name: core-api
+          image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api:dev
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              cpu: 200m
