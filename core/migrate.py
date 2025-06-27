@@ -77,7 +77,7 @@ async def migrate(
             ).close()
 
 
-def _get_migration_script(version: int, direction: Literal["up", "down"]) -> bytes:
+def _get_migration_script(version: int, direction: str) -> bytes:
     search_path = Path.joinpath(
         Path(__file__).parent.resolve(), "migrations", f"{version}.*{direction}.sql"
     ).as_posix()
