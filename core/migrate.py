@@ -33,16 +33,19 @@ async def migrate(
     """
 
     async with connection_factory() as conn:
-        conn.execute("""
+        create_table = await conn.execute("""
             CREATE TABLE IF NOT EXISTS migrations (
                 id serial PRIMARY KEY,
                 version INTEGER NOT NULL,
                 direction TEXT NOT NULL,
                 performed timestamp NOT NULL DEFAULT NOW()
             )
-        """).close()
+        """)
+        await create_table.close()
 
-        conn.execute("LOCK TABLE migrations IN ACCESS EXCLUSIVE MODE").close()
+        await (
+            await conn.execute("LOCK TABLE migrations IN ACCESS EXCLUSIVE MODE")
+        ).close()
 
         initial_version = 0
         cur = await conn.execute(
@@ -68,12 +71,14 @@ async def migrate(
         for i in range(initial_version + offset, target_version + offset, change):
             script = _get_migration_script(i, direction)
             log.info(f"Running migration {i} {direction}...")
-            conn.execute(script).close()
+            await (await conn.execute(script)).close()
             current_version = i if direction == "up" else i - 1
             log.info(f"Current version: {current_version}")
-            conn.execute(
-                "INSERT INTO migrations (version, direction) VALUES (%s, %s);",
-                (current_version, direction),
+            await (
+                await conn.execute(
+                    "INSERT INTO migrations (version, direction) VALUES (%s, %s);",
+                    (current_version, direction),
+                )
             ).close()
 
 
