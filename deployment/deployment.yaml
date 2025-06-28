@@ -18,6 +18,7 @@ spec:
       containers:
         - name: core-api
           image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api:dev
+          imagePullPolicy: Always
           ports:
             - containerPort: 8000
           resources:
