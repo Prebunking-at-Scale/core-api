@@ -52,6 +52,7 @@ async def hello_world() -> str:
 
 
 app = Litestar(
+    path="/api/",
     debug=True,
     route_handlers=[
         hello_world,
