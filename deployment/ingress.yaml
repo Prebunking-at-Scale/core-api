@@ -21,13 +21,13 @@ spec:
     - host: pas-dev.fullfact.org
       http:
         paths:
-          - backend:
+          - path: /api/*
+            pathType: ImplementationSpecific
+            backend:
               service:
                 name: core-api
                 port:
                   number: 8000
-            path: /api/*
-            pathType: ImplementationSpecific
 ---
 apiVersion: v1
 kind: Service
