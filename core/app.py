@@ -1,6 +1,6 @@
 import os
 
-from litestar import Litestar, get
+from litestar import Litestar, Router, get
 from litestar.di import Provide
 from litestar.openapi import OpenAPIConfig
 from litestar.openapi.spec import Components, SecurityScheme
@@ -51,12 +51,24 @@ async def hello_world() -> str:
     return "Hello, world!"
 
 
+@get("/health")
+async def health() -> str:
+    async with pool.connection() as conn:
+        cur = await conn.execute(
+            "SELECT version FROM migrations ORDER BY id DESC LIMIT 1"
+        )
+        await cur.close()
+        return "ok"
+
+
+api_router = Router(path="/api", route_handlers=[VideoController])
+
+
 app = Litestar(
-    path="/api/",
     debug=True,
     route_handlers=[
         hello_world,
-        VideoController,
+        api_router,
     ],
     on_startup=[
         setup_db,
