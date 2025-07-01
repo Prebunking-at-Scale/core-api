@@ -1,5 +1,5 @@
 import logging
-from typing import Callable, Literal
+from typing import Callable
 from pathlib import Path
 import glob
 
