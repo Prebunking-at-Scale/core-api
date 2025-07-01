@@ -4,7 +4,7 @@ from uuid import UUID
 from litestar.dto import DTOData
 
 from core.uow import ConnectionFactory, uow
-from core.videos.models import Video
+from core.videos.models import Video, VideoFilters
 from core.videos.repo import VideoRepository
 
 
@@ -18,6 +18,10 @@ class VideoService:
     async def get_video_by_id(self, video_id: UUID) -> Video | None:
         async with self.repo() as repo:
             return await repo.get_video_by_id(video_id)
+
+    async def filter_videos(self, filters: VideoFilters) -> list[Video]:
+        async with self.repo() as repo:
+            return await repo.filter_videos(filters)
 
     async def add_video(self, video: Video) -> Video:
         async with self.repo() as repo:

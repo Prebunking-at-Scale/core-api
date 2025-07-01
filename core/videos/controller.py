@@ -4,9 +4,9 @@ from litestar import Controller, delete, get, patch, post
 from litestar.di import Provide
 from litestar.dto import DTOData
 
-from core.response import JSON
+from core.response import JSON, CursorJSON
 from core.uow import ConnectionFactory
-from core.videos.models import VideoCreate, VideoPatch, Video
+from core.videos.models import VideoCreate, VideoFilters, VideoPatch, Video
 from core.videos.service import VideoService
 
 
@@ -22,14 +22,16 @@ class VideoController(Controller):
         "video_service": Provide(video_service),
     }
 
-    @get(
-        path="/{video_id:uuid}",
-        summary="Get a video by ID",
+    @post(
+        path="/filter",
+        summary="Get all or a filtered subset of videos",
     )
-    async def get_video(
-        self, video_service: VideoService, video_id: UUID
-    ) -> JSON[Video | None]:
-        return JSON(await video_service.get_video_by_id(video_id))
+    async def filter_videos(
+        self, video_service: VideoService, data: VideoFilters
+    ) -> CursorJSON[list[Video]]:
+        videos = await video_service.filter_videos(data)
+        cursor = videos[-1].id if videos else None
+        return CursorJSON(data=videos, cursor=cursor)
 
     @post(
         path="/",
@@ -41,6 +43,15 @@ class VideoController(Controller):
         self, video_service: VideoService, data: DTOData[Video]
     ) -> JSON[Video]:
         return JSON(await video_service.add_video(data.create_instance()))
+
+    @get(
+        path="/{video_id:uuid}",
+        summary="Get a video by ID",
+    )
+    async def get_video(
+        self, video_service: VideoService, video_id: UUID
+    ) -> JSON[Video | None]:
+        return JSON(await video_service.get_video_by_id(video_id))
 
     @patch(
         path="/{video_id:uuid}",
