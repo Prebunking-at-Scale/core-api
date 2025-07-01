@@ -1,5 +1,7 @@
 import os
 
+from dotenv import load_dotenv
+
 from litestar import Litestar, Router, get
 from litestar.di import Provide
 from litestar.openapi import OpenAPIConfig
@@ -8,21 +10,20 @@ from psycopg import AsyncConnection
 from psycopg.rows import DictRow, dict_row
 from psycopg_pool import AsyncConnectionPool
 
+from core.auth import base_guard
 from core.migrate import migrate
 from core.videos.controller import VideoController
 
+load_dotenv()
 
 MIGRATION_TARGET_VERSION = 1
-DB_HOST = os.environ.get("DATABASE_HOST", "localhost")
-DB_PORT = os.environ.get("DATABASE_PORT", "5433")
-DB_USER = os.environ.get("DATABASE_USER", "pas")
-DB_PASSWORD = os.environ.get("DATABASE_PASSWORD", "s3cret")
-DB_NAME = os.environ.get("DATABASE_NAME", "pas")
+DB_HOST = os.environ.get("DATABASE_HOST")
+DB_PORT = os.environ.get("DATABASE_PORT")
+DB_USER = os.environ.get("DATABASE_USER")
+DB_PASSWORD = os.environ.get("DATABASE_PASSWORD")
+DB_NAME = os.environ.get("DATABASE_NAME")
 
-if DB_PASSWORD:
-    DB_PASSWORD = ":" + DB_PASSWORD
-
-dsn = f"postgresql://{DB_USER}{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+dsn = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 pool = AsyncConnectionPool(
     dsn,
@@ -46,12 +47,12 @@ async def perform_migrations(app: Litestar) -> None:
     await migrate(app.state.connection_factory, MIGRATION_TARGET_VERSION)
 
 
-@get("/")
+@get("/", include_in_schema=False)
 async def hello_world() -> str:
     return "Hello, world!"
 
 
-@get("/health")
+@get("/health", include_in_schema=False)
 async def health() -> str:
     async with pool.connection() as conn:
         cur = await conn.execute(
@@ -61,7 +62,12 @@ async def health() -> str:
         return "ok"
 
 
-api_router = Router(path="/api", route_handlers=[VideoController])
+api_router = Router(
+    path="/api",
+    route_handlers=[VideoController],
+    guards=[base_guard],
+    security=[{"APIToken": []}],
+)
 
 
 app = Litestar(
@@ -87,9 +93,10 @@ app = Litestar(
         security=[{"BearerToken": []}],
         components=Components(
             security_schemes={
-                "BearerToken": SecurityScheme(
-                    type="http",
-                    scheme="bearer",
+                "APIToken": SecurityScheme(
+                    name="X-API-TOKEN",
+                    type="apiKey",
+                    security_scheme_in="header",
                 )
             },
         ),
