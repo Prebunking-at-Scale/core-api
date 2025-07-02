@@ -84,7 +84,9 @@ app = Litestar(
     dependencies={
         "connection_factory": Provide(lambda: pool.connection, sync_to_thread=False),
     },
-    on_shutdown=[shutdown_db],
+    on_shutdown=[
+        shutdown_db,
+    ],
     plugins=[],
     middleware=[],
     openapi_config=OpenAPIConfig(

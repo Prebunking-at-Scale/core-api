@@ -31,7 +31,6 @@ class Video(IDAuditModel):
 class VideoCreate(PydanticDTO[Video]):
     config = DTOConfig(
         exclude={
-            "id",
             "created_at",
             "updated_at",
         },
