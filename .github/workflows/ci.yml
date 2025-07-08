@@ -58,13 +58,6 @@ jobs:
           release_branches: main
           pre_release_branches: dev
 
-      - name: Create a GitHub release
-        uses: ncipollo/release-action@v1
-        with:
-          tag: ${{ steps.tag_version.outputs.new_tag }}
-          name: Release ${{ steps.tag_version.outputs.new_tag }}
-          body: ${{ steps.tag_version.outputs.changelog }}
-
       - id: auth
         name: Authenticate with Google Cloud
         uses: google-github-actions/auth@v2
@@ -96,3 +89,10 @@ jobs:
           push: true
           tags: |
             europe-west4-docker.pkg.dev/pas-shared/pas/core-api:${{ steps.tag_version.outputs.new_tag }}
+
+      - name: Create a GitHub release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ steps.tag_version.outputs.new_tag }}
+          name: Release ${{ steps.tag_version.outputs.new_tag }}
+          body: ${{ steps.tag_version.outputs.changelog }}
