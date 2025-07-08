@@ -1,17 +1,17 @@
+from unittest.mock import Base
 import annotated_types
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from datetime import datetime
 from typing import Annotated, Any
 
 from litestar.plugins.pydantic import PydanticDTO
 from litestar.dto import DTOConfig
-from pydantic import BaseModel
-
-from core.models import IDAuditModel
+from pydantic import BaseModel, Field
 
 
-class Video(IDAuditModel):
+class Video(BaseModel):
+    id: UUID = Field(default_factory=uuid4)
     title: str
     description: str
     platform: str
@@ -26,15 +26,6 @@ class Video(IDAuditModel):
     scrape_topic: str | None = None
     scrape_keyword: str | None = None
     metadata: dict[str, Any] = {}
-
-
-class VideoCreate(PydanticDTO[Video]):
-    config = DTOConfig(
-        exclude={
-            "created_at",
-            "updated_at",
-        },
-    )
 
 
 class VideoPatch(PydanticDTO[Video]):
@@ -60,21 +51,7 @@ class VideoFilters(BaseModel):
     limit: Annotated[int, annotated_types.Gt(0)] = 25
 
 
-class TranscriptSentence(IDAuditModel):
-    transcript_id: UUID
-    source: str  # Speech-to-text, OCR, etc
-    text: str  # The actual text of the sentence
-    start_time_s: float  # Start time in seconds
-    metadata: dict[str, Any] | None = None
-
-
-class Transcript(IDAuditModel):
-    video_id: UUID
-    sentences: list[TranscriptSentence]
-    metadata: dict[str, Any] | None = None
-
-
-class VideoClaims(IDAuditModel):
+class VideoClaims(BaseModel):
     video_id: UUID
     claim: str  # The claim made in the video
     start_time_s: float  # When in the video the claim starts
