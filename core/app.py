@@ -1,7 +1,6 @@
 import os
 
 from dotenv import load_dotenv
-
 from litestar import Litestar, Router, get
 from litestar.datastructures import State
 from litestar.di import Provide
