@@ -1,12 +1,10 @@
-from unittest.mock import Base
-import annotated_types
-from uuid import UUID, uuid4
-
 from datetime import datetime
 from typing import Annotated, Any
+from uuid import UUID, uuid4
 
-from litestar.plugins.pydantic import PydanticDTO
+import annotated_types
 from litestar.dto import DTOConfig
+from litestar.plugins.pydantic import PydanticDTO
 from pydantic import BaseModel, Field
 
 

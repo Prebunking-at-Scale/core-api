@@ -1,7 +1,7 @@
-import logging
-from typing import Callable
-from pathlib import Path
 import glob
+import logging
+from pathlib import Path
+from typing import Callable
 
 import psycopg
 from psycopg.rows import DictRow
