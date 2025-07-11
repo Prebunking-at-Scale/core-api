@@ -13,15 +13,9 @@ from core.videos.controller import VideoController
 
 
 MIGRATION_TARGET_VERSION = 1
-DB_HOST = os.environ.get("DATABASE_HOST", "localhost")
-DB_PORT = os.environ.get("DATABASE_PORT", "5433")
-DB_USER = os.environ.get("DATABASE_USER", "pas")
-DB_PASSWORD = os.environ.get("DATABASE_PASSWORD", "s3cret")
-DB_NAME = os.environ.get("DATABASE_NAME", "pas")
-dsn = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-
+DB_URI = os.environ.get("DATABASE_URI", "postgresql://pas:s3cret@localhost:5433/pas")
 pool = AsyncConnectionPool(
-    dsn,
+    DB_URI,
     open=False,
     max_size=10,
     connection_class=AsyncConnection[DictRow],

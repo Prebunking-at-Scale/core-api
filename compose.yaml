@@ -23,3 +23,5 @@ services:
       - pas-postgres
     ports:
       - "8000:8000"
+    environment:
+      - DATABASE_URI=postgresql://pas:s3cret@pas-postgres:5432/pas
