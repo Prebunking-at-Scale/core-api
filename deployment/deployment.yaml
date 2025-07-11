@@ -15,7 +15,6 @@ spec:
         app: core-api
         tier: web
     spec:
-      serviceAccountName: workload-identity-sa
       containers:
         - name: core-api
           image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api:dev
@@ -25,38 +24,3 @@ spec:
           resources:
             requests:
               cpu: 200m
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8000
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8000
-            initialDelaySeconds: 5
-            periodSeconds: 10
-            timeoutSeconds: 5
-          env:
-            - name: DATABASE_HOST
-              value: "127.0.0.1"
-            - name: DATABASE_PORT
-              value: "5432"
-            - name: DATABASE_USER
-              value: prebunker
-            - name: DATABASE_NAME
-              value: pas-vectordb
-            - name: DATABASE_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: db
-                  key: password
-        - name: cloud-sql-proxy
-          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.17.1
-          args:
-            - "--private-ip"
-            - "--auto-iam-authn"
-            - "--structured-logs"
-            - "--port=5432"
-            - "pas-development-1:europe-west4:pas-vectordb-instance"
-          securityContext:
-            runAsNonRoot: true
