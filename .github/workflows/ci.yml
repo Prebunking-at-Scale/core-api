@@ -51,7 +51,6 @@ jobs:
         name: Authenticate with Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          token_format: access_token
           project_id: "pas-shared"
           workload_identity_provider: projects/1086645519617/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider
           service_account: github-actions-service-account@pas-shared.iam.gserviceaccount.com
