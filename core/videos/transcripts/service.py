@@ -6,7 +6,6 @@ from litestar.dto import DTOData
 from core.uow import ConnectionFactory, uow
 from core.videos.transcripts.models import Transcript, TranscriptSentence
 from core.videos.transcripts.repo import TranscriptRepository
-from tests.videos.controller_test import video
 
 
 class TranscriptService:
