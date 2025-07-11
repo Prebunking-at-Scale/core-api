@@ -15,6 +15,7 @@ spec:
         app: core-api
         tier: web
     spec:
+      serviceAccountName: workload-identity-sa
       containers:
         - name: core-api
           image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api:dev
@@ -37,7 +38,7 @@ spec:
             timeoutSeconds: 5
           env:
             - name: DATABASE_HOST
-              value: 127.0.0.1
+              value: "127.0.0.1"
             - name: DATABASE_PORT
               value: "5432"
             - name: DATABASE_USER
@@ -49,11 +50,6 @@ spec:
                 secretKeyRef:
                   name: db
                   key: password
-            - name: API_KEYS
-              valueFrom:
-                secretKeyRef:
-                  name: core-api-keys
-                  key: keys
         - name: cloud-sql-proxy
           image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.17.1
           args:
