@@ -1,6 +1,6 @@
 import os
 
-from litestar import Litestar, get
+from litestar import Litestar
 from litestar.di import Provide
 from litestar.openapi import OpenAPIConfig
 from litestar.openapi.spec import Components, SecurityScheme
@@ -13,11 +13,11 @@ from core.videos.controller import VideoController
 
 
 MIGRATION_TARGET_VERSION = 1
-DB_HOST = os.environ.get("DATABASE_HOST", "localhost")
-DB_PORT = os.environ.get("DATABASE_PORT", "5433")
-DB_USER = os.environ.get("DATABASE_USER", "pas")
-DB_PASSWORD = os.environ.get("DATABASE_PASSWORD", "s3cret")
-DB_NAME = os.environ.get("DATABASE_NAME", "pas")
+DB_HOST = os.environ.get("DATABASE_HOST")
+DB_PORT = os.environ.get("DATABASE_PORT")
+DB_USER = os.environ.get("DATABASE_USER")
+DB_PASSWORD = os.environ.get("DATABASE_PASSWORD", "")
+DB_NAME = os.environ.get("DATABASE_NAME")
 
 if DB_PASSWORD:
     DB_PASSWORD = ":" + DB_PASSWORD
@@ -46,15 +46,9 @@ async def perform_migrations(app: Litestar) -> None:
     await migrate(app.state.connection_factory, MIGRATION_TARGET_VERSION)
 
 
-@get("/")
-async def hello_world() -> str:
-    return "Hello, world!"
-
-
 app = Litestar(
     debug=True,
     route_handlers=[
-        hello_world,
         VideoController,
     ],
     on_startup=[
