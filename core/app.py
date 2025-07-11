@@ -74,7 +74,7 @@ api_router = Router(
 )
 
 
-app: Litestar = Litestar(
+app = Litestar(
     route_handlers=[
         hello_world,
         health,
