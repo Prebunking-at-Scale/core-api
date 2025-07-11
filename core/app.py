@@ -68,7 +68,6 @@ app = Litestar(
     debug=True,
     route_handlers=[
         hello_world,
-        health,
         api_router,
     ],
     on_startup=[
