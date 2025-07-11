@@ -1,18 +1,17 @@
 from uuid import UUID
 
 from litestar import Controller, delete, get, patch, post
-from litestar.datastructures import State
-from litestar.exceptions import NotFoundException
 from litestar.di import Provide
 from litestar.dto import DTOData
 
 from core.response import JSON, CursorJSON
-from core.videos.models import Video, VideoFilters, VideoPatch
+from core.uow import ConnectionFactory
+from core.videos.models import VideoCreate, VideoFilters, VideoPatch, Video
 from core.videos.service import VideoService
 
 
-async def video_service(state: State) -> VideoService:
-    return VideoService(connection_factory=state.connection_factory)
+async def video_service(connection_factory: ConnectionFactory) -> VideoService:
+    return VideoService(connection_factory=connection_factory)
 
 
 class VideoController(Controller):
@@ -26,9 +25,13 @@ class VideoController(Controller):
     @post(
         path="/",
         summary="Add a new video",
+        dto=VideoCreate,
+        return_dto=None,
     )
-    async def add_video(self, video_service: VideoService, data: Video) -> JSON[Video]:
-        return JSON(await video_service.add_video(data))
+    async def add_video(
+        self, video_service: VideoService, data: DTOData[Video]
+    ) -> JSON[Video]:
+        return JSON(await video_service.add_video(data.create_instance()))
 
     @get(
         path="/{video_id:uuid}",
@@ -37,10 +40,7 @@ class VideoController(Controller):
     async def get_video(
         self, video_service: VideoService, video_id: UUID
     ) -> JSON[Video | None]:
-        video = await video_service.get_video_by_id(video_id)
-        if not video:
-            raise NotFoundException()
-        return JSON(video)
+        return JSON(await video_service.get_video_by_id(video_id))
 
     @patch(
         path="/{video_id:uuid}",
@@ -63,12 +63,9 @@ class VideoController(Controller):
     @post(
         path="/filter",
         summary="Get all or a filtered subset of videos",
-        status_code=200,
     )
     async def filter_videos(
-        self,
-        video_service: VideoService,
-        data: VideoFilters,
+        self, video_service: VideoService, data: VideoFilters
     ) -> CursorJSON[list[Video]]:
         videos = await video_service.filter_videos(data)
         cursor = videos[-1].id if videos else None
