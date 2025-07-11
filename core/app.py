@@ -13,10 +13,11 @@ from psycopg_pool import AsyncConnectionPool
 from core.auth import base_guard
 from core.migrate import migrate
 from core.videos.controller import VideoController
+from core.videos.transcripts.controller import TranscriptController
 
 load_dotenv()
 
-MIGRATION_TARGET_VERSION = 1
+MIGRATION_TARGET_VERSION = 2
 DB_HOST = os.environ.get("DATABASE_HOST")
 DB_PORT = os.environ.get("DATABASE_PORT")
 DB_USER = os.environ.get("DATABASE_USER")
@@ -68,13 +69,14 @@ async def health(state: State) -> str:
 
 api_router = Router(
     path="/api",
-    route_handlers=[VideoController],
+    route_handlers=[VideoController, TranscriptController],
     guards=[base_guard],
     security=[{"APIToken": []}],
 )
 
 
 app: Litestar = Litestar(
+    debug=True,
     route_handlers=[
         hello_world,
         health,
