@@ -23,6 +23,7 @@ if DB_PASSWORD:
     DB_PASSWORD = ":" + DB_PASSWORD
 
 dsn = f"postgresql://{DB_USER}{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+print(dsn)
 
 pool = AsyncConnectionPool(
     dsn,
