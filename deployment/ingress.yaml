@@ -21,7 +21,7 @@ spec:
     - host: pas-dev.fullfact.org
       http:
         paths:
-          - path: /*
+          - path: /api/*
             pathType: ImplementationSpecific
             backend:
               service:
