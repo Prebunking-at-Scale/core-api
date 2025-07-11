@@ -1,12 +1,10 @@
-import annotated_types
-from uuid import UUID
+import uuid
 
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Any
 
 from litestar.plugins.pydantic import PydanticDTO
 from litestar.dto import DTOConfig
-from pydantic import BaseModel
 
 from core.models import IDAuditModel
 
@@ -25,7 +23,7 @@ class Video(IDAuditModel):
     channel_followers: int | None = None
     scrape_topic: str | None = None
     scrape_keyword: str | None = None
-    metadata: dict[str, Any] = {}
+    metadata: dict[str, Any] | None = None
 
 
 class VideoCreate(PydanticDTO[Video]):
@@ -33,7 +31,7 @@ class VideoCreate(PydanticDTO[Video]):
         exclude={
             "id",
             "created_at",
-            "updated_at",
+            "updated_id",
         },
     )
 
@@ -53,16 +51,8 @@ class VideoPatch(PydanticDTO[Video]):
     )
 
 
-class VideoFilters(BaseModel):
-    platform: list[str] | None = None
-    channel: list[str] | None = None
-    metadata: str | None = None
-    cursor: UUID | None = None
-    limit: Annotated[int, annotated_types.Gt(0)] = 25
-
-
 class TranscriptSentence(IDAuditModel):
-    transcript_id: UUID
+    transcript_id: uuid.UUID
     source: str  # Speech-to-text, OCR, etc
     text: str  # The actual text of the sentence
     start_time_s: float  # Start time in seconds
@@ -70,13 +60,13 @@ class TranscriptSentence(IDAuditModel):
 
 
 class Transcript(IDAuditModel):
-    video_id: UUID
+    video_id: uuid.UUID
     sentences: list[TranscriptSentence]
     metadata: dict[str, Any] | None = None
 
 
 class VideoClaims(IDAuditModel):
-    video_id: UUID
+    video_id: uuid.UUID
     claim: str  # The claim made in the video
     start_time_s: float  # When in the video the claim starts
     metadata: dict[str, Any] | None = None  # Additional metadata about the claim

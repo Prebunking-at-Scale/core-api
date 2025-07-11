@@ -1,5 +1,4 @@
 from typing import Generic, TypeVar
-from uuid import UUID
 
 from pydantic.dataclasses import dataclass
 
@@ -15,10 +14,11 @@ class JSON(Generic[T]):
 
 
 @dataclass
-class CursorJSON(JSON[T]):
+class PaginatedJSON(JSON[T]):
     """Base response structure for paginated API responses."""
 
-    cursor: UUID | None = None
+    next_cursor: str | None = None
+    previous_cursor: str | None = None
 
 
 @dataclass

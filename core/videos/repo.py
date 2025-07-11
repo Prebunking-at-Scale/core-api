@@ -1,11 +1,10 @@
 from uuid import UUID
 
 import psycopg
-from psycopg import sql
 from psycopg.rows import DictRow
 from psycopg.types.json import Jsonb
 
-from core.videos.models import Video, VideoFilters
+from core.videos.models import Video
 
 
 class VideoRepository:
@@ -81,7 +80,7 @@ class VideoRepository:
                 likes = %(likes)s,
                 comments = %(comments)s,
                 channel_followers = %(channel_followers)s,
-                metadata = metadata || %(metadata)s
+                metadata = %(metadata)s
             WHERE id = %(id)s
             RETURNING *
             """,
@@ -101,51 +100,3 @@ class VideoRepository:
         )
         if self._session.rowcount == 0:
             raise ValueError(f"Video with ID {video_id} not found")
-
-    async def filter_videos(self, filters: VideoFilters) -> list[Video]:
-        wheres = [sql.SQL("1=1")]
-        if filters.platform:
-            wheres.append(sql.SQL("v.platform = ANY(%(platform)s)"))
-
-        if filters.channel:
-            wheres.append(sql.SQL("v.channel = ANY(%(channel)s)"))
-
-        if filters.metadata:
-            wheres.append(sql.SQL("v.metadata @@ %(metadata)s"))
-
-        if filters.cursor:
-            wheres.append(
-                sql.SQL("""
-                v.created_at < (
-                        SELECT created_at FROM videos WHERE id = %(cursor)s
-                )
-                """)
-            )
-
-        full_query = sql.SQL("""
-            SELECT
-                v.id,
-                v.title,
-                v.description,
-                v.platform,
-                v.source_url,
-                v.destination_path,
-                v.uploaded_at,
-                v.views,
-                v.likes,
-                v.comments,
-                v.channel,
-                v.channel_followers,
-                v.scrape_topic,
-                v.scrape_keyword,
-                v.metadata,
-                v.updated_at,
-                v.created_at
-            FROM videos v
-            WHERE {wheres}
-            ORDER BY v.created_at DESC
-            LIMIT %(limit)s
-            """).format(wheres=sql.Composed(wheres).join(" AND "))
-
-        await self._session.execute(full_query, params=filters.model_dump())
-        return [Video(**row) for row in await self._session.fetchall()]
