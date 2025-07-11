@@ -2,9 +2,9 @@ from uuid import UUID
 
 from litestar import Controller, delete, get, patch, post
 from litestar.datastructures import State
+from litestar.exceptions import NotFoundException
 from litestar.di import Provide
 from litestar.dto import DTOData
-from litestar.exceptions import NotFoundException
 
 from core.response import JSON, CursorJSON
 from core.videos.models import Video, VideoFilters, VideoPatch

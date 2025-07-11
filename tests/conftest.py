@@ -6,8 +6,8 @@ from litestar.testing import AsyncTestClient
 from pytest import fixture
 from testing.postgresql import Postgresql
 
-import core.app as app
 from core import auth
+import core.app as app
 
 TEST_API_KEY = "abc123"
 

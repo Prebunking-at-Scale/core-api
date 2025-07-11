@@ -3,6 +3,7 @@ from uuid import UUID
 
 from pydantic.dataclasses import dataclass
 
+
 T = TypeVar("T")
 
 

@@ -2,8 +2,8 @@ import json
 import os
 
 from litestar.connection import ASGIConnection
-from litestar.exceptions import NotAuthorizedException
 from litestar.handlers import BaseRouteHandler
+from litestar.exceptions import NotAuthorizedException
 
 API_KEY_HEADER = "X-API-TOKEN"
 VALID_API_KEYS = json.loads(os.environ.get("API_KEYS", "[]"))
