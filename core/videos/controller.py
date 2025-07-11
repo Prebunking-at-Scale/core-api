@@ -23,6 +23,17 @@ class VideoController(Controller):
     }
 
     @post(
+        path="/filter",
+        summary="Get all or a filtered subset of videos",
+    )
+    async def filter_videos(
+        self, video_service: VideoService, data: VideoFilters
+    ) -> CursorJSON[list[Video]]:
+        videos = await video_service.filter_videos(data)
+        cursor = videos[-1].id if videos else None
+        return CursorJSON(data=videos, cursor=cursor)
+
+    @post(
         path="/",
         summary="Add a new video",
         dto=VideoCreate,
@@ -59,14 +70,3 @@ class VideoController(Controller):
     )
     async def delete_video(self, video_service: VideoService, video_id: UUID) -> None:
         await video_service.delete_video(video_id)
-
-    @post(
-        path="/filter",
-        summary="Get all or a filtered subset of videos",
-    )
-    async def filter_videos(
-        self, video_service: VideoService, data: VideoFilters
-    ) -> CursorJSON[list[Video]]:
-        videos = await video_service.filter_videos(data)
-        cursor = videos[-1].id if videos else None
-        return CursorJSON(data=videos, cursor=cursor)
