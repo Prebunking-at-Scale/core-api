@@ -39,7 +39,6 @@ jobs:
   build:
     name: Build & Push
     needs: test
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
     runs-on: ubuntu-latest
 
     permissions:
@@ -49,21 +48,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Bump version and push tag
-        id: tag_version
-        uses: mathieudutour/github-tag-action@v6.2
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          release_branches: main
-          pre_release_branches: dev
-
-      - name: Create a GitHub release
-        uses: ncipollo/release-action@v1
-        with:
-          tag: ${{ steps.tag_version.outputs.new_tag }}
-          name: Release ${{ steps.tag_version.outputs.new_tag }}
-          body: ${{ steps.tag_version.outputs.changelog }}
 
       - id: auth
         name: Authenticate with Google Cloud
@@ -95,4 +79,5 @@ jobs:
           context: .
           push: true
           tags: |
-            europe-west4-docker.pkg.dev/pas-shared/pas/core-api:${{ steps.tag_version.outputs.new_tag }}
+            europe-west4-docker.pkg.dev/pas-shared/pas/core-api:dev
+            europe-west4-docker.pkg.dev/pas-shared/pas/core-api:latest
