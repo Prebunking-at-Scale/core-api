@@ -58,7 +58,7 @@ jobs:
           access_token_lifetime: 600s
 
       - name: Login to Artifact Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v1
         with:
           registry: europe-west4-docker.pkg.dev
           username: oauth2accesstoken
@@ -78,4 +78,4 @@ jobs:
           push: true
           tags: |
             europe-west4-docker.pkg.dev/pas-shared/pas/core-api:dev
-            europe-west4-docker.pkg.dev/pas-shared/pas/core-api:latest
+            europe-west4-docker.pkg.dev/pas-shared/pas/<your-docker-image-name>:latest
