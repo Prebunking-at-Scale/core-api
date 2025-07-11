@@ -32,7 +32,7 @@ jobs:
       - name: Install the project
         run: uv sync --locked --all-extras --dev
       - name: Check typing with mypy
-        run: uv run mypy --install-types --non-interactive core
+        run: uv run mypy --install-types --non-interactive src
 
   build:
     name: Build & Push
