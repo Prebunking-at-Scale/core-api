@@ -24,7 +24,6 @@ DB_PASSWORD = os.environ.get("DATABASE_PASSWORD")
 DB_NAME = os.environ.get("DATABASE_NAME")
 
 dsn = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-print(dsn)
 
 pool = AsyncConnectionPool(
     dsn,
