@@ -11,7 +11,6 @@ from core.uow import ConnectionFactory
 from core.videos.transcripts.models import (
     Transcript,
     TranscriptDTO,
-    TranscriptSentence,
 )
 from core.videos.transcripts.service import TranscriptService
 
@@ -69,13 +68,13 @@ class TranscriptController(Controller):
         path="/{sentence_id:uuid}/metadata",
         summary="Update the metadata for a transcript sentence",
     )
-    async def patch_sentence(
+    async def patch_sentence_metadata(
         self,
         transcript_service: TranscriptService,
         sentence_id: UUID,
         data: dict[str, Any],
-    ) -> TranscriptSentence:
-        return await transcript_service.update_metadata(sentence_id, data)
+    ) -> JSON[dict[str, Any]]:
+        return JSON(await transcript_service.update_metadata(sentence_id, data))
 
     @delete(
         path="/{sentence_id:uuid}",

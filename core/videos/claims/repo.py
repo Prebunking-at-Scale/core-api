@@ -6,28 +6,20 @@ from psycopg.rows import DictRow
 from psycopg.types.json import Jsonb
 
 from core.analysis import embedding
-from core.videos.transcripts.models import TranscriptSentence
+from core.videos.claims.models import Claim
 
 
-class TranscriptRepository:
+class ClaimRepository:
     def __init__(self, session: psycopg.AsyncCursor[DictRow]) -> None:
         self._session = session
 
-    async def add_sentences(
-        self, video_id: UUID, sentences: list[TranscriptSentence]
-    ) -> list[TranscriptSentence]:
+    async def add_claims(self, video_id: UUID, claims: list[Claim]) -> list[Claim]:
         await self._session.executemany(
             """
-            INSERT INTO transcript_sentences (
-                id, video_id, source, text, start_time_s, metadata, embedding
+            INSERT INTO video_claims (
+                id, video_id, claim, start_time_s, metadata, embedding
             ) VALUES (
-                %(id)s,
-                %(video_id)s,
-                %(source)s,
-                %(text)s,
-                %(start_time_s)s,
-                %(metadata)s,
-                %(embedding)s
+                %(id)s, %(video_id)s, %(claim)s, %(start_time_s)s, %(metadata)s, %(embedding)s
             )
             RETURNING *
             """,
@@ -36,71 +28,69 @@ class TranscriptRepository:
                 | {
                     "metadata": Jsonb(x.metadata),
                     "video_id": video_id,
-                    "embedding": list(embedding.encode(x.text)),
+                    "embedding": list(embedding.encode(x.claim)),
                 }
-                for x in sentences
+                for x in claims
             ],
             returning=True,
         )
 
-        added_sentences = []
+        added_claims = []
         while True:
             row = await self._session.fetchone()
             if not row:
                 break
-            added_sentences.append(TranscriptSentence(**row))
+            added_claims.append(Claim(**row))
             if not self._session.nextset():
                 break
 
-        return added_sentences
+        return added_claims
 
-    async def get_transcript_for_video(
-        self, video_id: UUID
-    ) -> list[TranscriptSentence]:
+    async def get_claims_for_video(self, video_id: UUID) -> list[Claim]:
         await self._session.execute(
             """
-            SELECT * FROM transcript_sentences
+            SELECT * FROM video_claims
             WHERE video_id = %(video_id)s
             ORDER BY start_time_s ASC
             """,
             {"video_id": video_id},
         )
-        return [TranscriptSentence(**row) for row in await self._session.fetchall()]
+        return [Claim(**row) for row in await self._session.fetchall()]
 
-    async def delete_transcript(self, video_id: UUID) -> None:
+    async def delete_video_claims(self, video_id: UUID) -> None:
         await self._session.execute(
             """
-            DELETE FROM transcript_sentences
+            DELETE FROM video_claims
             WHERE video_id = %(video_id)s
             """,
             {"video_id": video_id},
         )
 
-    async def update_sentence_metadata(
-        self, sentence_id: UUID, metadata: dict[str, Any]
+    async def update_claim_metadata(
+        self, claim_id: UUID, metadata: dict[str, Any]
     ) -> dict[str, Any]:
         await self._session.execute(
             """
-            UPDATE transcript_sentences
+            UPDATE video_claims
             SET
                 metadata = metadata || %(metadata)s,
                 updated_at = now()
-            WHERE id = %(sentence_id)s
-            RETURNING metadata
+            WHERE id = %(claim_id)s
+            RETURNING *
             """,
-            {"sentence_id": sentence_id, "metadata": Jsonb(metadata)},
+            {"claim_id": claim_id, "metadata": Jsonb(metadata)},
         )
         row = await self._session.fetchone()
         if not row:
-            raise ValueError("Sentence not found")
+            raise ValueError("claim not found")
         return row["metadata"]
 
-    async def delete_sentence(self, sentence_id: UUID) -> None:
+    async def delete_claim(self, claim_id: UUID) -> None:
         await self._session.execute(
             """
-            DELETE FROM transcript_sentences WHERE id = %(sentence_id)s
+            DELETE FROM video_claims WHERE id = %(claim_id)s
             """,
-            {"sentence_id": sentence_id},
+            {"claim_id": claim_id},
         )
 
     async def video_exists(self, video_id: UUID) -> bool:
