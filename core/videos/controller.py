@@ -14,7 +14,7 @@ from core.errors import ConflictError
 from core.response import JSON, CursorJSON
 from core.videos.claims.models import Claim, VideoClaims
 from core.videos.claims.service import ClaimsService
-from core.videos.models import Video, VideoFilters, VideoPatch
+from core.videos.models import AnalysedVideo, Video, VideoFilters, VideoPatch
 from core.videos.service import VideoService
 from core.videos.transcripts.models import Transcript, TranscriptSentence
 from core.videos.transcripts.service import TranscriptService
@@ -98,12 +98,25 @@ class VideoController(Controller):
         summary="Get a video by ID",
     )
     async def get_video(
-        self, video_service: VideoService, video_id: UUID
-    ) -> JSON[Video | None]:
+        self,
+        video_service: VideoService,
+        transcript_service: TranscriptService,
+        claims_service: ClaimsService,
+        video_id: UUID,
+    ) -> JSON[AnalysedVideo | None]:
         video = await video_service.get_video_by_id(video_id)
         if not video:
             raise NotFoundException()
-        return JSON(video)
+        transcript = await transcript_service.get_transcript_for_video(video_id)
+        claims = await claims_service.get_claims_for_video(video_id)
+
+        return JSON(
+            AnalysedVideo(
+                **video.model_dump(),
+                transcript=transcript,
+                claims=claims,
+            )
+        )
 
     @patch(
         path="/{video_id:uuid}",
