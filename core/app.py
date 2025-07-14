@@ -12,6 +12,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from core.auth import base_guard
 from core.migrate import migrate
+from core.videos.claims.controller import ClaimController
 from core.videos.controller import VideoController
 from core.videos.transcripts.controller import TranscriptController
 
