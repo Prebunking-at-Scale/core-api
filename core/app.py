@@ -18,12 +18,13 @@ from core.videos.transcripts.controller import TranscriptController
 
 load_dotenv()
 
-MIGRATION_TARGET_VERSION = 3
+MIGRATION_TARGET_VERSION = 4
 DB_HOST = os.environ.get("DATABASE_HOST")
 DB_PORT = os.environ.get("DATABASE_PORT")
 DB_USER = os.environ.get("DATABASE_USER")
 DB_PASSWORD = os.environ.get("DATABASE_PASSWORD")
 DB_NAME = os.environ.get("DATABASE_NAME")
+
 
 postgres_url = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
