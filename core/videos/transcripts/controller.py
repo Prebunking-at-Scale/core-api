@@ -6,6 +6,7 @@ from litestar.di import Provide
 from litestar.dto import DTOData
 from litestar.exceptions import NotFoundException
 
+from core.errors import ConflictError
 from core.response import JSON
 from core.uow import ConnectionFactory
 from core.videos.transcripts.models import (
@@ -34,6 +35,7 @@ class TranscriptController(Controller):
         summary="Add new transcript sentences for a video",
         dto=TranscriptDTO,
         return_dto=None,
+        raises=[ConflictError],
     )
     async def add_sentences(
         self,
