@@ -29,7 +29,8 @@ class TranscriptService:
 
     async def get_transcript_for_video(self, video_id: UUID) -> Transcript | None:
         async with self.repo() as repo:
-            # Todo: handle case that video doesn't exist
+            if not await repo.video_exists(video_id):
+                return None
             sentences = await repo.get_transcript_for_video(video_id)
         return Transcript(video_id=video_id, sentences=sentences)
 
@@ -39,7 +40,7 @@ class TranscriptService:
 
     async def update_metadata(
         self, sentence_id: UUID, metadata: dict[str, Any]
-    ) -> TranscriptSentence:
+    ) -> dict[str, Any]:
         async with self.repo() as repo:
             return await repo.update_sentence_metadata(sentence_id, metadata)
 

@@ -6,20 +6,19 @@ from litestar.plugins.pydantic import PydanticDTO
 from pydantic import BaseModel, Field
 
 
-class TranscriptSentence(BaseModel):
+class Claim(BaseModel):
     id: UUID = Field(default_factory=uuid4)
-    source: str  # Speech-to-text, OCR, etc
-    text: str  # The actual text of the sentence
-    start_time_s: float  # Start time in seconds
-    metadata: dict[str, Any] = {}
+    claim: str  # The claim made in the video
+    start_time_s: float  # When in the video the claim starts
+    metadata: dict[str, Any] = {}  # Additional metadata about the claim
 
 
-class Transcript(BaseModel):
+class VideoClaims(BaseModel):
     video_id: UUID | None
-    sentences: list[TranscriptSentence]
+    claims: list[Claim]
 
 
-class TranscriptDTO(PydanticDTO[Transcript]):
+class VideoClaimsDTO(PydanticDTO[VideoClaims]):
     config = DTOConfig(
         exclude={
             "video_id",

@@ -17,7 +17,7 @@ from core.videos.transcripts.controller import TranscriptController
 
 load_dotenv()
 
-MIGRATION_TARGET_VERSION = 2
+MIGRATION_TARGET_VERSION = 3
 DB_HOST = os.environ.get("DATABASE_HOST")
 DB_PORT = os.environ.get("DATABASE_PORT")
 DB_USER = os.environ.get("DATABASE_USER")
@@ -69,9 +69,13 @@ async def health(state: State) -> str:
 
 api_router = Router(
     path="/api",
-    route_handlers=[VideoController, TranscriptController],
     guards=[base_guard],
     security=[{"APIToken": []}],
+    route_handlers=[
+        VideoController,
+        TranscriptController,
+        ClaimController,
+    ],
 )
 
 
