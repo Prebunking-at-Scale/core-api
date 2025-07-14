@@ -6,6 +6,7 @@ from psycopg.rows import DictRow
 from psycopg.types.json import Jsonb
 
 from core.analysis import embedding
+from core.errors import ConflictError
 from core.videos.transcripts.models import TranscriptSentence
 
 
@@ -16,32 +17,35 @@ class TranscriptRepository:
     async def add_sentences(
         self, video_id: UUID, sentences: list[TranscriptSentence]
     ) -> list[TranscriptSentence]:
-        await self._session.executemany(
-            """
-            INSERT INTO transcript_sentences (
-                id, video_id, source, text, start_time_s, metadata, embedding
-            ) VALUES (
-                %(id)s,
-                %(video_id)s,
-                %(source)s,
-                %(text)s,
-                %(start_time_s)s,
-                %(metadata)s,
-                %(embedding)s
+        try:
+            await self._session.executemany(
+                """
+                INSERT INTO transcript_sentences (
+                    id, video_id, source, text, start_time_s, metadata, embedding
+                ) VALUES (
+                    %(id)s,
+                    %(video_id)s,
+                    %(source)s,
+                    %(text)s,
+                    %(start_time_s)s,
+                    %(metadata)s,
+                    %(embedding)s
+                )
+                RETURNING *
+                """,
+                [
+                    x.model_dump()
+                    | {
+                        "metadata": Jsonb(x.metadata),
+                        "video_id": video_id,
+                        "embedding": list(embedding.encode(x.text)),
+                    }
+                    for x in sentences
+                ],
+                returning=True,
             )
-            RETURNING *
-            """,
-            [
-                x.model_dump()
-                | {
-                    "metadata": Jsonb(x.metadata),
-                    "video_id": video_id,
-                    "embedding": list(embedding.encode(x.text)),
-                }
-                for x in sentences
-            ],
-            returning=True,
-        )
+        except psycopg.errors.UniqueViolation:
+            raise ConflictError("video ids must be unique")
 
         added_sentences = []
         while True:
