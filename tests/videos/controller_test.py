@@ -1,4 +1,5 @@
 import uuid
+from unittest.mock import ANY
 
 from litestar import Litestar
 from litestar.testing import AsyncTestClient
@@ -26,7 +27,9 @@ async def test_get_video(
 ) -> None:
     response = await api_key_client.get(f"/api/videos/{video.id}")
     assert response.status_code == 200
-    assert response.json() == {"data": video.model_dump(mode="json")}
+    assert response.json() == {
+        "data": video.model_dump(mode="json") | {"transcript": ANY, "claims": ANY}
+    }
 
 
 async def test_get_video_does_not_exist(
@@ -41,7 +44,9 @@ async def test_delete_video(
 ) -> None:
     response = await api_key_client.get(f"/api/videos/{video.id}")
     assert response.status_code == 200
-    assert response.json() == {"data": video.model_dump(mode="json")}
+    assert response.json() == {
+        "data": video.model_dump(mode="json") | {"transcript": ANY, "claims": ANY}
+    }
 
     delete = await api_key_client.delete(f"/api/videos/{video.id}")
     assert delete.status_code == 204

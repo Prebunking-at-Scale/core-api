@@ -6,6 +6,7 @@ from psycopg.rows import DictRow
 from psycopg.types.json import Jsonb
 
 from core.analysis import embedding
+from core.errors import ConflictError
 from core.videos.models import Video, VideoFilters
 
 
@@ -27,52 +28,55 @@ class VideoRepository:
 
     async def add_video(self, video: Video) -> Video:
         encoded = embedding.encode(video.title + " " + video.description)
-        await self._session.execute(
-            """
-            INSERT INTO videos (
-                id,
-                title,
-                description,
-                platform,
-                source_url,
-                destination_path,
-                uploaded_at,
-                views,
-                likes,
-                comments,
-                channel,
-                channel_followers,
-                scrape_topic,
-                scrape_keyword,
-                metadata,
-                embedding
+        try:
+            await self._session.execute(
+                """
+                INSERT INTO videos (
+                    id,
+                    title,
+                    description,
+                    platform,
+                    source_url,
+                    destination_path,
+                    uploaded_at,
+                    views,
+                    likes,
+                    comments,
+                    channel,
+                    channel_followers,
+                    scrape_topic,
+                    scrape_keyword,
+                    metadata,
+                    embedding
+                )
+                VALUES (
+                    %(id)s,
+                    %(title)s,
+                    %(description)s,
+                    %(platform)s,
+                    %(source_url)s,
+                    %(destination_path)s,
+                    %(uploaded_at)s,
+                    %(views)s,
+                    %(likes)s,
+                    %(comments)s,
+                    %(channel)s,
+                    %(channel_followers)s,
+                    %(scrape_topic)s,
+                    %(scrape_keyword)s,
+                    %(metadata)s,
+                    %(embedding)s
+                )
+                RETURNING *
+                """,
+                {
+                    **video.model_dump(),
+                    "metadata": Jsonb(video.metadata),
+                    "embedding": list(encoded),
+                },
             )
-            VALUES (
-                %(id)s,
-                %(title)s,
-                %(description)s,
-                %(platform)s,
-                %(source_url)s,
-                %(destination_path)s,
-                %(uploaded_at)s,
-                %(views)s,
-                %(likes)s,
-                %(comments)s,
-                %(channel)s,
-                %(channel_followers)s,
-                %(scrape_topic)s,
-                %(scrape_keyword)s,
-                %(metadata)s,
-                %(embedding)s
-            )
-            RETURNING *
-            """,
-            {
-                **video.model_dump(),
-                "metadata": Jsonb(video.metadata),
-                "embedding": list(encoded),
-            },
-        )
+        except psycopg.errors.UniqueViolation:
+            raise ConflictError("video ids must be unique")
         row = await self._session.fetchone()
         if not row:
             raise ValueError("Failed to insert video")

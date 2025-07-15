@@ -6,6 +6,7 @@ from litestar.di import Provide
 from litestar.dto import DTOData
 from litestar.exceptions import NotFoundException
 
+from core.errors import ConflictError
 from core.response import JSON
 from core.uow import ConnectionFactory
 from core.videos.claims.models import (
@@ -34,6 +35,7 @@ class ClaimController(Controller):
         summary="Add new claims for a video",
         dto=VideoClaimsDTO,
         return_dto=None,
+        raises=[ConflictError],
     )
     async def add_claims(
         self,

@@ -7,6 +7,9 @@ from litestar.dto import DTOConfig
 from litestar.plugins.pydantic import PydanticDTO
 from pydantic import BaseModel, Field
 
+from core.videos.claims.models import VideoClaims
+from core.videos.transcripts.models import Transcript
+
 
 class Video(BaseModel):
     id: UUID = Field(default_factory=uuid4)
@@ -24,6 +27,11 @@ class Video(BaseModel):
     scrape_topic: str | None = None
     scrape_keyword: str | None = None
     metadata: dict[str, Any] = {}
+
+
+class AnalysedVideo(Video):
+    transcript: Transcript | None = None
+    claims: VideoClaims | None = None
 
 
 class VideoPatch(PydanticDTO[Video]):
