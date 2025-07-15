@@ -33,6 +33,10 @@ jobs:
         run: uv sync --locked --all-extras --dev
       - name: Check typing with mypy
         run: uv run mypy --install-types --non-interactive core
+      - name: Install pgvector
+        run: |
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install postgresql-16-pgvector
       - name: Run tests
         run: uv run pytest
 

@@ -46,11 +46,5 @@ class VideoFilters(BaseModel):
     channel: list[str] | None = None
     metadata: str | None = None
     cursor: UUID | None = None
+    semantic: str | None = None
     limit: Annotated[int, annotated_types.Gt(0)] = 25
-
-
-class VideoClaims(BaseModel):
-    video_id: UUID
-    claim: str  # The claim made in the video
-    start_time_s: float  # When in the video the claim starts
-    metadata: dict[str, Any] | None = None  # Additional metadata about the claim
