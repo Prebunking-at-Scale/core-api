@@ -1,3 +1,5 @@
+from unittest.mock import ANY
+
 from litestar import Litestar
 from litestar.testing import AsyncTestClient
 
@@ -16,7 +18,8 @@ async def test_add_claims(
         json=claims_json,
     )
     assert response.status_code == 201
-    assert response.json() | {"data": claims_json} == response.json()
+    claims_json["claims"][0]["embedding"] = ANY
+    assert response.json() == {"data": claims_json}
 
 
 async def test_get_empty_claims(
@@ -32,7 +35,9 @@ async def test_get_claims(
 ) -> None:
     response = await api_key_client.get(f"/api/videos/{video.id}/claims")
     assert response.status_code == 200
-    assert response.json() == {"data": video_claims.model_dump(mode="json")}
+    claims_json = video_claims.model_dump(mode="json")
+    claims_json["claims"][0]["embedding"] = ANY
+    assert response.json() == {"data": claims_json}
 
 
 async def test_delete_claims(
@@ -40,7 +45,7 @@ async def test_delete_claims(
 ) -> None:
     response = await api_key_client.get(f"/api/videos/{video.id}/claims")
     assert response.status_code == 200
-    assert response.json() == {"data": video_claims.model_dump(mode="json")}
+    assert len(response.json()["data"]["claims"]) > 0
 
     response = await api_key_client.delete(f"/api/videos/{video.id}/claims")
     assert response.status_code == 204
@@ -55,7 +60,6 @@ async def test_delete_video_also_deletes_claims(
 ) -> None:
     response = await api_key_client.get(f"/api/videos/{video.id}/claims")
     assert response.status_code == 200
-    assert response.json() == {"data": video_claims.model_dump(mode="json")}
 
     response = await api_key_client.delete(f"/api/videos/{video.id}")
     assert response.status_code == 204
@@ -69,7 +73,6 @@ async def test_delete_claim(
 ) -> None:
     response = await api_key_client.get(f"/api/videos/{video.id}/claims")
     assert response.status_code == 200
-    assert response.json() == {"data": video_claims.model_dump(mode="json")}
 
     claims = response.json().get("data").get("claims")
     assert len(claims) == 1

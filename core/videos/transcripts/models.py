@@ -11,6 +11,7 @@ class TranscriptSentence(BaseModel):
     source: str  # Speech-to-text, OCR, etc
     text: str  # The actual text of the sentence
     start_time_s: float  # Start time in seconds
+    embedding: list[float]
     metadata: dict[str, Any] = {}
 
 
@@ -23,5 +24,6 @@ class TranscriptDTO(PydanticDTO[Transcript]):
     config = DTOConfig(
         exclude={
             "video_id",
+            "embedding",
         },
     )

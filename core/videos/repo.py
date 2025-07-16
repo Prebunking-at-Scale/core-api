@@ -17,7 +17,7 @@ class VideoRepository:
     async def get_video_by_id(self, video_id: UUID) -> Video | None:
         await self._session.execute(
             """
-            SELECT * FROM videos WHERE id = %(video_id)s
+            SELECT *, embedding::real[] FROM videos WHERE id = %(video_id)s
             """,
             {"video_id": video_id},
         )
@@ -67,7 +67,7 @@ class VideoRepository:
                     %(metadata)s,
                     %(embedding)s
                 )
-                RETURNING *
+                RETURNING *, embedding::real[]
                 """,
                 {
                     **video.model_dump(),
@@ -95,7 +95,7 @@ class VideoRepository:
                 channel_followers = %(channel_followers)s,
                 metadata = metadata || %(metadata)s
             WHERE id = %(id)s
-            RETURNING *
+            RETURNING *, embedding::real[]
             """,
             video.model_dump() | {"metadata": Jsonb(video.metadata)},
         )
@@ -155,6 +155,7 @@ class VideoRepository:
                 v.channel_followers,
                 v.scrape_topic,
                 v.scrape_keyword,
+                v.embedding::real[],
                 v.metadata,
                 v.updated_at,
                 v.created_at

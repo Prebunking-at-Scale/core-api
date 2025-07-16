@@ -10,6 +10,7 @@ class Claim(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     claim: str  # The claim made in the video
     start_time_s: float  # When in the video the claim starts
+    embedding: list[float] | None = None
     metadata: dict[str, Any] = {}  # Additional metadata about the claim
 
 
@@ -22,5 +23,6 @@ class VideoClaimsDTO(PydanticDTO[VideoClaims]):
     config = DTOConfig(
         exclude={
             "video_id",
+            "embedding",
         },
     )
