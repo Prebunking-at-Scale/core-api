@@ -31,7 +31,7 @@ class TranscriptRepository:
                     %(metadata)s,
                     %(embedding)s
                 )
-                RETURNING *
+                RETURNING *, embedding::real[]
                 """,
                 [
                     x.model_dump()
@@ -63,7 +63,7 @@ class TranscriptRepository:
     ) -> list[TranscriptSentence]:
         await self._session.execute(
             """
-            SELECT * FROM transcript_sentences
+            SELECT *, embedding::real[] FROM transcript_sentences
             WHERE video_id = %(video_id)s
             ORDER BY start_time_s ASC
             """,

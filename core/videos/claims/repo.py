@@ -23,7 +23,7 @@ class ClaimRepository:
                 ) VALUES (
                     %(id)s, %(video_id)s, %(claim)s, %(start_time_s)s, %(metadata)s, %(embedding)s
                 )
-                RETURNING *
+                RETURNING *, embedding::real[]
                 """,
                 [
                     x.model_dump()
@@ -53,7 +53,8 @@ class ClaimRepository:
     async def get_claims_for_video(self, video_id: UUID) -> list[Claim]:
         await self._session.execute(
             """
-            SELECT * FROM video_claims
+            SELECT *, embedding::real[]
+            FROM video_claims
             WHERE video_id = %(video_id)s
             ORDER BY start_time_s ASC
             """,
@@ -80,7 +81,7 @@ class ClaimRepository:
                 metadata = metadata || %(metadata)s,
                 updated_at = now()
             WHERE id = %(claim_id)s
-            RETURNING *
+            RETURNING *, embedding::real[]
             """,
             {"claim_id": claim_id, "metadata": Jsonb(metadata)},
         )

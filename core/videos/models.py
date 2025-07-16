@@ -26,6 +26,7 @@ class Video(BaseModel):
     channel_followers: int | None = None
     scrape_topic: str | None = None
     scrape_keyword: str | None = None
+    embedding: list[float] | None = None
     metadata: dict[str, Any] = {}
 
 

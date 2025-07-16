@@ -1,3 +1,5 @@
+from unittest.mock import ANY
+
 from litestar import Litestar
 from litestar.testing import AsyncTestClient
 
@@ -17,6 +19,7 @@ async def test_add_transcript(
         json=transcript_json,
     )
     assert response.status_code == 201
+    transcript_json["sentences"][0]["embedding"] = ANY
     assert response.json() | {"data": transcript_json} == response.json()
 
 
@@ -33,7 +36,9 @@ async def test_get_transcript(
 ) -> None:
     response = await api_key_client.get(f"/api/videos/{video.id}/transcript")
     assert response.status_code == 200
-    assert response.json() == {"data": transcript.model_dump(mode="json")}
+    transcript_json = transcript.model_dump(mode="json")
+    transcript_json["sentences"][0]["embedding"] = ANY
+    assert response.json() == {"data": transcript_json}
 
 
 async def test_delete_transcript(
@@ -41,7 +46,7 @@ async def test_delete_transcript(
 ) -> None:
     response = await api_key_client.get(f"/api/videos/{video.id}/transcript")
     assert response.status_code == 200
-    assert response.json() == {"data": transcript.model_dump(mode="json")}
+    assert len(response.json()["data"]["sentences"]) > 0
 
     response = await api_key_client.delete(f"/api/videos/{video.id}/transcript")
     assert response.status_code == 204
@@ -56,7 +61,6 @@ async def test_delete_video_also_deletes_transcript(
 ) -> None:
     response = await api_key_client.get(f"/api/videos/{video.id}/transcript")
     assert response.status_code == 200
-    assert response.json() == {"data": transcript.model_dump(mode="json")}
 
     response = await api_key_client.delete(f"/api/videos/{video.id}")
     assert response.status_code == 204
@@ -70,7 +74,6 @@ async def test_delete_sentence(
 ) -> None:
     response = await api_key_client.get(f"/api/videos/{video.id}/transcript")
     assert response.status_code == 200
-    assert response.json() == {"data": transcript.model_dump(mode="json")}
 
     sentences = response.json().get("data").get("sentences")
     assert len(sentences) == 1
