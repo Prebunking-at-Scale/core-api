@@ -27,3 +27,18 @@ class TranscriptDTO(PydanticDTO[Transcript]):
             "embedding",
         },
     )
+
+
+class TranscriptSentenceResponse(BaseModel):
+    """Response model for transcript sentences without embeddings"""
+    id: UUID
+    source: str
+    text: str
+    start_time_s: float
+    metadata: dict[str, Any] = {}
+
+
+class TranscriptResponse(BaseModel):
+    """Response model for transcripts without embeddings"""
+    video_id: UUID | None
+    sentences: list[TranscriptSentenceResponse]

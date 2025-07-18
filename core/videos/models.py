@@ -8,7 +8,7 @@ from litestar.plugins.pydantic import PydanticDTO
 from pydantic import BaseModel, Field
 
 from core.videos.claims.models import VideoClaims
-from core.videos.transcripts.models import Transcript
+from core.videos.transcripts.models import TranscriptResponse
 
 
 class Video(BaseModel):
@@ -30,9 +30,29 @@ class Video(BaseModel):
     metadata: dict[str, Any] = {}
 
 
-class AnalysedVideo(Video):
-    transcript: Transcript | None = None
+class VideoResponse(BaseModel):
+    """Response model for videos without embeddings"""
+    id: UUID
+    title: str
+    description: str
+    platform: str
+    source_url: str
+    destination_path: str
+    uploaded_at: datetime | None
+    views: int | None = None
+    likes: int | None = None
+    comments: int | None = None
+    channel: str | None = None
+    channel_followers: int | None = None
+    scrape_topic: str | None = None
+    scrape_keyword: str | None = None
+    metadata: dict[str, Any] = {}
+
+
+class AnalysedVideo(VideoResponse):
+    transcript: TranscriptResponse | None = None
     claims: VideoClaims | None = None
+    narratives: list[Any] = Field(default_factory=list)
 
 
 class VideoPatch(PydanticDTO[Video]):

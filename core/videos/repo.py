@@ -169,3 +169,56 @@ class VideoRepository:
             full_query, params=filters.model_dump() | additional_params
         )
         return [Video(**row) for row in await self._session.fetchall()]
+
+    async def get_videos_paginated(
+        self, limit: int, offset: int, platform: list[str] | None = None, channel: list[str] | None = None
+    ) -> tuple[list[Video], int]:
+        wheres = [sql.SQL("1=1")]
+        params = {"limit": limit, "offset": offset}
+        
+        if platform:
+            wheres.append(sql.SQL("platform = ANY(%(platform)s)"))
+            params["platform"] = platform
+        
+        if channel:
+            wheres.append(sql.SQL("channel = ANY(%(channel)s)"))
+            params["channel"] = channel
+        
+        where_clause = sql.Composed(wheres).join(" AND ")
+        
+        # Get total count
+        count_query = sql.SQL("""
+            SELECT COUNT(*) FROM videos
+            WHERE {wheres}
+        """).format(wheres=where_clause)
+        
+        await self._session.execute(count_query, params)
+        total = (await self._session.fetchone())["count"]
+        
+        # Get paginated results
+        data_query = sql.SQL("""
+            SELECT *, embedding::real[] FROM videos
+            WHERE {wheres}
+            ORDER BY created_at DESC
+            LIMIT %(limit)s OFFSET %(offset)s
+        """).format(wheres=where_clause)
+        
+        await self._session.execute(data_query, params)
+        videos = [Video(**row) for row in await self._session.fetchall()]
+        
+        return videos, total
+    
+    async def get_narratives_for_video(self, video_id: UUID) -> list[dict]:
+        """Get all narratives associated with a video through its claims"""
+        await self._session.execute(
+            """
+            SELECT DISTINCT n.id, n.title, n.description, n.metadata, n.created_at, n.updated_at
+            FROM narratives n
+            JOIN claim_narratives cn ON n.id = cn.narrative_id
+            JOIN video_claims c ON cn.claim_id = c.id
+            WHERE c.video_id = %(video_id)s
+            ORDER BY n.created_at DESC
+            """,
+            {"video_id": video_id},
+        )
+        return [dict(row) for row in await self._session.fetchall()]

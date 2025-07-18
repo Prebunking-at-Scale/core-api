@@ -13,13 +13,15 @@ from psycopg_pool import AsyncConnectionPool
 
 from core.auth import base_guard
 from core.migrate import migrate
-from core.videos.claims.controller import ClaimController
+from core.narratives.controller import NarrativeController
+from core.topics.controller import TopicController
+from core.videos.claims.controller import ClaimController, RootClaimController
 from core.videos.controller import VideoController
 from core.videos.transcripts.controller import TranscriptController
 
 load_dotenv()
 
-MIGRATION_TARGET_VERSION = 4
+MIGRATION_TARGET_VERSION = 9
 DB_HOST = os.environ.get("DATABASE_HOST")
 DB_PORT = os.environ.get("DATABASE_PORT")
 DB_USER = os.environ.get("DATABASE_USER")
@@ -78,6 +80,9 @@ api_router = Router(
         VideoController,
         TranscriptController,
         ClaimController,
+        RootClaimController,
+        NarrativeController,
+        TopicController,
     ],
 )
 
