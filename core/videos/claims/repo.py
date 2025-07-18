@@ -45,7 +45,7 @@ class ClaimRepository:
             row = await self._session.fetchone()
             if not row:
                 break
-            added_claims.append(self._create_claim_from_row(row, None, None, None))
+            added_claims.append(self._create_claim_from_row(row, None, None, None, include_embedding=False))
             if not self._session.nextset():
                 break
 
@@ -61,7 +61,7 @@ class ClaimRepository:
             """,
             {"video_id": video_id},
         )
-        return [self._create_claim_from_row(row, None, None, None) for row in await self._session.fetchall()]
+        return [self._create_claim_from_row(row, None, None, None, include_embedding=False) for row in await self._session.fetchall()]
 
     async def delete_video_claims(self, video_id: UUID) -> None:
         await self._session.execute(
@@ -294,4 +294,6 @@ class ClaimRepository:
             return None
         
         topics = await self._get_claim_topics(claim_id)
-        return self._create_claim_from_row(row, topics, None, None)
+        video = await self._get_video_info(row["video_id"]) if row.get("video_id") else None
+        narratives = await self._get_claim_narratives(claim_id)
+        return self._create_claim_from_row(row, topics, video, narratives, include_embedding=False)
