@@ -8,10 +8,11 @@ from litestar.datastructures import State
 from litestar.di import Provide
 from litestar.dto import DTOData
 from litestar.exceptions import NotFoundException
+from litestar.params import Parameter
 
 from core.analysis import genai
 from core.errors import ConflictError
-from core.response import JSON, CursorJSON
+from core.response import JSON, CursorJSON, PaginatedJSON
 from core.videos.claims.models import Claim, VideoClaims
 from core.videos.claims.service import ClaimsService
 from core.videos.models import AnalysedVideo, Video, VideoFilters, VideoPatch
@@ -91,6 +92,32 @@ class VideoController(Controller):
             background=BackgroundTask(
                 extract_transcript_and_claims, video, transcript_service, claims_service
             ),
+        )
+
+    @get(
+        path="/",
+        summary="Get a paginated list of videos with optional filters",
+    )
+    async def list_videos(
+        self,
+        video_service: VideoService,
+        platform: list[str] | None = Parameter(None, query="platform"),
+        channel: list[str] | None = Parameter(None, query="channel"),
+        limit: int = Parameter(25, query="limit", gt=0, le=100),
+        offset: int = Parameter(0, query="offset", ge=0),
+    ) -> PaginatedJSON[list[Video]]:
+        videos, total = await video_service.get_videos_paginated(
+            limit=limit,
+            offset=offset,
+            platform=platform,
+            channel=channel,
+        )
+        page = (offset // limit) + 1 if limit > 0 else 1
+        return PaginatedJSON(
+            data=videos,
+            total=total,
+            page=page,
+            size=limit,
         )
 
     @get(
