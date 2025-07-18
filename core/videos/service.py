@@ -38,3 +38,9 @@ class VideoService:
     async def delete_video(self, video_id) -> None:
         async with self.repo() as repo:
             return await repo.delete_video(video_id)
+
+    async def get_videos_paginated(
+        self, limit: int, offset: int, platform: list[str] | None = None, channel: list[str] | None = None
+    ) -> tuple[list[Video], int]:
+        async with self.repo() as repo:
+            return await repo.get_videos_paginated(limit, offset, platform, channel)

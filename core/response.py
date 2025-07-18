@@ -21,6 +21,16 @@ class CursorJSON(JSON[T]):
 
 
 @dataclass
+class PaginatedJSON(Generic[T]):
+    """Base response structure for paginated API responses with count."""
+
+    data: T
+    total: int
+    page: int
+    size: int
+
+
+@dataclass
 class Error:
     status: int
     message: str

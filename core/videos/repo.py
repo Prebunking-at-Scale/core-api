@@ -169,3 +169,41 @@ class VideoRepository:
             full_query, params=filters.model_dump() | additional_params
         )
         return [Video(**row) for row in await self._session.fetchall()]
+
+    async def get_videos_paginated(
+        self, limit: int, offset: int, platform: list[str] | None = None, channel: list[str] | None = None
+    ) -> tuple[list[Video], int]:
+        wheres = [sql.SQL("1=1")]
+        params = {"limit": limit, "offset": offset}
+        
+        if platform:
+            wheres.append(sql.SQL("platform = ANY(%(platform)s)"))
+            params["platform"] = platform
+        
+        if channel:
+            wheres.append(sql.SQL("channel = ANY(%(channel)s)"))
+            params["channel"] = channel
+        
+        where_clause = sql.Composed(wheres).join(" AND ")
+        
+        # Get total count
+        count_query = sql.SQL("""
+            SELECT COUNT(*) FROM videos
+            WHERE {wheres}
+        """).format(wheres=where_clause)
+        
+        await self._session.execute(count_query, params)
+        total = (await self._session.fetchone())["count"]
+        
+        # Get paginated results
+        data_query = sql.SQL("""
+            SELECT *, embedding::real[] FROM videos
+            WHERE {wheres}
+            ORDER BY created_at DESC
+            LIMIT %(limit)s OFFSET %(offset)s
+        """).format(wheres=where_clause)
+        
+        await self._session.execute(data_query, params)
+        videos = [Video(**row) for row in await self._session.fetchall()]
+        
+        return videos, total
