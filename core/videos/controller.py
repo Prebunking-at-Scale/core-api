@@ -15,12 +15,55 @@ from core.errors import ConflictError
 from core.response import JSON, CursorJSON, PaginatedJSON
 from core.videos.claims.models import Claim, VideoClaims
 from core.videos.claims.service import ClaimsService
-from core.videos.models import AnalysedVideo, Video, VideoFilters, VideoPatch
+from core.videos.models import AnalysedVideo, Video, VideoFilters, VideoPatch, VideoResponse
 from core.videos.service import VideoService
-from core.videos.transcripts.models import Transcript, TranscriptSentence
+from core.videos.transcripts.models import Transcript, TranscriptSentence, TranscriptResponse, TranscriptSentenceResponse
 from core.videos.transcripts.service import TranscriptService
 
 log = logging.getLogger(__name__)
+
+
+def video_to_response(video: Video) -> VideoResponse:
+    """Convert a Video to VideoResponse, excluding embeddings"""
+    return VideoResponse(
+        id=video.id,
+        title=video.title,
+        description=video.description,
+        platform=video.platform,
+        source_url=video.source_url,
+        destination_path=video.destination_path,
+        uploaded_at=video.uploaded_at,
+        views=video.views,
+        likes=video.likes,
+        comments=video.comments,
+        channel=video.channel,
+        channel_followers=video.channel_followers,
+        scrape_topic=video.scrape_topic,
+        scrape_keyword=video.scrape_keyword,
+        metadata=video.metadata
+    )
+
+
+def transcript_to_response(transcript: Transcript | None) -> TranscriptResponse | None:
+    """Convert a Transcript to TranscriptResponse, excluding embeddings"""
+    if not transcript:
+        return None
+    
+    sentences = [
+        TranscriptSentenceResponse(
+            id=s.id,
+            source=s.source,
+            text=s.text,
+            start_time_s=s.start_time_s,
+            metadata=s.metadata
+        )
+        for s in transcript.sentences
+    ]
+    
+    return TranscriptResponse(
+        video_id=transcript.video_id,
+        sentences=sentences
+    )
 
 
 async def video_service(state: State) -> VideoService:
@@ -101,20 +144,41 @@ class VideoController(Controller):
     async def list_videos(
         self,
         video_service: VideoService,
+        transcript_service: TranscriptService,
+        claims_service: ClaimsService,
         platform: list[str] | None = Parameter(None, query="platform"),
         channel: list[str] | None = Parameter(None, query="channel"),
         limit: int = Parameter(25, query="limit", gt=0, le=100),
         offset: int = Parameter(0, query="offset", ge=0),
-    ) -> PaginatedJSON[list[Video]]:
+    ) -> PaginatedJSON[list[AnalysedVideo]]:
         videos, total = await video_service.get_videos_paginated(
             limit=limit,
             offset=offset,
             platform=platform,
             channel=channel,
         )
+        
+        # Fetch claims and narratives for each video
+        analysed_videos = []
+        for video in videos:
+            video_response = video_to_response(video)
+            transcript = await transcript_service.get_transcript_for_video(video.id)
+            transcript_response = transcript_to_response(transcript)
+            claims = await claims_service.get_claims_for_video(video.id)
+            narratives = await video_service.get_narratives_for_video(video.id)
+            
+            analysed_videos.append(
+                AnalysedVideo(
+                    **video_response.model_dump(),
+                    transcript=transcript_response,
+                    claims=claims,
+                    narratives=narratives,
+                )
+            )
+        
         page = (offset // limit) + 1 if limit > 0 else 1
         return PaginatedJSON(
-            data=videos,
+            data=analysed_videos,
             total=total,
             page=page,
             size=limit,
@@ -134,14 +198,18 @@ class VideoController(Controller):
         video = await video_service.get_video_by_id(video_id)
         if not video:
             raise NotFoundException()
+        video_response = video_to_response(video)
         transcript = await transcript_service.get_transcript_for_video(video_id)
+        transcript_response = transcript_to_response(transcript)
         claims = await claims_service.get_claims_for_video(video_id)
+        narratives = await video_service.get_narratives_for_video(video_id)
 
         return JSON(
             AnalysedVideo(
-                **video.model_dump(),
-                transcript=transcript,
+                **video_response.model_dump(),
+                transcript=transcript_response,
                 claims=claims,
+                narratives=narratives,
             )
         )
 

@@ -44,3 +44,7 @@ class VideoService:
     ) -> tuple[list[Video], int]:
         async with self.repo() as repo:
             return await repo.get_videos_paginated(limit, offset, platform, channel)
+    
+    async def get_narratives_for_video(self, video_id: UUID) -> list[dict]:
+        async with self.repo() as repo:
+            return await repo.get_narratives_for_video(video_id)

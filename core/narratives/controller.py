@@ -76,6 +76,36 @@ class NarrativeController(Controller):
     ) -> JSON[list[Narrative]]:
         return JSON(await narrative_service.get_narratives_by_claim(claim_id))
 
+    @get(
+        path="/viral",
+        summary="Get viral narratives from a specified time period sorted by views",
+    )
+    async def get_viral_narratives(
+        self,
+        narrative_service: NarrativeService,
+        limit: int = 100,
+        offset: int = 0,
+        hours: int = 24,
+    ) -> JSON[list[Narrative]]:
+        return JSON(
+            await narrative_service.get_viral_narratives(limit=limit, offset=offset, hours=hours)
+        )
+
+    @get(
+        path="/prevalent",
+        summary="Get prevalent narratives sorted by video count in a specified time period",
+    )
+    async def get_prevalent_narratives(
+        self,
+        narrative_service: NarrativeService,
+        limit: int = 100,
+        offset: int = 0,
+        hours: int = 24,
+    ) -> JSON[list[Narrative]]:
+        return JSON(
+            await narrative_service.get_prevalent_narratives(limit=limit, offset=offset, hours=hours)
+        )
+
     @patch(
         path="/{narrative_id:uuid}",
         summary="Update a narrative",

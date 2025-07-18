@@ -254,7 +254,12 @@ class NarrativeRepository:
             """,
             {"narrative_id": narrative_id},
         )
-        return [Claim(**row) for row in await self._session.fetchall()]
+        claims = []
+        for row in await self._session.fetchall():
+            claim_data = dict(row)
+            claim_data['embedding'] = None
+            claims.append(Claim(**claim_data))
+        return claims
 
     async def _get_narrative_topics(self, narrative_id: UUID) -> list[Topic]:
         await self._session.execute(
@@ -341,3 +346,107 @@ class NarrativeRepository:
             narratives.append(Narrative(**row, claims=claims, topics=topics, videos=videos))
         
         return narratives, total
+    
+    async def get_viral_narratives(
+        self, limit: int = 100, offset: int = 0, hours: int = 24
+    ) -> list[Narrative]:
+        # Get narratives with claims from the specified time period, ordered by total video views
+        await self._session.execute(
+            """
+            WITH recent_narrative_views AS (
+                SELECT 
+                    n.id as narrative_id,
+                    n.title,
+                    n.description,
+                    n.metadata,
+                    n.created_at,
+                    n.updated_at,
+                    SUM(COALESCE(v.views, 0)) as total_views
+                FROM narratives n
+                JOIN claim_narratives cn ON n.id = cn.narrative_id
+                JOIN video_claims c ON cn.claim_id = c.id
+                JOIN videos v ON c.video_id = v.id
+                WHERE v.updated_at >= NOW() - (%(hours)s || ' hours')::INTERVAL
+                GROUP BY n.id, n.title, n.description, n.metadata, n.created_at, n.updated_at
+            )
+            SELECT 
+                narrative_id as id,
+                title,
+                description,
+                metadata,
+                created_at,
+                updated_at,
+                total_views
+            FROM recent_narrative_views
+            ORDER BY total_views DESC
+            LIMIT %(limit)s OFFSET %(offset)s
+            """,
+            {"limit": limit, "offset": offset, "hours": hours},
+        )
+        rows = await self._session.fetchall()
+        
+        narratives = []
+        for row in rows:
+            narrative_data = dict(row)
+            # Remove total_views from the dict as it's not part of the Narrative model
+            narrative_data.pop('total_views', None)
+            
+            claims = await self._get_narrative_claims(narrative_data["id"])
+            topics = await self._get_narrative_topics(narrative_data["id"])
+            videos = await self._get_narrative_videos(narrative_data["id"])
+            
+            narratives.append(Narrative(**narrative_data, claims=claims, topics=topics, videos=videos))
+        
+        return narratives
+    
+    async def get_prevalent_narratives(
+        self, limit: int = 100, offset: int = 0, hours: int = 24
+    ) -> list[Narrative]:
+        # Get narratives ordered by the count of associated videos within the specified time period
+        await self._session.execute(
+            """
+            WITH narrative_video_counts AS (
+                SELECT 
+                    n.id as narrative_id,
+                    n.title,
+                    n.description,
+                    n.metadata,
+                    n.created_at,
+                    n.updated_at,
+                    COUNT(DISTINCT v.id) as video_count
+                FROM narratives n
+                JOIN claim_narratives cn ON n.id = cn.narrative_id
+                JOIN video_claims c ON cn.claim_id = c.id
+                JOIN videos v ON c.video_id = v.id
+                WHERE v.updated_at >= NOW() - (%(hours)s || ' hours')::INTERVAL
+                GROUP BY n.id, n.title, n.description, n.metadata, n.created_at, n.updated_at
+            )
+            SELECT 
+                narrative_id as id,
+                title,
+                description,
+                metadata,
+                created_at,
+                updated_at,
+                video_count
+            FROM narrative_video_counts
+            ORDER BY video_count DESC
+            LIMIT %(limit)s OFFSET %(offset)s
+            """,
+            {"limit": limit, "offset": offset, "hours": hours},
+        )
+        rows = await self._session.fetchall()
+        
+        narratives = []
+        for row in rows:
+            narrative_data = dict(row)
+            # Remove video_count from the dict as it's not part of the Narrative model
+            narrative_data.pop('video_count', None)
+            
+            claims = await self._get_narrative_claims(narrative_data["id"])
+            topics = await self._get_narrative_topics(narrative_data["id"])
+            videos = await self._get_narrative_videos(narrative_data["id"])
+            
+            narratives.append(Narrative(**narrative_data, claims=claims, topics=topics, videos=videos))
+        
+        return narratives

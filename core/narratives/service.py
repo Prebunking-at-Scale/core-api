@@ -86,3 +86,15 @@ class NarrativeService:
     ) -> tuple[list[Narrative], int]:
         async with self.repo() as repo:
             return await repo.get_narratives_by_topic(topic_id, limit=limit, offset=offset)
+    
+    async def get_viral_narratives(
+        self, limit: int = 100, offset: int = 0, hours: int = 24
+    ) -> list[Narrative]:
+        async with self.repo() as repo:
+            return await repo.get_viral_narratives(limit=limit, offset=offset, hours=hours)
+    
+    async def get_prevalent_narratives(
+        self, limit: int = 100, offset: int = 0, hours: int = 24
+    ) -> list[Narrative]:
+        async with self.repo() as repo:
+            return await repo.get_prevalent_narratives(limit=limit, offset=offset, hours=hours)
