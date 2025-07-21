@@ -1,7 +1,10 @@
+import asyncio
 import logging
 import os
+from urllib.parse import urljoin
 from uuid import UUID
 
+import httpx
 from litestar import Controller, Response, delete, get, patch, post
 from litestar.background_tasks import BackgroundTask
 from litestar.datastructures import State
@@ -12,12 +15,25 @@ from litestar.params import Parameter
 
 from core.analysis import genai
 from core.errors import ConflictError
+from core.narratives.service import NarrativeService
 from core.response import JSON, CursorJSON, PaginatedJSON
 from core.videos.claims.models import Claim, VideoClaims
 from core.videos.claims.service import ClaimsService
-from core.videos.models import AnalysedVideo, Video, VideoFilters, VideoPatch, VideoResponse
+from core.videos.models import (
+    AnalysedVideo,
+    AnalysedVideoWithEmbedding,
+    Video,
+    VideoFilters,
+    VideoPatch,
+    VideoResponse,
+)
 from core.videos.service import VideoService
-from core.videos.transcripts.models import Transcript, TranscriptSentence, TranscriptResponse, TranscriptSentenceResponse
+from core.videos.transcripts.models import (
+    Transcript,
+    TranscriptResponse,
+    TranscriptSentence,
+    TranscriptSentenceResponse,
+)
 from core.videos.transcripts.service import TranscriptService
 
 log = logging.getLogger(__name__)
@@ -78,6 +94,10 @@ async def claims_service(state: State) -> ClaimsService:
     return ClaimsService(state.connection_factory)
 
 
+async def narrative_service(state: State) -> NarrativeService:
+    return NarrativeService(state.connection_factory)
+
+
 async def extract_transcript_and_claims(
     video: Video, transcript_service: TranscriptService, claims_service: ClaimsService
 ) -> None:
@@ -105,6 +125,64 @@ async def extract_transcript_and_claims(
     log.info(
         f"finished processing {video.source_url}, got {len(sentences)} sentences and {len(claims)} claims."
     )
+    
+    # Send video to narratives API for analysis
+    if claims:
+        await analyze_for_narratives(video, video_claims)
+
+
+async def analyze_for_narratives(video: Video, video_claims: VideoClaims) -> None:
+    """Send video claims to the narratives API for analysis."""
+
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        # We don't want to run this during tests
+        return
+
+    narratives_base_url = os.environ.get("NARRATIVES_BASE_ENDPOINT")
+    narratives_api_key = os.environ.get("NARRATIVES_API_KEY")
+    app_base_url = os.environ.get("APP_BASE_URL")
+    
+    if not narratives_base_url or not narratives_api_key:
+        log.warning("Narratives API configuration missing, skipping narrative analysis")
+        return
+    
+    if not app_base_url:
+        log.warning("APP_BASE_URL not configured, skipping narrative analysis")
+        return
+
+    claims_data = []
+    for claim in video_claims.claims:
+        claims_data.append({
+            "id": str(claim.id),
+            "claim": claim.claim,
+            "video_id": str(video.id),
+            "claim_api_url": urljoin(app_base_url, "/api/videos/{video_id}/claims/{claim_id}")
+        })
+    
+    payload = {
+        "claims": claims_data,
+        "narratives_api_url": urljoin(app_base_url, "/api/narratives")
+    }
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            url = f"{narratives_base_url}/add-contents"
+                        
+            response = await client.post(
+                url,
+                json=payload,
+                headers={"X-API-TOKEN": narratives_api_key}
+            )
+            
+            log.info(f"Received response: {response.status_code}")
+
+            if response.status_code == 202:
+                log.debug(f"Successfully sent {len(claims_data)} claims to narratives API")
+            else:
+                log.error(f"Failed to analyze claims: {response.status_code} - {response.text}")
+                
+        except Exception as e:
+            log.error(f"Error sending claims to narratives API: {e}", exc_info=True)
 
 
 class VideoController(Controller):
@@ -115,6 +193,7 @@ class VideoController(Controller):
         "video_service": Provide(video_service),
         "transcript_service": Provide(transcript_service),
         "claims_service": Provide(claims_service),
+        "narrative_service": Provide(narrative_service),
     }
 
     @post(
@@ -194,19 +273,18 @@ class VideoController(Controller):
         transcript_service: TranscriptService,
         claims_service: ClaimsService,
         video_id: UUID,
-    ) -> JSON[AnalysedVideo | None]:
+    ) -> JSON[AnalysedVideoWithEmbedding | None]:
         video = await video_service.get_video_by_id(video_id)
         if not video:
             raise NotFoundException()
-        video_response = video_to_response(video)
         transcript = await transcript_service.get_transcript_for_video(video_id)
         transcript_response = transcript_to_response(transcript)
         claims = await claims_service.get_claims_for_video(video_id)
         narratives = await video_service.get_narratives_for_video(video_id)
 
         return JSON(
-            AnalysedVideo(
-                **video_response.model_dump(),
+            AnalysedVideoWithEmbedding(
+                **video.model_dump(),
                 transcript=transcript_response,
                 claims=claims,
                 narratives=narratives,

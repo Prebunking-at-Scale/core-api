@@ -55,6 +55,13 @@ class AnalysedVideo(VideoResponse):
     narratives: list[Any] = Field(default_factory=list)
 
 
+class AnalysedVideoWithEmbedding(Video):
+    """Response model for individual video with embeddings included"""
+    transcript: TranscriptResponse | None = None
+    claims: VideoClaims | None = None
+    narratives: list[Any] = Field(default_factory=list)
+
+
 class VideoPatch(PydanticDTO[Video]):
     config = DTOConfig(
         partial=True,

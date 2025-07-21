@@ -4,7 +4,7 @@ from uuid import UUID
 from litestar.dto import DTOData
 
 from core.uow import ConnectionFactory, uow
-from core.videos.transcripts.models import Transcript, TranscriptSentence
+from core.videos.transcripts.models import Transcript
 from core.videos.transcripts.repo import TranscriptRepository
 
 
