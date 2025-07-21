@@ -33,6 +33,7 @@ async def test_get_video(
             "embedding": ANY,
             "transcript": ANY,
             "claims": ANY,
+            "narratives": ANY,
         }
     }
 
