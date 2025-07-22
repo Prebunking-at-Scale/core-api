@@ -132,7 +132,10 @@ async def extract_transcript_and_claims(
     sentences = [TranscriptSentence(**x.model_dump()) for x in result]
     claims = await get_claims(
         keywords=KEYWORDS,
-        sentences=[HarmfulClaimFinderSentence(**s.model_dump()) for s in sentences],
+        sentences=[
+            HarmfulClaimFinderSentence(**({"video_id": video.id} | s.model_dump()))
+            for s in sentences
+        ],
         country_codes=COUNTRIES["org"],
     )  # this list currently needs to be converted to correct format
 
