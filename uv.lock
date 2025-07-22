@@ -385,7 +385,7 @@ wheels = [
 [[package]]
 name = "harmful-claim-finder"
 version = "0.0.1"
-source = { git = "https://github.com/Prebunking-at-Scale/harmful-claim-finder.git#4fc4b3c5a4c4f2711349d0e21e942d740492d197" }
+source = { git = "https://github.com/Prebunking-at-Scale/harmful-claim-finder.git#ba7bc73a3fc396600ab5e58f279ac8a8e5ad377f" }
 dependencies = [
     { name = "google-cloud-storage" },
     { name = "google-genai" },
