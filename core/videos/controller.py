@@ -19,7 +19,91 @@ from core.videos.service import VideoService
 from core.videos.transcripts.models import Transcript, TranscriptSentence
 from core.videos.transcripts.service import TranscriptService
 
+from harmful_claim_finder.transcript_inference import get_claims
+from harmful_claim_finder.utils.models import (
+    TranscriptSentence as HarmfulClaimFinderSentence,
+)
+
 log = logging.getLogger(__name__)
+
+
+KEYWORDS = {
+    "health": [
+        "vacunas",
+        "inflamación",
+        "grafeno",
+        "5G",
+        "autismo",
+        "cáncer",
+        "diabetes",
+        "remedios",
+        "colesterol",
+        "ivermectina",
+        "ondas",
+        "hormonas",
+    ],
+    "climate": [
+        "sequía",
+        "HAARP",
+        "geoingeniería",
+        "chemtrails",
+        "yoduro de plata",
+        "cambio climático",
+        "fumigaciones",
+        "hielo ártico",
+        "hielo antártico",
+        "glaciación",
+        "deshielo",
+        "CO2",
+        "alarmismo climático",
+    ],
+    "eu": [
+        "fondos europeos",
+        "Bruselas",
+        "Von de Leyen",
+        "OTAN",
+        "Parlamento Europeo",
+        "Agenda 2030",
+        "Ciudad 15 minutos",
+        "euro digital",
+        "PAC (Política Agraria Común)",
+        "Pacto Verde Europeo",
+    ],
+    "migration": [
+        "magrebíes",
+        "jovenlandeses",
+        "marroquíes",
+        "inmigrantes",
+        "paguitas",
+        "musulmanes",
+        "islam",
+        "moros",
+        "rumanos",
+        "senegaleses",
+        "argelinos",
+        "pateras",
+        "cayucos",
+        "menas",
+        "invasión",
+    ],
+    "conflict": [
+        "drones",
+        "misiles",
+        "mercenarios",
+        "ejecuciones",
+        "pallywood",
+        "banderitas",
+        "ukronazis",
+        "bombardeo",
+        "guerra mundial",
+        "balcanización",
+        "masacres",
+        "genocidio",
+        "otanistas",
+    ],
+}
+
+COUNTRIES = {"org": ["ESP", "GBR", "USA"]}
 
 
 async def video_service(state: State) -> VideoService:
@@ -46,16 +130,21 @@ async def extract_transcript_and_claims(
 
     result = await genai.generate_transcript(video.source_url)
     sentences = [TranscriptSentence(**x.model_dump()) for x in result]
-    claims = [
-        Claim(**(x.model_dump() | {"claim": x.text})) for x in result if x.is_claim
-    ]
+    claims = await get_claims(
+        keywords=KEYWORDS,
+        sentences=[HarmfulClaimFinderSentence(**s.model_dump()) for s in sentences],
+        country_codes=COUNTRIES["org"],
+    )  # this list currently needs to be converted to correct format
 
     if sentences:
         transcript = Transcript(video_id=video.id, sentences=sentences)
         await transcript_service.add_transcript(video.id, transcript)
 
     if claims:
-        video_claims = VideoClaims(video_id=video.id, claims=claims)
+        video_claims = VideoClaims(
+            video_id=video.id,
+            claims=[Claim(**claim.model_dump()) for claim in claims],
+        )
         await claims_service.add_claims(video.id, video_claims)
 
     log.info(
