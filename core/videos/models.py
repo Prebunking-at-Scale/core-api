@@ -8,7 +8,7 @@ from litestar.plugins.pydantic import PydanticDTO
 from pydantic import BaseModel, Field
 
 from core.videos.claims.models import VideoClaims
-from core.videos.transcripts.models import TranscriptResponse
+from core.videos.transcripts.models import Transcript
 
 
 class Video(BaseModel):
@@ -50,14 +50,14 @@ class VideoResponse(BaseModel):
 
 
 class AnalysedVideo(VideoResponse):
-    transcript: TranscriptResponse | None = None
+    transcript: Transcript | None = None
     claims: VideoClaims | None = None
     narratives: list[Any] = Field(default_factory=list)
 
 
 class AnalysedVideoWithEmbedding(Video):
     """Response model for individual video with embeddings included"""
-    transcript: TranscriptResponse | None = None
+    transcript: Transcript | None = None
     claims: VideoClaims | None = None
     narratives: list[Any] = Field(default_factory=list)
 

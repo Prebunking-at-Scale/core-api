@@ -14,10 +14,10 @@ class Narrative(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     title: str
     description: str
-    claims: list[Claim] = Field(default_factory=list)
-    topics: list[Topic] = Field(default_factory=list)
-    videos: list[Any] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    claims: list[Claim] = []
+    topics: list[Topic] = []
+    videos: list[Any] = []
+    metadata: dict[str, Any] = {}
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -25,16 +25,6 @@ class Narrative(BaseModel):
 class NarrativeInput(BaseModel):
     title: str
     description: str
-    claim_ids: list[UUID] = Field(default_factory=list)
-    topic_ids: list[UUID] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class NarrativeDTO(PydanticDTO[NarrativeInput]):
-    config = DTOConfig(
-        exclude={
-            "id",
-            "created_at",
-            "updated_at",
-        },
-    )
+    claim_ids: list[UUID] = []
+    topic_ids: list[UUID] = []
+    metadata: dict[str, Any] = {}

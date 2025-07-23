@@ -30,14 +30,15 @@ from core.videos.models import (
 from core.videos.service import VideoService
 from core.videos.transcripts.models import (
     Transcript,
-    TranscriptResponse,
     TranscriptSentence,
-    TranscriptSentenceResponse,
 )
 from core.videos.transcripts.service import TranscriptService
 
 log = logging.getLogger(__name__)
 
+narratives_base_url = os.environ.get("NARRATIVES_BASE_ENDPOINT")
+narratives_api_key = os.environ.get("NARRATIVES_API_KEY")
+app_base_url = os.environ.get("APP_BASE_URL")
 
 def video_to_response(video: Video) -> VideoResponse:
     """Convert a Video to VideoResponse, excluding embeddings"""
@@ -60,26 +61,6 @@ def video_to_response(video: Video) -> VideoResponse:
     )
 
 
-def transcript_to_response(transcript: Transcript | None) -> TranscriptResponse | None:
-    """Convert a Transcript to TranscriptResponse, excluding embeddings"""
-    if not transcript:
-        return None
-    
-    sentences = [
-        TranscriptSentenceResponse(
-            id=s.id,
-            source=s.source,
-            text=s.text,
-            start_time_s=s.start_time_s,
-            metadata=s.metadata
-        )
-        for s in transcript.sentences
-    ]
-    
-    return TranscriptResponse(
-        video_id=transcript.video_id,
-        sentences=sentences
-    )
 
 
 async def video_service(state: State) -> VideoService:
@@ -137,10 +118,6 @@ async def analyze_for_narratives(video: Video, video_claims: VideoClaims) -> Non
     if "PYTEST_CURRENT_TEST" in os.environ:
         # We don't want to run this during tests
         return
-
-    narratives_base_url = os.environ.get("NARRATIVES_BASE_ENDPOINT")
-    narratives_api_key = os.environ.get("NARRATIVES_API_KEY")
-    app_base_url = os.environ.get("APP_BASE_URL")
     
     if not narratives_base_url or not narratives_api_key:
         log.warning("Narratives API configuration missing, skipping narrative analysis")
@@ -242,14 +219,13 @@ class VideoController(Controller):
         for video in videos:
             video_response = video_to_response(video)
             transcript = await transcript_service.get_transcript_for_video(video.id)
-            transcript_response = transcript_to_response(transcript)
             claims = await claims_service.get_claims_for_video(video.id)
             narratives = await video_service.get_narratives_for_video(video.id)
             
             analysed_videos.append(
                 AnalysedVideo(
                     **video_response.model_dump(),
-                    transcript=transcript_response,
+                    transcript=transcript,
                     claims=claims,
                     narratives=narratives,
                 )
@@ -278,14 +254,13 @@ class VideoController(Controller):
         if not video:
             raise NotFoundException()
         transcript = await transcript_service.get_transcript_for_video(video_id)
-        transcript_response = transcript_to_response(transcript)
         claims = await claims_service.get_claims_for_video(video_id)
         narratives = await video_service.get_narratives_for_video(video_id)
 
         return JSON(
             AnalysedVideoWithEmbedding(
                 **video.model_dump(),
-                transcript=transcript_response,
+                transcript=transcript,
                 claims=claims,
                 narratives=narratives,
             )

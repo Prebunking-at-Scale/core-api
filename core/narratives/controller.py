@@ -9,7 +9,7 @@ from litestar.exceptions import NotFoundException
 from core.errors import ConflictError
 from core.response import JSON
 from core.uow import ConnectionFactory
-from core.narratives.models import Narrative, NarrativeInput, NarrativeDTO
+from core.narratives.models import Narrative, NarrativeInput
 from core.narratives.service import NarrativeService
 
 
@@ -30,7 +30,7 @@ class NarrativeController(Controller):
     @post(
         path="/",
         summary="Create a new narrative",
-        dto=NarrativeDTO,
+        dto=NarrativeInput,
         return_dto=None,
         raises=[ConflictError],
     )
@@ -109,7 +109,7 @@ class NarrativeController(Controller):
     @patch(
         path="/{narrative_id:uuid}",
         summary="Update a narrative",
-        dto=NarrativeDTO,
+        dto=NarrativeInput,
         return_dto=None,
     )
     async def update_narrative(
