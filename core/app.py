@@ -6,6 +6,7 @@ from litestar.datastructures import State
 from litestar.di import Provide
 from litestar.openapi import OpenAPIConfig
 from litestar.openapi.spec import Components, SecurityScheme
+from litestar.plugins.structlog import StructlogPlugin
 from psycopg import AsyncConnection
 from psycopg.rows import DictRow, dict_row
 from psycopg_pool import AsyncConnectionPool
@@ -100,7 +101,9 @@ app: Litestar = Litestar(
     on_shutdown=[
         shutdown_db,
     ],
-    plugins=[],
+    plugins=[
+        StructlogPlugin(),
+    ],
     middleware=[],
     openapi_config=OpenAPIConfig(
         title="PAS Core API",
