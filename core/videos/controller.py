@@ -2,6 +2,10 @@ import logging
 import os
 from uuid import UUID
 
+from harmful_claim_finder.transcript_inference import get_claims
+from harmful_claim_finder.utils.models import (
+    TranscriptSentence as HarmfulClaimFinderSentence,
+)
 from litestar import Controller, Response, delete, get, patch, post
 from litestar.background_tasks import BackgroundTask
 from litestar.datastructures import State
@@ -15,95 +19,12 @@ from core.response import JSON, CursorJSON
 from core.videos.claims.models import Claim, VideoClaims
 from core.videos.claims.service import ClaimsService
 from core.videos.models import AnalysedVideo, Video, VideoFilters, VideoPatch
+from core.videos.pastel import COUNTRIES, KEYWORDS
 from core.videos.service import VideoService
 from core.videos.transcripts.models import Transcript, TranscriptSentence
 from core.videos.transcripts.service import TranscriptService
 
-from harmful_claim_finder.transcript_inference import get_claims
-from harmful_claim_finder.utils.models import (
-    TranscriptSentence as HarmfulClaimFinderSentence,
-)
-
 log = logging.getLogger(__name__)
-
-
-KEYWORDS = {
-    "health": [
-        "vacunas",
-        "inflamación",
-        "grafeno",
-        "5G",
-        "autismo",
-        "cáncer",
-        "diabetes",
-        "remedios",
-        "colesterol",
-        "ivermectina",
-        "ondas",
-        "hormonas",
-    ],
-    "climate": [
-        "sequía",
-        "HAARP",
-        "geoingeniería",
-        "chemtrails",
-        "yoduro de plata",
-        "cambio climático",
-        "fumigaciones",
-        "hielo ártico",
-        "hielo antártico",
-        "glaciación",
-        "deshielo",
-        "CO2",
-        "alarmismo climático",
-    ],
-    "eu": [
-        "fondos europeos",
-        "Bruselas",
-        "Von de Leyen",
-        "OTAN",
-        "Parlamento Europeo",
-        "Agenda 2030",
-        "Ciudad 15 minutos",
-        "euro digital",
-        "PAC (Política Agraria Común)",
-        "Pacto Verde Europeo",
-    ],
-    "migration": [
-        "magrebíes",
-        "jovenlandeses",
-        "marroquíes",
-        "inmigrantes",
-        "paguitas",
-        "musulmanes",
-        "islam",
-        "moros",
-        "rumanos",
-        "senegaleses",
-        "argelinos",
-        "pateras",
-        "cayucos",
-        "menas",
-        "invasión",
-    ],
-    "conflict": [
-        "drones",
-        "misiles",
-        "mercenarios",
-        "ejecuciones",
-        "pallywood",
-        "banderitas",
-        "ukronazis",
-        "bombardeo",
-        "guerra mundial",
-        "balcanización",
-        "masacres",
-        "genocidio",
-        "otanistas",
-    ],
-}
-
-COUNTRIES = {"org": ["ESP", "GBR", "USA"]}
 
 
 async def video_service(state: State) -> VideoService:
@@ -133,7 +54,7 @@ async def extract_transcript_and_claims(
     claims = await get_claims(
         keywords=KEYWORDS,
         sentences=[
-            HarmfulClaimFinderSentence(**({"video_id": video.id} | s.model_dump()))
+            HarmfulClaimFinderSentence(**(s.model_dump() | {"video_id": video.id}))
             for s in sentences
         ],
         country_codes=COUNTRIES["org"],
