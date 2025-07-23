@@ -37,9 +37,11 @@ class NarrativeService:
 
     async def get_all_narratives(
         self, limit: int = 100, offset: int = 0
-    ) -> list[Narrative]:
+    ) -> tuple[list[Narrative], int]:
         async with self.repo() as repo:
-            return await repo.get_all_narratives(limit=limit, offset=offset)
+            narratives = await repo.get_all_narratives(limit=limit, offset=offset)
+            total = await repo.count_all_narratives()
+            return narratives, total
 
     async def update_narrative(
         self,
