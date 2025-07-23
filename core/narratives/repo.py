@@ -138,6 +138,15 @@ class NarrativeRepository:
 
         return narratives
 
+    async def count_all_narratives(self) -> int:
+        await self._session.execute(
+            """
+            SELECT COUNT(*) FROM narratives
+            """
+        )
+        row = await self._session.fetchone()
+        return row["count"] if row else 0
+
     async def update_narrative(
         self,
         narrative_id: UUID,
