@@ -3,7 +3,6 @@ from uuid import UUID
 
 from litestar import Controller, delete, get, patch, post
 from litestar.di import Provide
-from litestar.dto import DTOData
 from litestar.exceptions import NotFoundException
 
 from core.errors import ConflictError
@@ -30,14 +29,13 @@ class NarrativeController(Controller):
     @post(
         path="/",
         summary="Create a new narrative",
-        dto=NarrativeInput,
         return_dto=None,
         raises=[ConflictError],
     )
     async def create_narrative(
         self,
         narrative_service: NarrativeService,
-        data: DTOData[NarrativeInput],
+        data: NarrativeInput,
     ) -> JSON[Narrative]:
         return JSON(await narrative_service.create_narrative(data))
 
@@ -109,14 +107,13 @@ class NarrativeController(Controller):
     @patch(
         path="/{narrative_id:uuid}",
         summary="Update a narrative",
-        dto=NarrativeInput,
         return_dto=None,
     )
     async def update_narrative(
         self,
         narrative_service: NarrativeService,
         narrative_id: UUID,
-        data: DTOData[NarrativeInput],
+        data: NarrativeInput,
     ) -> JSON[Narrative]:
         narrative = await narrative_service.update_narrative(narrative_id, data)
         if not narrative:
