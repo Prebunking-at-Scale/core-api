@@ -212,12 +212,13 @@ class VideoRepository:
         """Get all narratives associated with a video through its claims"""
         await self._session.execute(
             """
-            SELECT DISTINCT n.id, n.title, n.description, n.metadata, n.created_at, n.updated_at
-            FROM narratives n
-            JOIN claim_narratives cn ON n.id = cn.narrative_id
-            JOIN video_claims c ON cn.claim_id = c.id
-            WHERE c.video_id = %(video_id)s
-            ORDER BY n.created_at DESC
+            SELECT * FROM narratives n
+			WHERE EXISTS (
+				SELECT 1 FROM claim_narratives cn
+				JOIN video_claims c ON cn.claim_id = c.id
+				WHERE c.video_id = %(video_id)s AND cn.narrative_id = n.id
+			)
+			ORDER BY n.created_at DESC 
             """,
             {"video_id": video_id},
         )

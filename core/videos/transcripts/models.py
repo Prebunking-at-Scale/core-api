@@ -24,21 +24,8 @@ class TranscriptDTO(PydanticDTO[Transcript]):
     config = DTOConfig(
         exclude={
             "video_id",
-            "embedding",
+            "sentences.*.embedding",
         },
     )
 
 
-class TranscriptSentenceResponse(BaseModel):
-    """Response model for transcript sentences without embeddings"""
-    id: UUID
-    source: str
-    text: str
-    start_time_s: float
-    metadata: dict[str, Any] = {}
-
-
-class TranscriptResponse(BaseModel):
-    """Response model for transcripts without embeddings"""
-    video_id: UUID | None
-    sentences: list[TranscriptSentenceResponse]
