@@ -15,9 +15,10 @@ spec:
         app: core-api
         tier: web
     spec:
+      serviceAccountName: workload-identity-sa
       containers:
         - name: core-api
-          image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api:dev
+          image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api:v0.5.0-dev.0
           imagePullPolicy: Always
           ports:
             - containerPort: 8000
@@ -54,6 +55,12 @@ spec:
                 secretKeyRef:
                   name: core-api-keys
                   key: keys
+            - name: GEMINI_PROJECT
+              value: pas-development-1
+            - name: GEMINI_LOCATION
+              value: global
+            - name: GEMINI_MODEL
+              value: gemini-2.0-flash-lite-001
         - name: cloud-sql-proxy
           image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.17.1
           args:
