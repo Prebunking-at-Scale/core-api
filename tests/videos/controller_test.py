@@ -1,35 +1,10 @@
 import uuid
-from typing import Any
 
 from litestar import Litestar
 from litestar.testing import AsyncTestClient
-from polyfactory.factories.pydantic_factory import ModelFactory
-from pytest import fixture
 
 from core.videos.models import Video
-
-
-class VideoFactory(ModelFactory[Video]):
-    # Creates fake data for testing purposes
-    ...
-
-
-async def create_video(
-    api_key_client: AsyncTestClient[Litestar], **args: dict[str, Any]
-) -> Video:
-    video = VideoFactory.build()
-    video_json = video.model_dump(mode="json")
-    response = await api_key_client.post(
-        "/api/videos/",
-        json=video_json,
-    )
-    assert response.status_code == 201
-    return video
-
-
-@fixture
-async def video(api_key_client: AsyncTestClient[Litestar]) -> Video:
-    return await create_video(api_key_client)
+from tests.videos.conftest import VideoFactory, create_video
 
 
 async def test_add_video(

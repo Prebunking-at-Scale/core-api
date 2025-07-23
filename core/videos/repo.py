@@ -5,6 +5,7 @@ from psycopg import sql
 from psycopg.rows import DictRow
 from psycopg.types.json import Jsonb
 
+from core.analysis import embedding
 from core.videos.models import Video, VideoFilters
 
 
@@ -25,6 +26,7 @@ class VideoRepository:
         return Video(**row)
 
     async def add_video(self, video: Video) -> Video:
+        encoded = embedding.encode(video.title + " " + video.description)
         await self._session.execute(
             """
             INSERT INTO videos (
@@ -42,7 +44,8 @@ class VideoRepository:
                 channel_followers,
                 scrape_topic,
                 scrape_keyword,
-                metadata
+                metadata,
+                embedding
             )
             VALUES (
                 %(id)s,
@@ -59,11 +62,16 @@ class VideoRepository:
                 %(channel_followers)s,
                 %(scrape_topic)s,
                 %(scrape_keyword)s,
-                %(metadata)s
+                %(metadata)s,
+                %(embedding)s
             )
             RETURNING *
             """,
-            video.model_dump() | {"metadata": Jsonb(video.metadata)},
+            {
+                **video.model_dump(),
+                "metadata": Jsonb(video.metadata),
+                "embedding": list(encoded),
+            },
         )
         row = await self._session.fetchone()
         if not row:
@@ -104,6 +112,7 @@ class VideoRepository:
 
     async def filter_videos(self, filters: VideoFilters) -> list[Video]:
         wheres = [sql.SQL("1=1")]
+        additional_params = {}
         if filters.platform:
             wheres.append(sql.SQL("v.platform = ANY(%(platform)s)"))
 
@@ -112,6 +121,10 @@ class VideoRepository:
 
         if filters.metadata:
             wheres.append(sql.SQL("v.metadata @@ %(metadata)s"))
+
+        if filters.semantic:
+            additional_params["encoded"] = list(embedding.encode(filters.semantic))
+            wheres.append(sql.SQL("v.embedding <=> %(encoded)s::vector < 0.75"))
 
         if filters.cursor:
             wheres.append(
@@ -147,5 +160,7 @@ class VideoRepository:
             LIMIT %(limit)s
             """).format(wheres=sql.Composed(wheres).join(" AND "))
 
-        await self._session.execute(full_query, params=filters.model_dump())
+        await self._session.execute(
+            full_query, params=filters.model_dump() | additional_params
+        )
         return [Video(**row) for row in await self._session.fetchall()]
