@@ -1,10 +1,7 @@
-from unittest.mock import ANY
-
 from litestar import Litestar
 from litestar.testing import AsyncTestClient
 
-from core.videos.models import Video
-from core.videos.transcripts.models import Transcript
+from core.models import Transcript, Video
 from tests.videos.conftest import TranscriptFactory
 
 
@@ -19,7 +16,6 @@ async def test_add_transcript(
         json=transcript_json,
     )
     assert response.status_code == 201
-    transcript_json["sentences"][0]["embedding"] = ANY
     assert response.json() | {"data": transcript_json} == response.json()
 
 
@@ -37,7 +33,6 @@ async def test_get_transcript(
     response = await api_key_client.get(f"/api/videos/{video.id}/transcript")
     assert response.status_code == 200
     transcript_json = transcript.model_dump(mode="json")
-    transcript_json["sentences"][0]["embedding"] = ANY
     assert response.json() == {"data": transcript_json}
 
 

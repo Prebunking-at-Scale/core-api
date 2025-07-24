@@ -3,8 +3,9 @@ from uuid import UUID
 
 from litestar.dto import DTOData
 
+from core.models import Video
 from core.uow import ConnectionFactory, uow
-from core.videos.models import Video, VideoFilters
+from core.videos.models import VideoFilters
 from core.videos.repo import VideoRepository
 
 
@@ -40,11 +41,15 @@ class VideoService:
             return await repo.delete_video(video_id)
 
     async def get_videos_paginated(
-        self, limit: int, offset: int, platform: list[str] | None = None, channel: list[str] | None = None
+        self,
+        limit: int,
+        offset: int,
+        platform: list[str] | None = None,
+        channel: list[str] | None = None,
     ) -> tuple[list[Video], int]:
         async with self.repo() as repo:
             return await repo.get_videos_paginated(limit, offset, platform, channel)
-    
+
     async def get_narratives_for_video(self, video_id: UUID) -> list[dict]:
         async with self.repo() as repo:
             return await repo.get_narratives_for_video(video_id)

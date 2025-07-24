@@ -3,8 +3,8 @@ from unittest.mock import ANY
 from litestar import Litestar
 from litestar.testing import AsyncTestClient
 
+from core.models import Video
 from core.videos.claims.models import VideoClaims
-from core.videos.models import Video
 from tests.videos.conftest import ClaimsFactory
 
 
@@ -17,8 +17,12 @@ async def test_add_claims(
         f"/api/videos/{video.id}/claims",
         json=claims_json,
     )
+    claims_json["claims"][0] = claims_json["claims"][0] | {
+        "created_at": ANY,
+        "updated_at": ANY,
+        "video_id": str(video.id),
+    }
     assert response.status_code == 201
-    claims_json["claims"][0]["embedding"] = ANY
     assert response.json() == {"data": claims_json}
 
 
@@ -36,12 +40,18 @@ async def test_get_claims(
     response = await api_key_client.get(f"/api/videos/{video.id}/claims")
     assert response.status_code == 200
     claims_json = video_claims.model_dump(mode="json")
-    claims_json["claims"][0]["embedding"] = ANY
+    claims_json["claims"][0] = claims_json["claims"][0] | {
+        "created_at": ANY,
+        "updated_at": ANY,
+        "video_id": str(video.id),
+    }
     assert response.json() == {"data": claims_json}
 
 
 async def test_delete_claims(
-    api_key_client: AsyncTestClient[Litestar], video: Video, video_claims: VideoClaims
+    api_key_client: AsyncTestClient[Litestar],
+    video: Video,
+    video_claims: VideoClaims,  # side effects
 ) -> None:
     response = await api_key_client.get(f"/api/videos/{video.id}/claims")
     assert response.status_code == 200
@@ -56,7 +66,9 @@ async def test_delete_claims(
 
 
 async def test_delete_video_also_deletes_claims(
-    api_key_client: AsyncTestClient[Litestar], video: Video, video_claims: VideoClaims
+    api_key_client: AsyncTestClient[Litestar],
+    video: Video,
+    video_claims: VideoClaims,  # side effects
 ) -> None:
     response = await api_key_client.get(f"/api/videos/{video.id}/claims")
     assert response.status_code == 200
@@ -69,7 +81,9 @@ async def test_delete_video_also_deletes_claims(
 
 
 async def test_delete_claim(
-    api_key_client: AsyncTestClient[Litestar], video: Video, video_claims: VideoClaims
+    api_key_client: AsyncTestClient[Litestar],
+    video: Video,
+    video_claims: VideoClaims,  # side effects
 ) -> None:
     response = await api_key_client.get(f"/api/videos/{video.id}/claims")
     assert response.status_code == 200

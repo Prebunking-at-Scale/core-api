@@ -1,9 +1,10 @@
 from typing import Any, AsyncContextManager
 from uuid import UUID
 
-from core.uow import ConnectionFactory, uow
-from core.narratives.models import Narrative, NarrativeInput
+from core.models import Narrative
+from core.narratives.models import NarrativeInput
 from core.narratives.repo import NarrativeRepository
+from core.uow import ConnectionFactory, uow
 
 
 class NarrativeService:
@@ -13,13 +14,11 @@ class NarrativeService:
     def repo(self) -> AsyncContextManager[NarrativeRepository]:
         return uow(NarrativeRepository, self._connection_factory)
 
-    async def create_narrative(
-        self, narrative: NarrativeInput
-    ) -> Narrative:
+    async def create_narrative(self, narrative: NarrativeInput) -> Narrative:
         async with self.repo() as repo:
             if not await repo.claims_exist(narrative.claim_ids):
                 raise ValueError("one or more claims not found")
-            
+
             return await repo.create_narrative(
                 title=narrative.title,
                 description=narrative.description,
@@ -72,21 +71,27 @@ class NarrativeService:
             if not updated:
                 raise ValueError("narrative not found")
             return updated.metadata
-    
+
     async def get_narratives_by_topic(
         self, topic_id: UUID, limit: int = 100, offset: int = 0
     ) -> tuple[list[Narrative], int]:
         async with self.repo() as repo:
-            return await repo.get_narratives_by_topic(topic_id, limit=limit, offset=offset)
-    
+            return await repo.get_narratives_by_topic(
+                topic_id, limit=limit, offset=offset
+            )
+
     async def get_viral_narratives(
         self, limit: int = 100, offset: int = 0, hours: int = 24
     ) -> list[Narrative]:
         async with self.repo() as repo:
-            return await repo.get_viral_narratives(limit=limit, offset=offset, hours=hours)
-    
+            return await repo.get_viral_narratives(
+                limit=limit, offset=offset, hours=hours
+            )
+
     async def get_prevalent_narratives(
         self, limit: int = 100, offset: int = 0, hours: int = 24
     ) -> list[Narrative]:
         async with self.repo() as repo:
-            return await repo.get_prevalent_narratives(limit=limit, offset=offset, hours=hours)
+            return await repo.get_prevalent_narratives(
+                limit=limit, offset=offset, hours=hours
+            )

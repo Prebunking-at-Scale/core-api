@@ -3,9 +3,10 @@ from uuid import UUID
 
 from litestar.dto import DTOData
 
-from core.uow import ConnectionFactory, uow
-from core.topics.models import Topic, TopicWithStats
+from core.models import Topic
+from core.topics.models import TopicWithStats
 from core.topics.repo import TopicRepository
+from core.uow import ConnectionFactory, uow
 
 
 class TopicService:
@@ -15,12 +16,10 @@ class TopicService:
     def repo(self) -> AsyncContextManager[TopicRepository]:
         return uow(TopicRepository, self._connection_factory)
 
-    async def create_topic(
-        self, topic: Topic | DTOData[Topic]
-    ) -> Topic:
+    async def create_topic(self, topic: Topic | DTOData[Topic]) -> Topic:
         if isinstance(topic, DTOData):
             topic = topic.create_instance()
-        
+
         async with self.repo() as repo:
             return await repo.create_topic(
                 topic=topic.topic,
@@ -35,9 +34,7 @@ class TopicService:
         async with self.repo() as repo:
             return await repo.get_topic_by_name(topic)
 
-    async def get_all_topics(
-        self, limit: int = 100, offset: int = 0
-    ) -> list[Topic]:
+    async def get_all_topics(self, limit: int = 100, offset: int = 0) -> list[Topic]:
         async with self.repo() as repo:
             return await repo.get_all_topics(limit=limit, offset=offset)
 
@@ -52,7 +49,7 @@ class TopicService:
     ) -> Topic | None:
         if isinstance(data, DTOData):
             data = data.as_builtins()
-        
+
         async with self.repo() as repo:
             return await repo.update_topic(
                 topic_id=topic_id,
@@ -79,7 +76,7 @@ class TopicService:
     async def get_topics_by_narrative(self, narrative_id: UUID) -> list[Topic]:
         async with self.repo() as repo:
             return await repo.get_topics_by_narrative(narrative_id)
-    
+
     async def get_all_topics_with_stats(
         self, limit: int = 100, offset: int = 0
     ) -> tuple[list[TopicWithStats], int]:
