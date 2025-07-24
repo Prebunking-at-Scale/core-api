@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import os
 from urllib.parse import urljoin
@@ -19,24 +18,18 @@ from litestar.params import Parameter
 
 from core.analysis import genai
 from core.errors import ConflictError
+from core.models import Claim, Transcript, TranscriptSentence, Video
 from core.narratives.service import NarrativeService
 from core.response import JSON, CursorJSON, PaginatedJSON
-from core.videos.claims.models import Claim, VideoClaims
+from core.videos.claims.models import VideoClaims
 from core.videos.claims.service import ClaimsService
 from core.videos.models import (
     AnalysedVideo,
-    AnalysedVideoWithEmbedding,
-    Video,
     VideoFilters,
     VideoPatch,
-    VideoResponse,
 )
 from core.videos.pastel import COUNTRIES, KEYWORDS
 from core.videos.service import VideoService
-from core.videos.transcripts.models import (
-    Transcript,
-    TranscriptSentence,
-)
 from core.videos.transcripts.service import TranscriptService
 
 log = logging.getLogger(__name__)
@@ -44,28 +37,6 @@ log = logging.getLogger(__name__)
 narratives_base_url = os.environ.get("NARRATIVES_BASE_ENDPOINT")
 narratives_api_key = os.environ.get("NARRATIVES_API_KEY")
 app_base_url = os.environ.get("APP_BASE_URL")
-
-def video_to_response(video: Video) -> VideoResponse:
-    """Convert a Video to VideoResponse, excluding embeddings"""
-    return VideoResponse(
-        id=video.id,
-        title=video.title,
-        description=video.description,
-        platform=video.platform,
-        source_url=video.source_url,
-        destination_path=video.destination_path,
-        uploaded_at=video.uploaded_at,
-        views=video.views,
-        likes=video.likes,
-        comments=video.comments,
-        channel=video.channel,
-        channel_followers=video.channel_followers,
-        scrape_topic=video.scrape_topic,
-        scrape_keyword=video.scrape_keyword,
-        metadata=video.metadata
-    )
-
-
 
 
 async def video_service(state: State) -> VideoService:
@@ -119,7 +90,7 @@ async def extract_transcript_and_claims(
     log.info(
         f"finished processing {video.source_url}, got {len(sentences)} sentences and {len(claims)} claims."
     )
-    
+
     # Send video to narratives API for analysis
     if claims:
         await analyze_for_narratives(video, video_claims)
@@ -131,11 +102,11 @@ async def analyze_for_narratives(video: Video, video_claims: VideoClaims) -> Non
     if "PYTEST_CURRENT_TEST" in os.environ:
         # We don't want to run this during tests
         return
-    
+
     if not narratives_base_url or not narratives_api_key:
         log.warning("Narratives API configuration missing, skipping narrative analysis")
         return
-    
+
     if not app_base_url:
         log.warning("APP_BASE_URL not configured, skipping narrative analysis")
         return
@@ -146,31 +117,35 @@ async def analyze_for_narratives(video: Video, video_claims: VideoClaims) -> Non
             "id": str(claim.id),
             "claim": claim.claim,
             "video_id": str(video.id),
-            "claim_api_url": urljoin(app_base_url, "/api/videos/{video_id}/claims/{claim_id}")
+            "claim_api_url": urljoin(
+                app_base_url, "/api/videos/{video_id}/claims/{claim_id}"
+            ),
         })
-    
+
     payload = {
         "claims": claims_data,
-        "narratives_api_url": urljoin(app_base_url, "/api/narratives")
+        "narratives_api_url": urljoin(app_base_url, "/api/narratives"),
     }
-    
+
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             url = f"{narratives_base_url}/add-contents"
-                        
+
             response = await client.post(
-                url,
-                json=payload,
-                headers={"X-API-TOKEN": narratives_api_key}
+                url, json=payload, headers={"X-API-TOKEN": narratives_api_key}
             )
-            
+
             log.info(f"Received response: {response.status_code}")
 
             if response.status_code == 202:
-                log.debug(f"Successfully sent {len(claims_data)} claims to narratives API")
+                log.debug(
+                    f"Successfully sent {len(claims_data)} claims to narratives API"
+                )
             else:
-                log.error(f"Failed to analyze claims: {response.status_code} - {response.text}")
-                
+                log.error(
+                    f"Failed to analyze claims: {response.status_code} - {response.text}"
+                )
+
         except Exception as e:
             log.error(f"Error sending claims to narratives API: {e}", exc_info=True)
 
@@ -226,24 +201,23 @@ class VideoController(Controller):
             platform=platform,
             channel=channel,
         )
-        
+
         # Fetch claims and narratives for each video
         analysed_videos = []
         for video in videos:
-            video_response = video_to_response(video)
             transcript = await transcript_service.get_transcript_for_video(video.id)
             claims = await claims_service.get_claims_for_video(video.id)
             narratives = await video_service.get_narratives_for_video(video.id)
-            
+
             analysed_videos.append(
                 AnalysedVideo(
-                    **video_response.model_dump(),
+                    **video.model_dump(),
                     transcript=transcript,
                     claims=claims,
                     narratives=narratives,
                 )
             )
-        
+
         page = (offset // limit) + 1 if limit > 0 else 1
         return PaginatedJSON(
             data=analysed_videos,
@@ -262,7 +236,7 @@ class VideoController(Controller):
         transcript_service: TranscriptService,
         claims_service: ClaimsService,
         video_id: UUID,
-    ) -> JSON[AnalysedVideoWithEmbedding | None]:
+    ) -> JSON[AnalysedVideo | None]:
         video = await video_service.get_video_by_id(video_id)
         if not video:
             raise NotFoundException()
@@ -271,7 +245,7 @@ class VideoController(Controller):
         narratives = await video_service.get_narratives_for_video(video_id)
 
         return JSON(
-            AnalysedVideoWithEmbedding(
+            AnalysedVideo(
                 **video.model_dump(),
                 transcript=transcript,
                 claims=claims,

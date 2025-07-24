@@ -6,16 +6,15 @@ from psycopg.rows import DictRow
 from psycopg.types.json import Jsonb
 
 from core.errors import ConflictError
-from core.topics.models import Topic, TopicWithStats
+from core.models import Topic
+from core.topics.models import TopicWithStats
 
 
 class TopicRepository:
     def __init__(self, session: psycopg.AsyncCursor[DictRow]) -> None:
         self._session = session
 
-    async def create_topic(
-        self, topic: str, metadata: dict[str, Any]
-    ) -> Topic:
+    async def create_topic(self, topic: str, metadata: dict[str, Any]) -> Topic:
         try:
             await self._session.execute(
                 """
@@ -63,9 +62,7 @@ class TopicRepository:
             return None
         return Topic(**row)
 
-    async def get_all_topics(
-        self, limit: int = 100, offset: int = 0
-    ) -> list[Topic]:
+    async def get_all_topics(self, limit: int = 100, offset: int = 0) -> list[Topic]:
         await self._session.execute(
             """
             SELECT * FROM topics
@@ -95,7 +92,7 @@ class TopicRepository:
         metadata: dict[str, Any] | None = None,
     ) -> Topic | None:
         updates = []
-        params = {"topic_id": topic_id}
+        params: dict[str, Any] = {"topic_id": topic_id}
 
         if topic is not None:
             updates.append("topic = %(topic)s")
@@ -109,7 +106,7 @@ class TopicRepository:
             return await self.get_topic(topic_id)
 
         updates.append("updated_at = now()")
-        
+
         try:
             await self._session.execute(
                 f"""
@@ -148,7 +145,7 @@ class TopicRepository:
             {"narrative_id": narrative_id},
         )
         return [Topic(**row) for row in await self._session.fetchall()]
-    
+
     async def get_all_topics_with_stats(
         self, limit: int = 100, offset: int = 0
     ) -> tuple[list[TopicWithStats], int]:
@@ -156,11 +153,11 @@ class TopicRepository:
         await self._session.execute("SELECT COUNT(*) FROM topics")
         total_row = await self._session.fetchone()
         total = total_row["count"] if total_row else 0
-        
+
         # Get topics with stats
         await self._session.execute(
             """
-            SELECT 
+            SELECT
                 t.*,
                 COUNT(DISTINCT nt.narrative_id) as narrative_count,
                 COUNT(DISTINCT ct.claim_id) as claim_count

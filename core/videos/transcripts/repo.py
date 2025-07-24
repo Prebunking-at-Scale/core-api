@@ -7,7 +7,7 @@ from psycopg.types.json import Jsonb
 
 from core.analysis import embedding
 from core.errors import ConflictError
-from core.videos.transcripts.models import TranscriptSentence
+from core.models import TranscriptSentence
 
 
 class TranscriptRepository:
@@ -31,7 +31,7 @@ class TranscriptRepository:
                     %(metadata)s,
                     %(embedding)s
                 )
-                RETURNING *, embedding::real[]
+                RETURNING *
                 """,
                 [
                     x.model_dump()
@@ -63,7 +63,7 @@ class TranscriptRepository:
     ) -> list[TranscriptSentence]:
         await self._session.execute(
             """
-            SELECT *, embedding::real[] FROM transcript_sentences
+            SELECT * FROM transcript_sentences
             WHERE video_id = %(video_id)s
             ORDER BY start_time_s ASC
             """,

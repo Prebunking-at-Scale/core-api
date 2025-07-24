@@ -1,3 +1,4 @@
+from typing import Any
 from uuid import UUID
 
 import psycopg
@@ -7,7 +8,8 @@ from psycopg.types.json import Jsonb
 
 from core.analysis import embedding
 from core.errors import ConflictError
-from core.videos.models import Video, VideoFilters
+from core.models import Narrative, Video
+from core.videos.models import VideoFilters
 
 
 class VideoRepository:
@@ -17,7 +19,7 @@ class VideoRepository:
     async def get_video_by_id(self, video_id: UUID) -> Video | None:
         await self._session.execute(
             """
-            SELECT *, embedding::real[] FROM videos WHERE id = %(video_id)s
+            SELECT * FROM videos WHERE id = %(video_id)s
             """,
             {"video_id": video_id},
         )
@@ -67,7 +69,7 @@ class VideoRepository:
                     %(metadata)s,
                     %(embedding)s
                 )
-                RETURNING *, embedding::real[]
+                RETURNING *
                 """,
                 {
                     **video.model_dump(),
@@ -95,7 +97,7 @@ class VideoRepository:
                 channel_followers = %(channel_followers)s,
                 metadata = metadata || %(metadata)s
             WHERE id = %(id)s
-            RETURNING *, embedding::real[]
+            RETURNING *
             """,
             video.model_dump() | {"metadata": Jsonb(video.metadata)},
         )
@@ -155,7 +157,6 @@ class VideoRepository:
                 v.channel_followers,
                 v.scrape_topic,
                 v.scrape_keyword,
-                v.embedding::real[],
                 v.metadata,
                 v.updated_at,
                 v.created_at
@@ -171,44 +172,48 @@ class VideoRepository:
         return [Video(**row) for row in await self._session.fetchall()]
 
     async def get_videos_paginated(
-        self, limit: int, offset: int, platform: list[str] | None = None, channel: list[str] | None = None
+        self,
+        limit: int,
+        offset: int,
+        platform: list[str] | None = None,
+        channel: list[str] | None = None,
     ) -> tuple[list[Video], int]:
         wheres = [sql.SQL("1=1")]
-        params = {"limit": limit, "offset": offset}
-        
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+
         if platform:
             wheres.append(sql.SQL("platform = ANY(%(platform)s)"))
             params["platform"] = platform
-        
+
         if channel:
             wheres.append(sql.SQL("channel = ANY(%(channel)s)"))
             params["channel"] = channel
-        
+
         where_clause = sql.Composed(wheres).join(" AND ")
-        
+
         # Get total count
         count_query = sql.SQL("""
             SELECT COUNT(*) FROM videos
             WHERE {wheres}
         """).format(wheres=where_clause)
-        
+
         await self._session.execute(count_query, params)
-        total = (await self._session.fetchone())["count"]
-        
+        total = (await self._session.fetchone())["count"]  # type: ignore
+
         # Get paginated results
         data_query = sql.SQL("""
-            SELECT *, embedding::real[] FROM videos
+            SELECT * FROM videos
             WHERE {wheres}
             ORDER BY created_at DESC
             LIMIT %(limit)s OFFSET %(offset)s
         """).format(wheres=where_clause)
-        
+
         await self._session.execute(data_query, params)
         videos = [Video(**row) for row in await self._session.fetchall()]
-        
+
         return videos, total
-    
-    async def get_narratives_for_video(self, video_id: UUID) -> list[dict]:
+
+    async def get_narratives_for_video(self, video_id: UUID) -> list[Narrative]:
         """Get all narratives associated with a video through its claims"""
         await self._session.execute(
             """
@@ -218,8 +223,8 @@ class VideoRepository:
 				JOIN video_claims c ON cn.claim_id = c.id
 				WHERE c.video_id = %(video_id)s AND cn.narrative_id = n.id
 			)
-			ORDER BY n.created_at DESC 
+			ORDER BY n.created_at DESC
             """,
             {"video_id": video_id},
         )
-        return [dict(row) for row in await self._session.fetchall()]
+        return [Narrative(**row) for row in await self._session.fetchall()]

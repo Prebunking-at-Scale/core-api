@@ -7,8 +7,8 @@ from psycopg.types.json import Jsonb
 
 from core.analysis import embedding
 from core.errors import ConflictError
-from core.videos.claims.models import Claim
-from core.topics.models import Topic
+from core.models import Claim, Narrative, Topic, Video
+from core.videos.claims.models import EnrichedClaim
 
 
 class ClaimRepository:
@@ -24,7 +24,7 @@ class ClaimRepository:
                 ) VALUES (
                     %(id)s, %(video_id)s, %(claim)s, %(start_time_s)s, %(metadata)s, %(embedding)s
                 )
-                RETURNING *, embedding::real[]
+                RETURNING *
                 """,
                 [
                     x.model_dump()
@@ -45,7 +45,7 @@ class ClaimRepository:
             row = await self._session.fetchone()
             if not row:
                 break
-            added_claims.append(self._create_claim_from_row(row, None, None, None, include_embedding=False))
+            added_claims.append(Claim(**row))
             if not self._session.nextset():
                 break
 
@@ -54,14 +54,14 @@ class ClaimRepository:
     async def get_claims_for_video(self, video_id: UUID) -> list[Claim]:
         await self._session.execute(
             """
-            SELECT *, embedding::real[]
+            SELECT *
             FROM video_claims
             WHERE video_id = %(video_id)s
             ORDER BY start_time_s ASC
             """,
             {"video_id": video_id},
         )
-        return [self._create_claim_from_row(row, None, None, None, include_embedding=False) for row in await self._session.fetchall()]
+        return [Claim(**row) for row in await self._session.fetchall()]
 
     async def delete_video_claims(self, video_id: UUID) -> None:
         await self._session.execute(
@@ -82,7 +82,7 @@ class ClaimRepository:
                 metadata = metadata || %(metadata)s,
                 updated_at = now()
             WHERE id = %(claim_id)s
-            RETURNING *, embedding::real[]
+            RETURNING *
             """,
             {"claim_id": claim_id, "metadata": Jsonb(metadata)},
         )
@@ -107,14 +107,14 @@ class ClaimRepository:
             {"video_id": video_id},
         )
         return (await self._session.fetchone()) is not None
-    
+
     async def get_claims_by_topic(
         self, topic_id: UUID, limit: int = 100, offset: int = 0
-    ) -> tuple[list[Claim], int]:
+    ) -> tuple[list[EnrichedClaim], int]:
         # Get total count
         await self._session.execute(
             """
-            SELECT COUNT(DISTINCT c.id) 
+            SELECT COUNT(DISTINCT c.id)
             FROM video_claims c
             JOIN claim_topics ct ON c.id = ct.claim_id
             WHERE ct.topic_id = %(topic_id)s
@@ -123,7 +123,7 @@ class ClaimRepository:
         )
         total_row = await self._session.fetchone()
         total = total_row["count"] if total_row else 0
-        
+
         # Get claims
         await self._session.execute(
             """
@@ -136,16 +136,22 @@ class ClaimRepository:
             """,
             {"topic_id": topic_id, "limit": limit, "offset": offset},
         )
-        
+
         claims = []
         for row in await self._session.fetchall():
             topics = await self._get_claim_topics(row["id"])
-            video = await self._get_video_info(row["video_id"]) if row.get("video_id") else None
+            video = (
+                await self._get_video_info(row["video_id"])
+                if row.get("video_id")
+                else None
+            )
             narratives = await self._get_claim_narratives(row["id"])
-            claims.append(self._create_claim_from_row(row, topics, video, narratives, include_embedding=False))
-        
+            claims.append(
+                EnrichedClaim(topics=topics, video=video, narratives=narratives, **row)
+            )
+
         return claims, total
-    
+
     async def _get_claim_topics(self, claim_id: UUID) -> list[Topic]:
         await self._session.execute(
             """
@@ -158,8 +164,8 @@ class ClaimRepository:
             {"claim_id": claim_id},
         )
         return [Topic(**row) for row in await self._session.fetchall()]
-    
-    async def _get_claim_narratives(self, claim_id: UUID) -> list[dict]:
+
+    async def _get_claim_narratives(self, claim_id: UUID) -> list[Narrative]:
         await self._session.execute(
             """
             SELECT n.id, n.title, n.description, n.metadata, n.created_at, n.updated_at
@@ -170,12 +176,12 @@ class ClaimRepository:
             """,
             {"claim_id": claim_id},
         )
-        return [dict(row) for row in await self._session.fetchall()]
-    
-    async def _get_video_info(self, video_id: UUID) -> dict | None:
+        return [Narrative(**row) for row in await self._session.fetchall()]
+
+    async def _get_video_info(self, video_id: UUID) -> Video | None:
         await self._session.execute(
             """
-            SELECT id, title, description, platform, source_url, channel, 
+            SELECT id, title, description, platform, source_url, channel,
                    uploaded_at, views, likes, comments, metadata
             FROM videos
             WHERE id = %(video_id)s
@@ -183,51 +189,22 @@ class ClaimRepository:
             {"video_id": video_id},
         )
         row = await self._session.fetchone()
-        return dict(row) if row else None
-    
-    def _create_claim_from_row(self, row: DictRow, topics: list[Topic] | None = None, 
-                              video: dict | None = None, narratives: list[dict] | None = None,
-                              include_embedding: bool = True) -> Claim:
-        """Helper method to create a Claim from a database row, handling embedding field properly."""
-        claim_data = dict(row)
-        
-        # Exclude embedding if not needed
-        if not include_embedding:
-            claim_data.pop("embedding", None)
-        else:
-            # Handle embedding field - it might come as a string from the database
-            if claim_data.get("embedding") and isinstance(claim_data["embedding"], str):
-                import json
-                try:
-                    claim_data["embedding"] = json.loads(claim_data["embedding"])
-                except:
-                    claim_data["embedding"] = None
-        
-        if topics is not None:
-            claim_data["topics"] = topics
-        
-        if video is not None:
-            claim_data["video"] = video
-            
-        if narratives is not None:
-            claim_data["narratives"] = narratives
-        
-        return Claim(**claim_data)
-    
+        return Video(**row) if row else None
+
     async def get_all_claims(
         self, limit: int = 100, offset: int = 0, topic_id: UUID | None = None
-    ) -> tuple[list[Claim], int]:
+    ) -> tuple[list[EnrichedClaim], int]:
         # Build the query conditionally
         where_clause = ""
-        params = {"limit": limit, "offset": offset}
-        
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+
         if topic_id:
             where_clause = "WHERE ct.topic_id = %(topic_id)s"
             params["topic_id"] = topic_id
-        
+
         # Get total count
         count_query = f"""
-            SELECT COUNT(DISTINCT c.id) 
+            SELECT COUNT(DISTINCT c.id)
             FROM video_claims c
             {"JOIN claim_topics ct ON c.id = ct.claim_id" if topic_id else ""}
             {where_clause}
@@ -235,7 +212,7 @@ class ClaimRepository:
         await self._session.execute(count_query, params)
         total_row = await self._session.fetchone()
         total = total_row["count"] if total_row else 0
-        
+
         # Get claims
         claims_query = f"""
             SELECT DISTINCT c.*
@@ -246,16 +223,22 @@ class ClaimRepository:
             LIMIT %(limit)s OFFSET %(offset)s
         """
         await self._session.execute(claims_query, params)
-        
+
         claims = []
         for row in await self._session.fetchall():
             topics = await self._get_claim_topics(row["id"])
-            video = await self._get_video_info(row["video_id"]) if row.get("video_id") else None
+            video = (
+                await self._get_video_info(row["video_id"])
+                if row.get("video_id")
+                else None
+            )
             narratives = await self._get_claim_narratives(row["id"])
-            claims.append(self._create_claim_from_row(row, topics, video, narratives, include_embedding=False))
-        
+            claims.append(
+                EnrichedClaim(topics=topics, video=video, narratives=narratives, **row)
+            )
+
         return claims, total
-    
+
     async def associate_topics_with_claim(
         self, claim_id: UUID, topic_ids: list[UUID]
     ) -> None:
@@ -267,7 +250,7 @@ class ClaimRepository:
             """,
             {"claim_id": claim_id},
         )
-        
+
         # Then add new associations
         if topic_ids:
             await self._session.executemany(
@@ -280,8 +263,8 @@ class ClaimRepository:
                     for topic_id in topic_ids
                 ],
             )
-    
-    async def get_claim_by_id(self, claim_id: UUID) -> Claim | None:
+
+    async def get_claim_by_id(self, claim_id: UUID) -> EnrichedClaim | None:
         await self._session.execute(
             """
             SELECT * FROM video_claims
@@ -292,8 +275,10 @@ class ClaimRepository:
         row = await self._session.fetchone()
         if not row:
             return None
-        
+
         topics = await self._get_claim_topics(claim_id)
-        video = await self._get_video_info(row["video_id"]) if row.get("video_id") else None
+        video = (
+            await self._get_video_info(row["video_id"]) if row.get("video_id") else None
+        )
         narratives = await self._get_claim_narratives(claim_id)
-        return self._create_claim_from_row(row, topics, video, narratives, include_embedding=False)
+        return EnrichedClaim(topics=topics, video=video, narratives=narratives, **row)

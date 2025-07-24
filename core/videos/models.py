@@ -1,65 +1,19 @@
-from datetime import datetime
-from typing import Annotated, Any
-from uuid import UUID, uuid4
+from typing import Annotated
+from uuid import UUID
 
 import annotated_types
 from litestar.dto import DTOConfig
 from litestar.plugins.pydantic import PydanticDTO
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
+from core.models import Narrative, Transcript, Video
 from core.videos.claims.models import VideoClaims
-from core.videos.transcripts.models import Transcript
 
 
-class Video(BaseModel):
-    id: UUID = Field(default_factory=uuid4)
-    title: str
-    description: str
-    platform: str
-    source_url: str
-    destination_path: str
-    uploaded_at: datetime | None
-    views: int | None = None
-    likes: int | None = None
-    comments: int | None = None
-    channel: str | None = None
-    channel_followers: int | None = None
-    scrape_topic: str | None = None
-    scrape_keyword: str | None = None
-    embedding: list[float] | None = None
-    metadata: dict[str, Any] = {}
-
-
-class VideoResponse(BaseModel):
-    """Response model for videos without embeddings"""
-    id: UUID
-    title: str
-    description: str
-    platform: str
-    source_url: str
-    destination_path: str
-    uploaded_at: datetime | None
-    views: int | None = None
-    likes: int | None = None
-    comments: int | None = None
-    channel: str | None = None
-    channel_followers: int | None = None
-    scrape_topic: str | None = None
-    scrape_keyword: str | None = None
-    metadata: dict[str, Any] = {}
-
-
-class AnalysedVideo(VideoResponse):
+class AnalysedVideo(Video):
     transcript: Transcript | None = None
     claims: VideoClaims | None = None
-    narratives: list[Any] = Field(default_factory=list)
-
-
-class AnalysedVideoWithEmbedding(Video):
-    """Response model for individual video with embeddings included"""
-    transcript: Transcript | None = None
-    claims: VideoClaims | None = None
-    narratives: list[Any] = Field(default_factory=list)
+    narratives: list[Narrative] = []
 
 
 class VideoPatch(PydanticDTO[Video]):

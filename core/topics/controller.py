@@ -7,13 +7,13 @@ from litestar.dto import DTOData
 from litestar.exceptions import NotFoundException
 
 from core.errors import ConflictError
-from core.response import JSON, PaginatedJSON
-from core.uow import ConnectionFactory
-from core.narratives.models import Narrative
+from core.models import Narrative, Topic
 from core.narratives.service import NarrativeService
-from core.topics.models import Topic, TopicDTO, TopicWithStats
+from core.response import JSON, PaginatedJSON
+from core.topics.models import TopicDTO, TopicWithStats
 from core.topics.service import TopicService
-from core.videos.claims.models import Claim
+from core.uow import ConnectionFactory
+from core.videos.claims.models import EnrichedClaim
 from core.videos.claims.service import ClaimsService
 
 
@@ -93,9 +93,7 @@ class TopicController(Controller):
         limit: int = 100,
         offset: int = 0,
     ) -> JSON[list[Topic]]:
-        return JSON(
-            await topic_service.get_all_topics(limit=limit, offset=offset)
-        )
+        return JSON(await topic_service.get_all_topics(limit=limit, offset=offset))
 
     @get(
         path="/search",
@@ -107,7 +105,7 @@ class TopicController(Controller):
         query: str,
     ) -> JSON[list[Topic]]:
         return JSON(await topic_service.search_topics(query))
-    
+
     @get(
         path="/stats",
         summary="Get all topics with narrative and claim counts",
@@ -178,7 +176,7 @@ class TopicController(Controller):
         topic_id: UUID,
     ) -> None:
         await topic_service.delete_topic(topic_id)
-    
+
     @get(
         path="/{topic_id:uuid}/narratives",
         summary="Get all narratives for a specific topic",
@@ -200,7 +198,7 @@ class TopicController(Controller):
             page=page,
             size=limit,
         )
-    
+
     @get(
         path="/{topic_id:uuid}/claims",
         summary="Get all claims for a specific topic",
@@ -211,7 +209,7 @@ class TopicController(Controller):
         topic_id: UUID,
         limit: int = 100,
         offset: int = 0,
-    ) -> PaginatedJSON[list[Claim]]:
+    ) -> PaginatedJSON[list[EnrichedClaim]]:
         claims, total = await claims_service.get_claims_by_topic(
             topic_id, limit=limit, offset=offset
         )

@@ -4,7 +4,7 @@ from uuid import UUID
 from litestar.dto import DTOData
 
 from core.uow import ConnectionFactory, uow
-from core.videos.claims.models import Claim, VideoClaims
+from core.videos.claims.models import EnrichedClaim, VideoClaims
 from core.videos.claims.repo import ClaimRepository
 
 
@@ -44,40 +44,48 @@ class ClaimsService:
     async def delete_claim(self, claim_id: UUID) -> None:
         async with self.repo() as repo:
             return await repo.delete_claim(claim_id)
-    
+
     async def get_claims_by_topic(
         self, topic_id: UUID, limit: int = 100, offset: int = 0
-    ) -> tuple[list[Claim], int]:
+    ) -> tuple[list[EnrichedClaim], int]:
         async with self.repo() as repo:
             return await repo.get_claims_by_topic(topic_id, limit=limit, offset=offset)
-    
+
     async def get_all_claims(
         self, limit: int = 100, offset: int = 0, topic_id: UUID | None = None
-    ) -> tuple[list[Claim], int]:
+    ) -> tuple[list[EnrichedClaim], int]:
         async with self.repo() as repo:
-            return await repo.get_all_claims(limit=limit, offset=offset, topic_id=topic_id)
-    
+            return await repo.get_all_claims(
+                limit=limit, offset=offset, topic_id=topic_id
+            )
+
     async def associate_topics_with_claim(
         self, claim_id: UUID, topic_ids: list[UUID]
     ) -> None:
         async with self.repo() as repo:
             await repo.associate_topics_with_claim(claim_id, topic_ids)
-    
+
     async def update_claim_associations(
-        self, claim_id: UUID, topic_ids: list[UUID], entity_ids: list[UUID] | None = None
-    ) -> Claim:
+        self,
+        claim_id: UUID,
+        topic_ids: list[UUID],
+        entity_ids: list[UUID] | None = None,
+    ) -> EnrichedClaim:
         async with self.repo() as repo:
             # Check if claim exists
             claim = await repo.get_claim_by_id(claim_id)
             if not claim:
                 raise ValueError(f"Claim with ID {claim_id} not found")
-            
+
             # Update topic associations
             await repo.associate_topics_with_claim(claim_id, topic_ids)
-            
+
             # TODO: When entities are implemented, update entity associations here
             # if entity_ids is not None:
             #     await repo.associate_entities_with_claim(claim_id, entity_ids)
-            
+
             # Return updated claim with new associations
-            return await repo.get_claim_by_id(claim_id)
+            claim = await repo.get_claim_by_id(claim_id)
+            if not claim:
+                raise ValueError(f"Claim with ID {claim_id} not found")
+            return claim
