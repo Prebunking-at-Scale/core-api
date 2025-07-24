@@ -7,7 +7,7 @@ from litestar.dto import DTOData
 from litestar.exceptions import NotFoundException
 
 from core.errors import ConflictError
-from core.models import Claim, Narrative, Topic
+from core.models import Narrative, Topic
 from core.narratives.service import NarrativeService
 from core.response import JSON, PaginatedJSON
 from core.topics.models import TopicDTO, TopicWithStats
