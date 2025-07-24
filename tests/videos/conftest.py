@@ -5,9 +5,8 @@ from litestar.testing import AsyncTestClient
 from polyfactory.factories.pydantic_factory import ModelFactory
 from pytest import fixture
 
+from core.models import Transcript, Video
 from core.videos.claims.models import VideoClaims
-from core.videos.models import Video
-from core.videos.transcripts.models import Transcript
 
 
 class VideoFactory(ModelFactory[Video]):

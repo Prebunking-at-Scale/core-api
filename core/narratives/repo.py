@@ -6,10 +6,7 @@ from psycopg.rows import DictRow
 from psycopg.types.json import Jsonb
 
 from core.errors import ConflictError
-from core.narratives.models import Narrative
-from core.topics.models import Topic
-from core.videos.claims.models import Claim
-from core.videos.models import Video
+from core.models import Claim, Narrative, Topic, Video
 
 
 class NarrativeRepository:
@@ -112,7 +109,9 @@ class NarrativeRepository:
             claims = await self._get_narrative_claims(row["id"])
             topics = await self._get_narrative_topics(row["id"])
             videos = await self._get_narrative_videos(row["id"])
-            narratives.append(Narrative(**row, claims=claims, topics=topics, videos=videos))
+            narratives.append(
+                Narrative(**row, claims=claims, topics=topics, videos=videos)
+            )
 
         return narratives
 
@@ -134,7 +133,9 @@ class NarrativeRepository:
             claims = await self._get_narrative_claims(row["id"])
             topics = await self._get_narrative_topics(row["id"])
             videos = await self._get_narrative_videos(row["id"])
-            narratives.append(Narrative(**row, claims=claims, topics=topics, videos=videos))
+            narratives.append(
+                Narrative(**row, claims=claims, topics=topics, videos=videos)
+            )
 
         return narratives
 
@@ -266,7 +267,6 @@ class NarrativeRepository:
         claims = []
         for row in await self._session.fetchall():
             claim_data = dict(row)
-            claim_data['embedding'] = None
             claims.append(Claim(**claim_data))
         return claims
 
@@ -286,9 +286,9 @@ class NarrativeRepository:
     async def _get_narrative_videos(self, narrative_id: UUID) -> list[Video]:
         await self._session.execute(
             """
-            SELECT DISTINCT v.id, v.title, v.description, v.platform, v.source_url, 
-                   v.destination_path, v.uploaded_at, v.views, v.likes, v.comments, 
-                   v.channel, v.channel_followers, v.scrape_topic, v.scrape_keyword, 
+            SELECT DISTINCT v.id, v.title, v.description, v.platform, v.source_url,
+                   v.destination_path, v.uploaded_at, v.views, v.likes, v.comments,
+                   v.channel, v.channel_followers, v.scrape_topic, v.scrape_keyword,
                    v.metadata, v.created_at, v.updated_at
             FROM videos v
             JOIN video_claims c ON v.id = c.video_id
@@ -302,14 +302,13 @@ class NarrativeRepository:
         videos = []
         for row in rows:
             video_data = dict(row)
-            video_data['embedding'] = None  # Exclude embedding data
             videos.append(Video(**video_data))
         return videos
 
     async def claims_exist(self, claim_ids: list[UUID]) -> bool:
         if not claim_ids:
             return True
-        
+
         await self._session.execute(
             """
             SELECT COUNT(*) as count FROM video_claims WHERE id = ANY(%(claim_ids)s)
@@ -318,14 +317,14 @@ class NarrativeRepository:
         )
         row = await self._session.fetchone()
         return row["count"] == len(claim_ids)
-    
+
     async def get_narratives_by_topic(
         self, topic_id: UUID, limit: int = 100, offset: int = 0
     ) -> tuple[list[Narrative], int]:
         # Get total count
         await self._session.execute(
             """
-            SELECT COUNT(DISTINCT n.id) 
+            SELECT COUNT(DISTINCT n.id)
             FROM narratives n
             JOIN narrative_topics nt ON n.id = nt.narrative_id
             WHERE nt.topic_id = %(topic_id)s
@@ -334,7 +333,7 @@ class NarrativeRepository:
         )
         total_row = await self._session.fetchone()
         total = total_row["count"] if total_row else 0
-        
+
         # Get narratives
         await self._session.execute(
             """
@@ -352,10 +351,12 @@ class NarrativeRepository:
             claims = await self._get_narrative_claims(row["id"])
             topics = await self._get_narrative_topics(row["id"])
             videos = await self._get_narrative_videos(row["id"])
-            narratives.append(Narrative(**row, claims=claims, topics=topics, videos=videos))
-        
+            narratives.append(
+                Narrative(**row, claims=claims, topics=topics, videos=videos)
+            )
+
         return narratives, total
-    
+
     async def get_viral_narratives(
         self, limit: int = 100, offset: int = 0, hours: int = 24
     ) -> list[Narrative]:
@@ -363,7 +364,7 @@ class NarrativeRepository:
         await self._session.execute(
             """
             WITH recent_narrative_views AS (
-                SELECT 
+                SELECT
                     n.id as narrative_id,
                     n.title,
                     n.description,
@@ -378,7 +379,7 @@ class NarrativeRepository:
                 WHERE v.updated_at >= NOW() - (%(hours)s || ' hours')::INTERVAL
                 GROUP BY n.id, n.title, n.description, n.metadata, n.created_at, n.updated_at
             )
-            SELECT 
+            SELECT
                 narrative_id as id,
                 title,
                 description,
@@ -393,21 +394,23 @@ class NarrativeRepository:
             {"limit": limit, "offset": offset, "hours": hours},
         )
         rows = await self._session.fetchall()
-        
+
         narratives = []
         for row in rows:
             narrative_data = dict(row)
             # Remove total_views from the dict as it's not part of the Narrative model
-            narrative_data.pop('total_views', None)
-            
+            narrative_data.pop("total_views", None)
+
             claims = await self._get_narrative_claims(narrative_data["id"])
             topics = await self._get_narrative_topics(narrative_data["id"])
             videos = await self._get_narrative_videos(narrative_data["id"])
-            
-            narratives.append(Narrative(**narrative_data, claims=claims, topics=topics, videos=videos))
-        
+
+            narratives.append(
+                Narrative(**narrative_data, claims=claims, topics=topics, videos=videos)
+            )
+
         return narratives
-    
+
     async def get_prevalent_narratives(
         self, limit: int = 100, offset: int = 0, hours: int = 24
     ) -> list[Narrative]:
@@ -415,7 +418,7 @@ class NarrativeRepository:
         await self._session.execute(
             """
             WITH narrative_video_counts AS (
-                SELECT 
+                SELECT
                     n.id as narrative_id,
                     n.title,
                     n.description,
@@ -430,7 +433,7 @@ class NarrativeRepository:
                 WHERE v.updated_at >= NOW() - (%(hours)s || ' hours')::INTERVAL
                 GROUP BY n.id, n.title, n.description, n.metadata, n.created_at, n.updated_at
             )
-            SELECT 
+            SELECT
                 narrative_id as id,
                 title,
                 description,
@@ -445,17 +448,19 @@ class NarrativeRepository:
             {"limit": limit, "offset": offset, "hours": hours},
         )
         rows = await self._session.fetchall()
-        
+
         narratives = []
         for row in rows:
             narrative_data = dict(row)
             # Remove video_count from the dict as it's not part of the Narrative model
-            narrative_data.pop('video_count', None)
-            
+            narrative_data.pop("video_count", None)
+
             claims = await self._get_narrative_claims(narrative_data["id"])
             topics = await self._get_narrative_topics(narrative_data["id"])
             videos = await self._get_narrative_videos(narrative_data["id"])
-            
-            narratives.append(Narrative(**narrative_data, claims=claims, topics=topics, videos=videos))
-        
+
+            narratives.append(
+                Narrative(**narrative_data, claims=claims, topics=topics, videos=videos)
+            )
+
         return narratives

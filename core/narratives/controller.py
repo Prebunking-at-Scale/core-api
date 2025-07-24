@@ -6,10 +6,11 @@ from litestar.di import Provide
 from litestar.exceptions import NotFoundException
 
 from core.errors import ConflictError
+from core.models import Narrative
+from core.narratives.models import NarrativeInput
+from core.narratives.service import NarrativeService
 from core.response import JSON, PaginatedJSON
 from core.uow import ConnectionFactory
-from core.narratives.models import Narrative, NarrativeInput
-from core.narratives.service import NarrativeService
 
 
 async def narrative_service(
@@ -61,13 +62,12 @@ class NarrativeController(Controller):
         limit: int = 100,
         offset: int = 0,
     ) -> PaginatedJSON[list[Narrative]]:
-        narratives, total = await narrative_service.get_all_narratives(limit=limit, offset=offset)
+        narratives, total = await narrative_service.get_all_narratives(
+            limit=limit, offset=offset
+        )
         page = (offset // limit) + 1 if limit > 0 else 1
         return PaginatedJSON(
-            data=narratives,
-            total=total,
-            page=page,
-            size=len(narratives)
+            data=narratives, total=total, page=page, size=len(narratives)
         )
 
     @get(
@@ -91,7 +91,9 @@ class NarrativeController(Controller):
         hours: int = 24,
     ) -> JSON[list[Narrative]]:
         return JSON(
-            await narrative_service.get_viral_narratives(limit=limit, offset=offset, hours=hours)
+            await narrative_service.get_viral_narratives(
+                limit=limit, offset=offset, hours=hours
+            )
         )
 
     @get(
@@ -106,7 +108,9 @@ class NarrativeController(Controller):
         hours: int = 24,
     ) -> JSON[list[Narrative]]:
         return JSON(
-            await narrative_service.get_prevalent_narratives(limit=limit, offset=offset, hours=hours)
+            await narrative_service.get_prevalent_narratives(
+                limit=limit, offset=offset, hours=hours
+            )
         )
 
     @patch(

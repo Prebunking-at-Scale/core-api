@@ -4,7 +4,7 @@ from unittest.mock import ANY
 from litestar import Litestar
 from litestar.testing import AsyncTestClient
 
-from core.videos.models import Video
+from core.models import Video
 from tests.videos.conftest import VideoFactory, create_video
 
 
@@ -18,7 +18,7 @@ async def test_add_video(
         json=video_json,
     )
     assert response.status_code == 201
-    assert response.json() == {"data": video_json | {"embedding": ANY}}
+    assert response.json() == {"data": video_json}
 
 
 async def test_get_video(
@@ -30,7 +30,6 @@ async def test_get_video(
     assert response.json() == {
         "data": video.model_dump(mode="json")
         | {
-            "embedding": ANY,
             "transcript": ANY,
             "claims": ANY,
             "narratives": ANY,
@@ -75,7 +74,7 @@ async def test_update_video(
     )
     assert update_response.status_code == 200
     assert update_response.json() == {
-        "data": video.model_dump(mode="json") | updated_fields | {"embedding": ANY}
+        "data": video.model_dump(mode="json") | updated_fields
     }
 
 
@@ -96,7 +95,6 @@ async def test_filter_cursor(
     videos = []
     for _ in range(5):
         video = (await create_video(api_key_client)).model_dump(mode="json")
-        video["embedding"] = ANY
         videos.append(video)
     videos = videos[::-1]
 
