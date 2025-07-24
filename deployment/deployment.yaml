@@ -50,11 +50,20 @@ spec:
                 secretKeyRef:
                   name: db
                   key: password
+            - name: NARRATIVES_BASE_ENDPOINT
+              value: https://pas-narratives.fundacionmaldita.es
+            - name: APP_BASE_URL
+              value: https://pas-dev.fullfact.org
             - name: API_KEYS
               valueFrom:
                 secretKeyRef:
                   name: core-api-keys
                   key: keys
+            - name: NARRATIVES_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: narratives
+                  key: api-key
             - name: GEMINI_PROJECT
               value: pas-development-1
             - name: GEMINI_LOCATION

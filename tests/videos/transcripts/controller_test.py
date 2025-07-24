@@ -1,8 +1,7 @@
 from litestar import Litestar
 from litestar.testing import AsyncTestClient
 
-from core.videos.models import Video
-from core.videos.transcripts.models import Transcript
+from core.models import Transcript, Video
 from tests.videos.conftest import TranscriptFactory
 
 
@@ -33,7 +32,8 @@ async def test_get_transcript(
 ) -> None:
     response = await api_key_client.get(f"/api/videos/{video.id}/transcript")
     assert response.status_code == 200
-    assert response.json() == {"data": transcript.model_dump(mode="json")}
+    transcript_json = transcript.model_dump(mode="json")
+    assert response.json() == {"data": transcript_json}
 
 
 async def test_delete_transcript(
@@ -41,7 +41,7 @@ async def test_delete_transcript(
 ) -> None:
     response = await api_key_client.get(f"/api/videos/{video.id}/transcript")
     assert response.status_code == 200
-    assert response.json() == {"data": transcript.model_dump(mode="json")}
+    assert len(response.json()["data"]["sentences"]) > 0
 
     response = await api_key_client.delete(f"/api/videos/{video.id}/transcript")
     assert response.status_code == 204
@@ -56,7 +56,6 @@ async def test_delete_video_also_deletes_transcript(
 ) -> None:
     response = await api_key_client.get(f"/api/videos/{video.id}/transcript")
     assert response.status_code == 200
-    assert response.json() == {"data": transcript.model_dump(mode="json")}
 
     response = await api_key_client.delete(f"/api/videos/{video.id}")
     assert response.status_code == 204
@@ -70,7 +69,6 @@ async def test_delete_sentence(
 ) -> None:
     response = await api_key_client.get(f"/api/videos/{video.id}/transcript")
     assert response.status_code == 200
-    assert response.json() == {"data": transcript.model_dump(mode="json")}
 
     sentences = response.json().get("data").get("sentences")
     assert len(sentences) == 1

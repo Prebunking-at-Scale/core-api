@@ -1,16 +1,16 @@
-from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from litestar.dto import DTOConfig
 from litestar.plugins.pydantic import PydanticDTO
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+
+from core.models import Claim, Narrative, Topic, Video
 
 
-class Claim(BaseModel):
-    id: UUID = Field(default_factory=uuid4)
-    claim: str  # The claim made in the video
-    start_time_s: float  # When in the video the claim starts
-    metadata: dict[str, Any] = {}  # Additional metadata about the claim
+class EnrichedClaim(Claim):
+    topics: list[Topic] = []  # Associated topics
+    video: Video | None = None  # Video information
+    narratives: list[Narrative] = []  # Associated narratives
 
 
 class VideoClaims(BaseModel):
@@ -22,5 +22,12 @@ class VideoClaimsDTO(PydanticDTO[VideoClaims]):
     config = DTOConfig(
         exclude={
             "video_id",
+            "claims.*.created_at",
+            "claims.*.updated_at",
         },
     )
+
+
+class ClaimUpdate(BaseModel):
+    entities: list[UUID] = []  # Future entity IDs
+    topics: list[UUID] = []  # Topic IDs to associate

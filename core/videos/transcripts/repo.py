@@ -7,7 +7,7 @@ from psycopg.types.json import Jsonb
 
 from core.analysis import embedding
 from core.errors import ConflictError
-from core.videos.transcripts.models import TranscriptSentence
+from core.models import TranscriptSentence
 
 
 class TranscriptRepository:

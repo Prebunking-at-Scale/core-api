@@ -1,7 +1,9 @@
 import logging
 import os
+from urllib.parse import urljoin
 from uuid import UUID
 
+import httpx
 from harmful_claim_finder.transcript_inference import get_claims
 from harmful_claim_finder.utils.models import (
     TranscriptSentence as HarmfulClaimFinderSentence,
@@ -12,19 +14,29 @@ from litestar.datastructures import State
 from litestar.di import Provide
 from litestar.dto import DTOData
 from litestar.exceptions import NotFoundException
+from litestar.params import Parameter
 
 from core.analysis import genai
 from core.errors import ConflictError
-from core.response import JSON, CursorJSON
-from core.videos.claims.models import Claim, VideoClaims
+from core.models import Claim, Transcript, TranscriptSentence, Video
+from core.narratives.service import NarrativeService
+from core.response import JSON, CursorJSON, PaginatedJSON
+from core.videos.claims.models import VideoClaims
 from core.videos.claims.service import ClaimsService
-from core.videos.models import AnalysedVideo, Video, VideoFilters, VideoPatch
+from core.videos.models import (
+    AnalysedVideo,
+    VideoFilters,
+    VideoPatch,
+)
 from core.videos.pastel import COUNTRIES, KEYWORDS
 from core.videos.service import VideoService
-from core.videos.transcripts.models import Transcript, TranscriptSentence
 from core.videos.transcripts.service import TranscriptService
 
 log = logging.getLogger(__name__)
+
+narratives_base_url = os.environ.get("NARRATIVES_BASE_ENDPOINT")
+narratives_api_key = os.environ.get("NARRATIVES_API_KEY")
+app_base_url = os.environ.get("APP_BASE_URL")
 
 
 async def video_service(state: State) -> VideoService:
@@ -37,6 +49,10 @@ async def transcript_service(state: State) -> TranscriptService:
 
 async def claims_service(state: State) -> ClaimsService:
     return ClaimsService(state.connection_factory)
+
+
+async def narrative_service(state: State) -> NarrativeService:
+    return NarrativeService(state.connection_factory)
 
 
 async def extract_transcript_and_claims(
@@ -75,6 +91,64 @@ async def extract_transcript_and_claims(
         f"finished processing {video.source_url}, got {len(sentences)} sentences and {len(claims)} claims."
     )
 
+    # Send video to narratives API for analysis
+    if claims:
+        await analyze_for_narratives(video, video_claims)
+
+
+async def analyze_for_narratives(video: Video, video_claims: VideoClaims) -> None:
+    """Send video claims to the narratives API for analysis."""
+
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        # We don't want to run this during tests
+        return
+
+    if not narratives_base_url or not narratives_api_key:
+        log.warning("Narratives API configuration missing, skipping narrative analysis")
+        return
+
+    if not app_base_url:
+        log.warning("APP_BASE_URL not configured, skipping narrative analysis")
+        return
+
+    claims_data = []
+    for claim in video_claims.claims:
+        claims_data.append({
+            "id": str(claim.id),
+            "claim": claim.claim,
+            "video_id": str(video.id),
+            "claim_api_url": urljoin(
+                app_base_url, "/api/videos/{video_id}/claims/{claim_id}"
+            ),
+        })
+
+    payload = {
+        "claims": claims_data,
+        "narratives_api_url": urljoin(app_base_url, "/api/narratives"),
+    }
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            url = f"{narratives_base_url}/add-contents"
+
+            response = await client.post(
+                url, json=payload, headers={"X-API-TOKEN": narratives_api_key}
+            )
+
+            log.info(f"Received response: {response.status_code}")
+
+            if response.status_code == 202:
+                log.debug(
+                    f"Successfully sent {len(claims_data)} claims to narratives API"
+                )
+            else:
+                log.error(
+                    f"Failed to analyze claims: {response.status_code} - {response.text}"
+                )
+
+        except Exception as e:
+            log.error(f"Error sending claims to narratives API: {e}", exc_info=True)
+
 
 class VideoController(Controller):
     path = "/videos"
@@ -84,6 +158,7 @@ class VideoController(Controller):
         "video_service": Provide(video_service),
         "transcript_service": Provide(transcript_service),
         "claims_service": Provide(claims_service),
+        "narrative_service": Provide(narrative_service),
     }
 
     @post(
@@ -107,6 +182,51 @@ class VideoController(Controller):
         )
 
     @get(
+        path="/",
+        summary="Get a paginated list of videos with optional filters",
+    )
+    async def list_videos(
+        self,
+        video_service: VideoService,
+        transcript_service: TranscriptService,
+        claims_service: ClaimsService,
+        platform: list[str] | None = Parameter(None, query="platform"),
+        channel: list[str] | None = Parameter(None, query="channel"),
+        limit: int = Parameter(25, query="limit", gt=0, le=100),
+        offset: int = Parameter(0, query="offset", ge=0),
+    ) -> PaginatedJSON[list[AnalysedVideo]]:
+        videos, total = await video_service.get_videos_paginated(
+            limit=limit,
+            offset=offset,
+            platform=platform,
+            channel=channel,
+        )
+
+        # Fetch claims and narratives for each video
+        analysed_videos = []
+        for video in videos:
+            transcript = await transcript_service.get_transcript_for_video(video.id)
+            claims = await claims_service.get_claims_for_video(video.id)
+            narratives = await video_service.get_narratives_for_video(video.id)
+
+            analysed_videos.append(
+                AnalysedVideo(
+                    **video.model_dump(),
+                    transcript=transcript,
+                    claims=claims,
+                    narratives=narratives,
+                )
+            )
+
+        page = (offset // limit) + 1 if limit > 0 else 1
+        return PaginatedJSON(
+            data=analysed_videos,
+            total=total,
+            page=page,
+            size=limit,
+        )
+
+    @get(
         path="/{video_id:uuid}",
         summary="Get a video by ID",
     )
@@ -122,12 +242,14 @@ class VideoController(Controller):
             raise NotFoundException()
         transcript = await transcript_service.get_transcript_for_video(video_id)
         claims = await claims_service.get_claims_for_video(video_id)
+        narratives = await video_service.get_narratives_for_video(video_id)
 
         return JSON(
             AnalysedVideo(
                 **video.model_dump(),
                 transcript=transcript,
                 claims=claims,
+                narratives=narratives,
             )
         )
 

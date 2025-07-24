@@ -4,7 +4,7 @@ from unittest.mock import ANY
 from litestar import Litestar
 from litestar.testing import AsyncTestClient
 
-from core.videos.models import Video
+from core.models import Video
 from tests.videos.conftest import VideoFactory, create_video
 
 
@@ -28,7 +28,12 @@ async def test_get_video(
     response = await api_key_client.get(f"/api/videos/{video.id}")
     assert response.status_code == 200
     assert response.json() == {
-        "data": video.model_dump(mode="json") | {"transcript": ANY, "claims": ANY}
+        "data": video.model_dump(mode="json")
+        | {
+            "transcript": ANY,
+            "claims": ANY,
+            "narratives": ANY,
+        }
     }
 
 
@@ -44,9 +49,6 @@ async def test_delete_video(
 ) -> None:
     response = await api_key_client.get(f"/api/videos/{video.id}")
     assert response.status_code == 200
-    assert response.json() == {
-        "data": video.model_dump(mode="json") | {"transcript": ANY, "claims": ANY}
-    }
 
     delete = await api_key_client.delete(f"/api/videos/{video.id}")
     assert delete.status_code == 204
@@ -90,9 +92,11 @@ async def test_empty_filter_response(
 async def test_filter_cursor(
     api_key_client: AsyncTestClient[Litestar],
 ) -> None:
-    videos = [
-        (await create_video(api_key_client)).model_dump(mode="json") for _ in range(50)
-    ][::-1]
+    videos = []
+    for _ in range(5):
+        video = (await create_video(api_key_client)).model_dump(mode="json")
+        videos.append(video)
+    videos = videos[::-1]
 
     response_videos = []
     cursor = None

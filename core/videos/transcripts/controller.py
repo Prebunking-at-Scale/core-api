@@ -7,12 +7,10 @@ from litestar.dto import DTOData
 from litestar.exceptions import NotFoundException
 
 from core.errors import ConflictError
+from core.models import Transcript
 from core.response import JSON
 from core.uow import ConnectionFactory
-from core.videos.transcripts.models import (
-    Transcript,
-    TranscriptDTO,
-)
+from core.videos.transcripts.models import TranscriptDTO
 from core.videos.transcripts.service import TranscriptService
 
 
