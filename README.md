@@ -25,7 +25,7 @@ You'll need `uv` installed to start the actual API. Follow instructions to do [t
 
 Once `uv` is installed, you can install the various Python packages with:
 ```bash
-do su
+uv sync
 ```
 
 and start the development server with
