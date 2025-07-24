@@ -30,4 +30,3 @@ async def api_key_guard(
 ) -> None:
     if connection.headers.get(API_KEY_HEADER, "") in VALID_API_KEYS:
         return
-    raise NotAuthorizedException(detail="could not validate API key", status_code=403)

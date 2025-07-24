@@ -69,20 +69,21 @@ async def migrate(
             return
 
         for i in range(initial_version + offset, target_version + offset, change):
-            script = _get_migration_script(i, direction)
-            log.info(f"Running migration {i} {direction}...")
-            await (await conn.execute(script)).close()
-            current_version = i if direction == "up" else i - 1
-            log.info(f"Current version: {current_version}")
-            await (
-                await conn.execute(
-                    "INSERT INTO migrations (version, direction) VALUES (%s, %s);",
-                    (current_version, direction),
-                )
-            ).close()
+            scripts = _get_migration_script(i, direction)
+            for name, script in scripts.items():
+                log.info(f"Running migration {name}: version {i} {direction}...")
+                await (await conn.execute(script)).close()
+                current_version = i if direction == "up" else i - 1
+                log.info(f"Current version: {current_version}")
+                await (
+                    await conn.execute(
+                        "INSERT INTO migrations (version, direction) VALUES (%s, %s);",
+                        (current_version, direction),
+                    )
+                ).close()
 
 
-def _get_migration_script(version: int, direction: str) -> bytes:
+def _get_migration_script(version: int, direction: str) -> dict[str, bytes]:
     search_path = Path.joinpath(
         Path(__file__).parent.resolve(), "migrations", f"{version}.*{direction}.sql"
     ).as_posix()
@@ -94,9 +95,4 @@ def _get_migration_script(version: int, direction: str) -> bytes:
             f"No migration script found for version {version} and direction {direction}."
         )
 
-    if len(matches) > 1:
-        raise FileNotFoundError(
-            f"Multiple migration scripts found for version {version} and direction {direction}."
-        )
-
-    return Path(matches[0]).read_bytes()
+    return {file: Path(file).read_bytes() for file in matches}

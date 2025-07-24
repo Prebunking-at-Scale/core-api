@@ -11,7 +11,9 @@ from psycopg import AsyncConnection
 from psycopg.rows import DictRow, dict_row
 from psycopg_pool import AsyncConnectionPool
 
-from core.auth import base_guard
+from core.auth import api_token_auth, jwt
+from core.auth.controller import AuthController
+from core.guards import base_guard
 from core.migrate import migrate
 from core.narratives.controller import NarrativeController
 from core.topics.controller import TopicController
@@ -77,6 +79,7 @@ api_router = Router(
     guards=[base_guard],
     security=[{"APIToken": []}],
     route_handlers=[
+        AuthController,
         VideoController,
         TranscriptController,
         ClaimController,
@@ -86,9 +89,14 @@ api_router = Router(
     ],
 )
 
+api_auth = api_token_auth.APITokenAuthMiddleware(jwt.jwt_auth)
 
 app: Litestar = Litestar(
     debug=True,
+    on_app_init=[
+        jwt.jwt_auth.on_app_init,
+        api_auth.on_app_init,
+    ],
     route_handlers=[
         hello_world,
         health,
@@ -98,6 +106,7 @@ app: Litestar = Litestar(
         setup_db,
         perform_migrations,
     ],
+    middleware=[],
     dependencies={
         "connection_factory": Provide(
             lambda: app.state.connection_factory, sync_to_thread=False
@@ -109,7 +118,6 @@ app: Litestar = Litestar(
     plugins=[
         StructlogPlugin(),
     ],
-    middleware=[],
     openapi_config=OpenAPIConfig(
         title="PAS Core API",
         version="0.0.1",
@@ -120,7 +128,7 @@ app: Litestar = Litestar(
                     name="X-API-TOKEN",
                     type="apiKey",
                     security_scheme_in="header",
-                )
+                ),
             },
         ),
     ),
