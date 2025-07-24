@@ -5,6 +5,10 @@ from urllib.parse import urljoin
 from uuid import UUID
 
 import httpx
+from harmful_claim_finder.transcript_inference import get_claims
+from harmful_claim_finder.utils.models import (
+    TranscriptSentence as HarmfulClaimFinderSentence,
+)
 from litestar import Controller, Response, delete, get, patch, post
 from litestar.background_tasks import BackgroundTask
 from litestar.datastructures import State
@@ -27,6 +31,7 @@ from core.videos.models import (
     VideoPatch,
     VideoResponse,
 )
+from core.videos.pastel import COUNTRIES, KEYWORDS
 from core.videos.service import VideoService
 from core.videos.transcripts.models import (
     Transcript,
@@ -91,16 +96,24 @@ async def extract_transcript_and_claims(
 
     result = await genai.generate_transcript(video.source_url)
     sentences = [TranscriptSentence(**x.model_dump()) for x in result]
-    claims = [
-        Claim(**(x.model_dump() | {"claim": x.text})) for x in result if x.is_claim
-    ]
+    claims = await get_claims(
+        keywords=KEYWORDS,
+        sentences=[
+            HarmfulClaimFinderSentence(**(s.model_dump() | {"video_id": video.id}))
+            for s in sentences
+        ],
+        country_codes=COUNTRIES["org"],
+    )  # this list currently needs to be converted to correct format
 
     if sentences:
         transcript = Transcript(video_id=video.id, sentences=sentences)
         await transcript_service.add_transcript(video.id, transcript)
 
     if claims:
-        video_claims = VideoClaims(video_id=video.id, claims=claims)
+        video_claims = VideoClaims(
+            video_id=video.id,
+            claims=[Claim(**claim.model_dump()) for claim in claims],
+        )
         await claims_service.add_claims(video.id, video_claims)
 
     log.info(
