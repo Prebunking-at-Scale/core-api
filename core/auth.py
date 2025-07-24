@@ -15,6 +15,8 @@ async def base_guard(
     if connection.scope.get("method") == "OPTIONS":
         return  # We don't want to perform auth on OPTIONS requests
 
+    print(connection.headers)
+
     if connection.headers.get(API_KEY_HEADER):
         await api_key_guard(connection, route_handler)
 
