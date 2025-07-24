@@ -85,4 +85,7 @@ class ClaimsService:
             #     await repo.associate_entities_with_claim(claim_id, entity_ids)
 
             # Return updated claim with new associations
-            return await repo.get_claim_by_id(claim_id)
+            claim = await repo.get_claim_by_id(claim_id)
+            if not claim:
+                raise ValueError(f"Claim with ID {claim_id} not found")
+            return claim

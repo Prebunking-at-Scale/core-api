@@ -53,8 +53,8 @@ class TopicService:
         async with self.repo() as repo:
             return await repo.update_topic(
                 topic_id=topic_id,
-                topic=data.get("topic"),
-                metadata=data.get("metadata"),
+                topic=data.get("topic"),  # type: ignore
+                metadata=data.get("metadata"),  # type: ignore
             )
 
     async def delete_topic(self, topic_id: UUID) -> None:

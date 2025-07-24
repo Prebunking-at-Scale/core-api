@@ -158,7 +158,7 @@ class NarrativeRepository:
         metadata: dict[str, Any] | None = None,
     ) -> Narrative | None:
         updates = []
-        params = {"narrative_id": narrative_id}
+        params: dict[str, Any] = {"narrative_id": narrative_id}
 
         if title is not None:
             updates.append("title = %(title)s")
@@ -316,6 +316,8 @@ class NarrativeRepository:
             {"claim_ids": claim_ids},
         )
         row = await self._session.fetchone()
+        if not row:
+            return False
         return row["count"] == len(claim_ids)
 
     async def get_narratives_by_topic(
