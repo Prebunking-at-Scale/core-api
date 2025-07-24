@@ -92,7 +92,7 @@ class TopicRepository:
         metadata: dict[str, Any] | None = None,
     ) -> Topic | None:
         updates = []
-        params = {"topic_id": topic_id}
+        params: dict[str, Any] = {"topic_id": topic_id}
 
         if topic is not None:
             updates.append("topic = %(topic)s")

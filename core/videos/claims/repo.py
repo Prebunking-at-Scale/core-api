@@ -196,7 +196,7 @@ class ClaimRepository:
     ) -> tuple[list[EnrichedClaim], int]:
         # Build the query conditionally
         where_clause = ""
-        params = {"limit": limit, "offset": offset}
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
 
         if topic_id:
             where_clause = "WHERE ct.topic_id = %(topic_id)s"

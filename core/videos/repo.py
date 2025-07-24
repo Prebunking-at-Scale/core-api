@@ -1,3 +1,4 @@
+from typing import Any
 from uuid import UUID
 
 import psycopg
@@ -7,7 +8,7 @@ from psycopg.types.json import Jsonb
 
 from core.analysis import embedding
 from core.errors import ConflictError
-from core.models import Video
+from core.models import Narrative, Video
 from core.videos.models import VideoFilters
 
 
@@ -178,7 +179,7 @@ class VideoRepository:
         channel: list[str] | None = None,
     ) -> tuple[list[Video], int]:
         wheres = [sql.SQL("1=1")]
-        params = {"limit": limit, "offset": offset}
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
 
         if platform:
             wheres.append(sql.SQL("platform = ANY(%(platform)s)"))
@@ -197,7 +198,7 @@ class VideoRepository:
         """).format(wheres=where_clause)
 
         await self._session.execute(count_query, params)
-        total = (await self._session.fetchone())["count"]
+        total = (await self._session.fetchone())["count"]  # type: ignore
 
         # Get paginated results
         data_query = sql.SQL("""
@@ -212,7 +213,7 @@ class VideoRepository:
 
         return videos, total
 
-    async def get_narratives_for_video(self, video_id: UUID) -> list[dict]:
+    async def get_narratives_for_video(self, video_id: UUID) -> list[Narrative]:
         """Get all narratives associated with a video through its claims"""
         await self._session.execute(
             """
@@ -226,4 +227,4 @@ class VideoRepository:
             """,
             {"video_id": video_id},
         )
-        return [dict(row) for row in await self._session.fetchall()]
+        return [Narrative(**row) for row in await self._session.fetchall()]

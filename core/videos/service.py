@@ -3,7 +3,7 @@ from uuid import UUID
 
 from litestar.dto import DTOData
 
-from core.models import Video
+from core.models import Narrative, Video
 from core.uow import ConnectionFactory, uow
 from core.videos.models import VideoFilters
 from core.videos.repo import VideoRepository
@@ -50,6 +50,6 @@ class VideoService:
         async with self.repo() as repo:
             return await repo.get_videos_paginated(limit, offset, platform, channel)
 
-    async def get_narratives_for_video(self, video_id: UUID) -> list[dict]:
+    async def get_narratives_for_video(self, video_id: UUID) -> list[Narrative]:
         async with self.repo() as repo:
             return await repo.get_narratives_for_video(video_id)
