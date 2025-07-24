@@ -62,8 +62,8 @@ spec:
             - name: NARRATIVES_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: core-api-keys
-                  key: narratives-api-key
+                  name: narratives
+                  key: api-key
             - name: GEMINI_PROJECT
               value: pas-development-1
             - name: GEMINI_LOCATION
