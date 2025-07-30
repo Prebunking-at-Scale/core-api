@@ -58,7 +58,7 @@ async def generate_transcript(video_url: str) -> list[Sentence]:
     """
 
     response = await client.aio.models.generate_content(
-        model="gemini-2.0-flash-lite",
+        model="gemini-2.5-flash-lite",
         config=GenerateContentConfig(
             safety_settings=DEFAULT_SAFETY_SETTINGS,
             audio_timestamp=True,
