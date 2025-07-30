@@ -1,3 +1,4 @@
+import os
 from typing import Literal
 
 from google import genai
@@ -15,8 +16,8 @@ from pydantic import BaseModel
 
 client = genai.Client(
     vertexai=True,
-    project="pas-development-1",
-    location="europe-west4",
+    project=os.environ["GEMINI_PROJECT"],
+    location=os.environ["GEMINI_LOCATION"],
     http_options=HttpOptions(api_version="v1"),
 )
 
@@ -58,7 +59,7 @@ async def generate_transcript(video_url: str) -> list[Sentence]:
     """
 
     response = await client.aio.models.generate_content(
-        model="gemini-2.5-flash-lite",
+        model=os.environ["GEMINI_MODEL"],
         config=GenerateContentConfig(
             safety_settings=DEFAULT_SAFETY_SETTINGS,
             audio_timestamp=True,
