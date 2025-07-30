@@ -13,6 +13,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  GEMINI_PROJECT: project
+  GEMINI_LOCATION: location
+  GEMINI_MODEL: model
+
 jobs:
   test:
     name: Test

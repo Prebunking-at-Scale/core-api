@@ -69,7 +69,7 @@ spec:
             - name: GEMINI_LOCATION
               value: global
             - name: GEMINI_MODEL
-              value: gemini-2.0-flash-lite-001
+              value: gemini-2.5-flash-lite
         - name: cloud-sql-proxy
           image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.17.1
           args:
