@@ -84,13 +84,13 @@ organisation. This will contain:
 }
 ```
 
-The `token` value is a valid JWT identical that can then be used as though the user had
-performed a login, and is valid for 30 days. If `first_time_setup` is True, then the user
+The `token` value is a JWT and is valid for 30 days and is identical to a token that would
+be returned as part of a normal login flow. If `first_time_setup` is True, then the user
 should be given the ability to set a password using `PATCH /api/auth/user/password`
 and to update their profile (such as display name) using `PATCH /api/auth/user`.
 
 ## Logging In
-Logging in is a 2 set process:
+Logging in is a 2 step process:
 1) Providing an email address and password to be validated
 2) Selecting an organisation (however this can happen automatically if user is only a member of one organisation)
 
