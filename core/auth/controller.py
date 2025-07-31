@@ -1,10 +1,12 @@
-from typing import Any
+from typing import Any, Annotated
 from uuid import UUID
 
 from litestar import Controller, Request, delete, get, patch, post
 from litestar.datastructures import State
 from litestar.di import Provide
 from litestar.dto import DTOData
+from litestar.params import Parameter
+from pydantic import Field
 
 from core.auth.guards import organisation_admin, super_admin
 from core.auth.models import (
@@ -49,6 +51,17 @@ class AuthController(Controller):
             await auth_service.login(data.email, data.password.get_secret_value())
         )
 
+    @get(
+        path="/identity",
+        summary="Get user, organisation and role information for the current session",
+        tags=["auth"],
+    )
+    async def identity(
+        self,
+        request: Request[Identity, AuthToken, Any],
+    ) -> JSON[Identity]:
+        return JSON(request.user)
+
     @post(
         path="/request-password-reset",
         summary="Request an email to reset the users password",
@@ -64,7 +77,7 @@ class AuthController(Controller):
 
     @patch(
         path="/user/password",
-        summary="Update the current users password and issue a new token",
+        summary="Update the current users password",
         tags=["users"],
     )
     async def password_update(
@@ -74,12 +87,12 @@ class AuthController(Controller):
         user: User,
         data: PasswordChange,
     ) -> None:
-        issued_at = None
+        last_update_before = None
         if request.auth.is_password_reset:
-            issued_at = request.auth.iat
+            last_update_before = request.auth.iat
 
         await auth_service.update_password(
-            user, data.new_password.get_secret_value(), issued_at
+            user, data.new_password.get_secret_value(), last_update_before
         )
 
     @get(
@@ -203,7 +216,11 @@ class AuthController(Controller):
         tags=["organisations"],
     )
     async def join_organisation(
-        self, auth_service: AuthService, invite_token: str
+        self,
+        auth_service: AuthService,
+        invite_token: Annotated[
+            str, Field(description="A JWT containing invite claims")
+        ],
     ) -> JSON[LoginOptions]:
         return JSON(await auth_service.accept_invite(invite_token))
 

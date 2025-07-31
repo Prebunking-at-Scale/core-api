@@ -84,20 +84,21 @@ class AuthService:
             if not user or not bcrypt.checkpw(password.encode(), hashed):
                 raise NotAuthorizedError("user does not exist or password incorrect")
 
-            organisations = await repo.organisation_memberships(user.id)
+            organisations, admin_status = await repo.organisation_memberships(user.id)
 
         if not organisations:
             raise NotAuthorizedError("user does not belong to any organisations")
 
         options = LoginOptions(user=user, organisations={})
-        for org in organisations:
+        for org, is_admin in zip(organisations, admin_status):
             options.organisations[org.id] = OrganisationToken(
-                org,
-                self.jwt_auth.create_token(
+                organisation=org,
+                token = self.jwt_auth.create_token(
                     identifier=str(user.id),
                     token_expiration=AUTH_TOKEN_TTL,
-                    organisation_id=org.id,
+                    organisation_id=str(org.id),
                 ),
+                is_organisation_admin=is_admin
             )
 
         return options
@@ -134,13 +135,12 @@ class AuthService:
         auto_accept: bool = False,
     ) -> None:
         async with self.repo() as repo:
-            email = email.strip()
-            user = await repo.get_user_by_email(email)
-
             organisation = await repo.get_organisation(organisation_id)
             if organisation.deactivated is not None:
                 raise ConflictError("cannot invite user to deactivated organisation")
 
+            email = email.strip()
+            user = await repo.get_user_by_email(email)
             if not user:
                 display_name = email.split("@", maxsplit=1)[0]
                 user = await repo.add_user(User(display_name=display_name, email=email))
@@ -173,8 +173,8 @@ class AuthService:
                 raise NotAuthorizedError()
 
             organisation_id = decoded.get("organisation_id")
-            organisation = await repo.get_organisation(organisation_id)
-            await repo.accept_invite(user.id, organisation.id)
+            await repo.accept_invite(user.id, organisation_id)
+            organisation, is_admin = await repo.organisation_and_role(user.id, organisation_id)
 
         return LoginOptions(
             user=user,
@@ -185,10 +185,11 @@ class AuthService:
                         identifier=str(user.id),
                         token_expiration=AUTH_TOKEN_TTL,
                         organisation_id=organisation_id,
-                        needs_password_set=not user.password_last_updated,
                     ),
+                    is_organisation_admin=is_admin,
                 ),
             },
+            first_time_setup=not user.password_last_updated,
         )
 
     async def remove_user(self, user_id: UUID, organisation_id: UUID) -> None:

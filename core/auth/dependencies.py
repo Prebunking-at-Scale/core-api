@@ -17,20 +17,12 @@ def organisation(
     organisation_id: UUID | None = None,
 ) -> Organisation:
     """Although organisation_id is not used here, it has the desirable side effect of
-    making it possible to set organisation_id in the generate documentation.
+    making it possible to set organisation_id in the generated documentation.
     organisation_id is then picked up by the middleware and injected into the
     generated JWT for requests using an API key."""
     if not request.user.organisation:
         raise OrganisationIDRequiredError()
     return request.user.organisation
-
-
-def is_admin(request: Request[Identity, AuthToken, Any]) -> bool:
-    return request.user.is_organisation_admin
-
-
-def is_super_admin(request: Request[Identity, AuthToken, Any]) -> bool:
-    return request.user.user.is_super_admin
 
 
 auth = {

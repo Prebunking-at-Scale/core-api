@@ -21,7 +21,7 @@ class Organisation(BaseModel):
     short_name: Annotated[
         str, Field(pattern=r"^[a-z0-9\-]+$", min_length=2, examples=["fullfact"])
     ]
-    deactivated: Annotated[datetime | None, Field(examples=[None])] = None
+    deactivated: Annotated[datetime | None, Field(exclude=True, examples=[None])] = None
 
 
 class User(BaseModel):
@@ -30,12 +30,10 @@ class User(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     email: Annotated[str, Field(examples=["auto@fullfact.org"])]
     display_name: Annotated[str, Field(min_length=2, examples=["Will Moy"])]
-    password_last_updated: datetime | None = None
+    password_last_updated: Annotated[datetime | None, Field(exclude=True)] = None
     is_super_admin: Annotated[bool, Field(exclude=True)] = False
 
-
-@dataclass
-class Identity:
+class Identity(BaseModel):
     """An identity and roles associated with a specific request. This should
     be used to perform authorization checks for requests that require one"""
 
@@ -74,17 +72,16 @@ class AdminStatus(BaseModel):
     is_admin: bool
 
 
-@dataclass
-class OrganisationToken:
+class OrganisationToken(BaseModel):
     organisation: Organisation
     token: str
+    is_organisation_admin: bool = False
 
 
-@dataclass
-class LoginOptions:
+class LoginOptions(BaseModel):
     user: User
     organisations: dict[UUID, OrganisationToken]
-    needs_password_set: bool = False
+    first_time_setup: bool = False
 
 
 class OrganisationCreateDTO(PydanticDTO[Organisation]):

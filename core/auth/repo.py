@@ -39,7 +39,7 @@ class AuthRepository:
         await self._session.execute(
             """
             UPDATE users SET
-                display_name = %(display_name)s
+                display_name = %(display_name)s,
                 updated_at = now()
             WHERE id = %(id)s
             RETURNING *
@@ -138,9 +138,9 @@ class AuthRepository:
             await self._session.execute(
                 """
                 INSERT INTO organisations (
-                    id, display_name, short_name, country_codes
+                    id, display_name, short_name, language, country_codes
                 ) VALUES (
-                    %(id)s, %(display_name)s, %(short_name)s, %(country_codes)s
+                    %(id)s, %(display_name)s, %(short_name)s, %(language)s, %(country_codes)s
                 )
                 RETURNING *
                 """,
@@ -160,6 +160,7 @@ class AuthRepository:
             UPDATE organisations SET
                 display_name = %(display_name)s,
                 country_codes = %(country_codes)s,
+                language = %(language)s,
                 updated_at = now()
             WHERE id = %(id)s
             RETURNING *
@@ -331,26 +332,37 @@ class AuthRepository:
     async def organisation_memberships(
         self,
         user_id: UUID,
-    ) -> list[Organisation]:
+    ) -> tuple[list[Organisation], list[bool]]:
+        """returns a list of organisations the user is a member of, and their admin
+        admin status"""
         await self._session.execute(
             """
-                SELECT *
-                FROM organisation o
-                WHERE
-                    (SELECT is_super_admin FROM users WHERE user_id = %(user_id)s)
-                    OR EXISTS (
-                        SELECT 1 FROM organisation_users ou
-                        WHERE uo.organisation_id = o.organisation_id
-                        AND uo.user_id = %(user_id)s
-                    )
-
+                WITH is_super_admin AS (
+                    SELECT is_super_admin FROM users
+                    WHERE id = %(user_id)s
+                ), is_organisation_admin AS (
+                    SELECT organisation_id, is_admin
+                    FROM organisation_users ou
+                    WHERE
+                        user_id = %(user_id)s
+                        AND deactivated IS NULL
+                        AND accepted IS NOT NULL
+                )
+                SELECT *, (is_admin or is_super_admin) as is_admin
+                FROM organisations o
+                LEFT OUTER JOIN is_organisation_admin oa ON oa.organisation_id = o.id
+                LEFT OUTER JOIN is_super_admin sa ON TRUE
+                WHERE (is_admin is NOT NULL OR is_super_admin)
             """,
-            {
-                "user_id": user_id,
-            },
+            {"user_id": user_id},
         )
 
-        return [Organisation(**row) for row in await self._session.fetchall()]
+        organisations = []
+        is_admin = []
+        for row in await self._session.fetchall():
+            organisations.append(Organisation(**row))
+            is_admin.append(row["is_admin"])
+        return organisations, is_admin
 
     async def organisation_users(
         self,
