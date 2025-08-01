@@ -1,4 +1,5 @@
 import os
+from typing import Any
 
 from dotenv import load_dotenv
 from litestar import Litestar, Router, get
@@ -11,7 +12,9 @@ from psycopg import AsyncConnection
 from psycopg.rows import DictRow, dict_row
 from psycopg_pool import AsyncConnectionPool
 
-from core.auth import base_guard
+from core.auth import dependencies, middleware
+from core.auth.controller import AuthController
+from core.auth.service import AuthService
 from core.migrate import migrate
 from core.narratives.controller import NarrativeController
 from core.topics.controller import TopicController
@@ -21,7 +24,7 @@ from core.videos.transcripts.controller import TranscriptController
 
 load_dotenv()
 
-MIGRATION_TARGET_VERSION = 9
+MIGRATION_TARGET_VERSION = 10
 DB_HOST = os.environ.get("DATABASE_HOST")
 DB_PORT = os.environ.get("DATABASE_PORT")
 DB_USER = os.environ.get("DATABASE_USER")
@@ -31,9 +34,11 @@ DB_NAME = os.environ.get("DATABASE_NAME")
 
 postgres_url = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
+auth_service = AuthService()
+api_auth = middleware.APITokenAuthMiddleware(auth_service.jwt_auth)
+
 
 def pool_factory(url: str) -> AsyncConnectionPool[AsyncConnection[DictRow]]:
-    # ugly, but useful for testing
     return AsyncConnectionPool(
         url,
         open=False,
@@ -47,6 +52,8 @@ async def setup_db(app: Litestar) -> None:
     app.state.connection_pool = pool_factory(postgres_url)
     await app.state.connection_pool.open()
     app.state.connection_factory = app.state.connection_pool.connection
+    connection_factory: Any = app.state.connection_factory
+    auth_service.connection_factory = connection_factory
 
 
 async def shutdown_db(app: Litestar) -> None:
@@ -74,9 +81,13 @@ async def health(state: State) -> str:
 
 api_router = Router(
     path="/api",
-    guards=[base_guard],
-    security=[{"APIToken": []}],
+    guards=[],
+    security=[
+        {"APIToken": []},
+        {"BearerToken": []},
+    ],
     route_handlers=[
+        AuthController,
         VideoController,
         TranscriptController,
         ClaimController,
@@ -89,6 +100,11 @@ api_router = Router(
 
 app: Litestar = Litestar(
     debug=True,
+    on_app_init=[
+        auth_service.jwt_auth.on_app_init,
+        # Order is important so that api_auth can override jwt_auth's settings
+        api_auth.on_app_init,
+    ],
     route_handlers=[
         hello_world,
         health,
@@ -98,7 +114,9 @@ app: Litestar = Litestar(
         setup_db,
         perform_migrations,
     ],
+    middleware=[],
     dependencies={
+        **dependencies.auth,
         "connection_factory": Provide(
             lambda: app.state.connection_factory, sync_to_thread=False
         ),
@@ -109,7 +127,6 @@ app: Litestar = Litestar(
     plugins=[
         StructlogPlugin(),
     ],
-    middleware=[],
     openapi_config=OpenAPIConfig(
         title="PAS Core API",
         version="0.0.1",
@@ -120,7 +137,12 @@ app: Litestar = Litestar(
                     name="X-API-TOKEN",
                     type="apiKey",
                     security_scheme_in="header",
-                )
+                ),
+                "BearerToken": SecurityScheme(
+                    type="http",
+                    scheme="bearer",
+                    security_scheme_in="header",
+                ),
             },
         ),
     ),
