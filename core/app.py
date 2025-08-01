@@ -4,6 +4,7 @@ from typing import Any
 from dotenv import load_dotenv
 from litestar import Litestar, Router, get
 from litestar.datastructures import State
+from litestar.di import Provide
 from litestar.openapi import OpenAPIConfig
 from litestar.openapi.spec import Components, SecurityScheme
 from litestar.plugins.structlog import StructlogPlugin
@@ -114,7 +115,12 @@ app: Litestar = Litestar(
         perform_migrations,
     ],
     middleware=[],
-    dependencies=dependencies.auth,
+    dependencies={
+        **dependencies.auth,
+        "connection_factory": Provide(
+            lambda: app.state.connection_factory, sync_to_thread=False
+        ),
+    },
     on_shutdown=[
         shutdown_db,
     ],

@@ -1,11 +1,10 @@
-from typing import Any, Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from litestar import Controller, Request, delete, get, patch, post
 from litestar.datastructures import State
 from litestar.di import Provide
 from litestar.dto import DTOData
-from litestar.params import Parameter
 from pydantic import Field
 
 from core.auth.guards import organisation_admin, super_admin
