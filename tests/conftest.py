@@ -7,20 +7,14 @@ from pytest import fixture
 from testing.postgresql import Postgresql
 
 import core.app as app
-from core import auth
+from core.auth import middleware
+from core.migrate import migrate
 
 TEST_API_KEY = "abc123"
 
 app.app.debug = True
 
-auth.VALID_API_KEYS = [TEST_API_KEY]
-
-
-@fixture(scope="module")
-def temp_db() -> Generator[Postgresql, Any, None]:
-    db = Postgresql()
-    yield db
-    db.stop()
+middleware.VALID_API_KEYS = [TEST_API_KEY]
 
 
 @fixture()
@@ -30,13 +24,29 @@ def tables_to_truncate() -> list[str]:
     return []
 
 
+@fixture(scope="module")
+def temp_db() -> Generator[Postgresql, Any, None]:
+    db = Postgresql()
+    yield db
+    db.stop()
+
+
+@fixture
+async def conn_factory(temp_db: Postgresql):
+    pool = app.pool_factory(temp_db.url())
+    await pool.open()
+    await migrate(pool.connection, app.MIGRATION_TARGET_VERSION)
+    yield pool.connection
+    await pool.close()
+
+
 @fixture(scope="function")
 async def api_key_client(
     temp_db: Postgresql, tables_to_truncate: list[str]
 ) -> AsyncIterator[AsyncTestClient[Litestar]]:
     app.postgres_url = temp_db.url()
     async with AsyncTestClient(app=app.app) as client:
-        client.headers.setdefault(auth.API_KEY_HEADER, TEST_API_KEY)
+        client.headers.setdefault(middleware.API_KEY_HEADER, TEST_API_KEY)
         yield client
 
         if tables_to_truncate:

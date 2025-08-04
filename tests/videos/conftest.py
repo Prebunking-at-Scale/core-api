@@ -10,15 +10,15 @@ from core.videos.claims.models import VideoClaims
 
 
 class VideoFactory(ModelFactory[Video]):
-    __check_model__ = False
+    __check_model__ = True
 
 
 class TranscriptFactory(ModelFactory[Transcript]):
-    __check_model__ = False
+    __check_model__ = True
 
 
 class ClaimsFactory(ModelFactory[VideoClaims]):
-    __check_model__ = False
+    __check_model__ = True
 
 
 @fixture

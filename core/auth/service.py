@@ -93,12 +93,12 @@ class AuthService:
         for org, is_admin in zip(organisations, admin_status):
             options.organisations[org.id] = OrganisationToken(
                 organisation=org,
-                token = self.jwt_auth.create_token(
+                token=self.jwt_auth.create_token(
                     identifier=str(user.id),
                     token_expiration=AUTH_TOKEN_TTL,
                     organisation_id=str(org.id),
                 ),
-                is_organisation_admin=is_admin
+                is_organisation_admin=is_admin,
             )
 
         return options
@@ -174,7 +174,9 @@ class AuthService:
 
             organisation_id = decoded.get("organisation_id")
             await repo.accept_invite(user.id, organisation_id)
-            organisation, is_admin = await repo.organisation_and_role(user.id, organisation_id)
+            organisation, is_admin = await repo.organisation_and_role(
+                user.id, organisation_id
+            )
 
         return LoginOptions(
             user=user,
@@ -195,6 +197,10 @@ class AuthService:
     async def remove_user(self, user_id: UUID, organisation_id: UUID) -> None:
         async with self.repo() as repo:
             await repo.deactivate_user(user_id, organisation_id)
+
+    async def get_user_by_email(self, email: str) -> User | None:
+        async with self.repo() as repo:
+            await repo.get_user_by_email(email)
 
     async def update_user(self, user: User, update: DTOData[User]) -> User:
         async with self.repo() as repo:
