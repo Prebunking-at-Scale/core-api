@@ -66,7 +66,7 @@ class AuthRepository:
     async def get_user_by_email(self, email: str) -> User | None:
         await self._session.execute(
             """
-            SELECT * FROM users WHERE email = %(email)s
+            SELECT * FROM users WHERE lower(email) = lower(%(email)s)
             """,
             {"email": email},
         )

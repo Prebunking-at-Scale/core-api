@@ -1,7 +1,5 @@
-import os
 from typing import Any
 
-from dotenv import load_dotenv
 from litestar import Litestar, Router, get
 from litestar.datastructures import State
 from litestar.di import Provide
@@ -12,6 +10,7 @@ from psycopg import AsyncConnection
 from psycopg.rows import DictRow, dict_row
 from psycopg_pool import AsyncConnectionPool
 
+from core import config, email
 from core.auth import dependencies, middleware
 from core.auth.controller import AuthController
 from core.auth.service import AuthService
@@ -22,17 +21,10 @@ from core.videos.claims.controller import ClaimController, RootClaimController
 from core.videos.controller import VideoController
 from core.videos.transcripts.controller import TranscriptController
 
-load_dotenv()
-
 MIGRATION_TARGET_VERSION = 10
-DB_HOST = os.environ.get("DATABASE_HOST")
-DB_PORT = os.environ.get("DATABASE_PORT")
-DB_USER = os.environ.get("DATABASE_USER")
-DB_PASSWORD = os.environ.get("DATABASE_PASSWORD")
-DB_NAME = os.environ.get("DATABASE_NAME")
 
 
-postgres_url = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+postgres_url = f"postgresql://{config.DB_USER}:{config.DB_PASSWORD}@{config.DB_HOST}:{config.DB_PORT}/{config.DB_NAME}"
 
 auth_service = AuthService()
 api_auth = middleware.APITokenAuthMiddleware(auth_service.jwt_auth)
@@ -99,7 +91,7 @@ api_router = Router(
 
 
 app: Litestar = Litestar(
-    debug=True,
+    debug=config.DEV_MODE,
     on_app_init=[
         auth_service.jwt_auth.on_app_init,
         # Order is important so that api_auth can override jwt_auth's settings
@@ -120,6 +112,7 @@ app: Litestar = Litestar(
         "connection_factory": Provide(
             lambda: app.state.connection_factory, sync_to_thread=False
         ),
+        "emailer": Provide(email.get_emailer),
     },
     on_shutdown=[
         shutdown_db,

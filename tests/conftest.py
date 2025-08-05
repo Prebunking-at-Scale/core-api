@@ -7,6 +7,7 @@ from pytest import fixture
 from testing.postgresql import Postgresql
 
 import core.app as app
+from core import config
 from core.auth import middleware
 from core.migrate import migrate
 
@@ -14,7 +15,7 @@ TEST_API_KEY = "abc123"
 
 app.app.debug = True
 
-middleware.VALID_API_KEYS = [TEST_API_KEY]
+config.VALID_API_KEYS = [TEST_API_KEY]
 
 
 @fixture()

@@ -1,7 +1,9 @@
+import os
 from typing import Annotated, Any
 from uuid import UUID
 
-from litestar import Controller, Request, delete, get, patch, post
+from litestar import Controller, Request, Response, delete, get, patch, post
+from litestar.background_tasks import BackgroundTask
 from litestar.datastructures import State
 from litestar.di import Provide
 from litestar.dto import DTOData
@@ -23,8 +25,25 @@ from core.auth.models import (
     UserUpdateDTO,
 )
 from core.auth.service import AuthService
+from core.email import Emailer, messages
 from core.errors import NotAuthorizedError
 from core.response import JSON
+
+
+async def send_invite_email(
+    emailer: Emailer, to: str, organisation: Organisation, token: str
+) -> None:
+    subject, body = messages.invite_message(
+        organisation.display_name, token, organisation.language
+    )
+    emailer.send(to, subject, body)
+
+
+async def send_password_reset_email(
+    emailer: Emailer, to: str, locale: str, token: str
+) -> None:
+    subject, body = messages.password_reset_message(token, locale)
+    emailer.send(to, subject, body)
 
 
 async def auth_service(state: State) -> AuthService:
@@ -69,10 +88,25 @@ class AuthController(Controller):
     )
     async def password_reset(
         self,
+        emailer: Emailer,
         auth_service: AuthService,
         email: str,
-    ) -> None:
-        await auth_service.password_reset_request(email)
+        locale: str = "en",
+    ) -> Response[None]:
+        token = await auth_service.password_reset_token(email)
+        if not token:
+            return Response(None)
+
+        return Response(
+            None,
+            background=BackgroundTask(
+                send_password_reset_email,
+                emailer,
+                email,
+                locale,
+                token,
+            ),
+        )
 
     @patch(
         path="/user/password",
@@ -197,15 +231,29 @@ class AuthController(Controller):
     )
     async def invite_user(
         self,
+        emailer: Emailer,
         auth_service: AuthService,
         organisation: Organisation,
         data: OrganisationInvite,
-    ) -> None:
-        await auth_service.invite_user(
+    ) -> Response[None]:
+        token = await auth_service.invite_token(
             organisation_id=organisation.id,
             email=data.user_email,
             as_admin=data.as_admin,
             auto_accept=False,
+        )
+        if not token:
+            raise Exception("expected token but got None")
+
+        return Response(
+            None,
+            background=BackgroundTask(
+                send_invite_email,
+                emailer,
+                data.user_email,
+                organisation,
+                token,
+            ),
         )
 
     @get(

@@ -1,5 +1,3 @@
-import json
-import os
 from datetime import timedelta
 
 from litestar.config.app import AppConfig
@@ -9,8 +7,9 @@ from litestar.middleware import ASGIMiddleware
 from litestar.security.jwt import JWTAuth
 from litestar.types import ASGIApp, Receive, Scope, Send
 
+from core import config
+
 API_KEY_HEADER = "X-API-TOKEN"
-VALID_API_KEYS = json.loads(os.environ.get("API_KEYS", "[]"))
 
 
 class APITokenAuthMiddleware(ASGIMiddleware):
@@ -37,7 +36,7 @@ class APITokenAuthMiddleware(ASGIMiddleware):
         organisation_id = url.query_params.get("organisation_id", "")
         api_key = headers.get(API_KEY_HEADER)
         if api_key:
-            if api_key not in VALID_API_KEYS:
+            if api_key not in config.VALID_API_KEYS:
                 raise NotAuthorizedException(
                     detail="could not validate API key", status_code=403
                 )

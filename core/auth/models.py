@@ -33,6 +33,7 @@ class User(BaseModel):
     password_last_updated: Annotated[datetime | None, Field(exclude=True)] = None
     is_super_admin: Annotated[bool, Field(exclude=True)] = False
 
+
 class Identity(BaseModel):
     """An identity and roles associated with a specific request. This should
     be used to perform authorization checks for requests that require one"""
@@ -100,6 +101,7 @@ class OrganisationUpdateDTO(PydanticDTO[Organisation]):
         include={
             "display_name",
             "country_code",
+            "language",
         },
     )
 

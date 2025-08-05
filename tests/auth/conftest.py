@@ -57,7 +57,7 @@ async def create_user(
     auth_service: AuthService, organisation: Organisation, as_admin: bool, **kwargs: Any
 ) -> User:
     user = UserFactory.build(**kwargs)
-    await auth_service.invite_user(
+    await auth_service.invite_token(
         organisation_id=organisation.id,
         email=user.email,
         as_admin=as_admin,

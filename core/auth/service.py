@@ -1,6 +1,5 @@
 import logging
-import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import AsyncContextManager
 from uuid import UUID
 
@@ -19,13 +18,9 @@ from core.auth.models import (
     User,
 )
 from core.auth.repo import AuthRepository
+from core.config import AUTH_TOKEN_TTL, INVITE_TTL, JWT_SECRET, PASSWORD_RESET_TTL
 from core.errors import ConflictError, NotAuthorizedError
 from core.uow import ConnectionFactory, uow
-
-AUTH_TOKEN_TTL = timedelta(days=30)
-INVITE_TTL = timedelta(days=7)
-PASSWORD_RESET_TTL = timedelta(minutes=30)
-JWT_SECRET = os.environ.get("JWT_SECRET", "abcd123")
 
 log = logging.getLogger(__name__)
 
@@ -127,13 +122,13 @@ class AuthService:
         async with self.repo() as repo:
             return await repo.organisation_users(organisation_id)
 
-    async def invite_user(
+    async def invite_token(
         self,
         organisation_id: UUID,
         email: str,
         as_admin: bool,
         auto_accept: bool = False,
-    ) -> None:
+    ) -> str | None:
         async with self.repo() as repo:
             organisation = await repo.get_organisation(organisation_id)
             if organisation.deactivated is not None:
@@ -152,13 +147,14 @@ class AuthService:
                 admin=as_admin,
             )
 
-            token = self.jwt_auth.create_token(
+            if auto_accept:
+                return None
+
+            return self.jwt_auth.create_token(
                 identifier=str(user.id),
                 token_expiration=INVITE_TTL,
                 organisation_id=str(organisation_id),
             )
-            print(f"{token=}")
-            # TODO: Send email with JTW link
 
     async def accept_invite(self, token: str) -> LoginOptions:
         decoded = jwt.decode(
@@ -200,7 +196,7 @@ class AuthService:
 
     async def get_user_by_email(self, email: str) -> User | None:
         async with self.repo() as repo:
-            await repo.get_user_by_email(email)
+            return await repo.get_user_by_email(email)
 
     async def update_user(self, user: User, update: DTOData[User]) -> User:
         async with self.repo() as repo:
@@ -213,21 +209,20 @@ class AuthService:
         async with self.repo() as repo:
             await repo.set_admin(user_id, organisation_id, is_admin)
 
-    async def password_reset_request(self, email: str) -> None:
+    async def password_reset_token(self, email: str) -> str | None:
         async with self.repo() as repo:
             user = await repo.get_user_by_email(email)
             if not user:
                 log.warning(
                     f"attempt to reset password for {email} but user does not exist"
                 )
-                return
+                return None
 
-            token = self.jwt_auth.create_token(
+            return self.jwt_auth.create_token(
                 identifier=str(user.id),
                 token_expiration=PASSWORD_RESET_TTL,
                 is_password_reset=True,
             )
-            print(f"{token=}")
 
     async def update_password(
         self, user: User, new_password: str, last_update_before: datetime | None = None
