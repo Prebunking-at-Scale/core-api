@@ -63,3 +63,7 @@ lint = { cmd = "ruff app", help = "confirms code style using pylint" }
 [[tool.mypy.overrides]]
 module = ["harmful_claim_finder.*"]
 follow_untyped_imports = true
+
+[[tool.mypy.overrides]]
+module = ["i18n.*"]
+follow_untyped_imports = true
