@@ -13,17 +13,17 @@ DEV_MODE = os.environ.get("DEVELOPMENT_MODE", "prod") == "dev"
 # The URL to prefix on external linkings pointing at the service. If running locally
 # this is likely http://localhost:8000. When deployed, this could be e.g.
 # https://pas.fullfact.org
-APP_BASE_URL = os.environ["APP_BASE_URL"]
+APP_BASE_URL = os.environ.get("APP_BASE_URL", "")
 
 """database settings"""
-DB_HOST = os.environ["DATABASE_HOST"]
-DB_PORT = os.environ["DATABASE_PORT"]
-DB_USER = os.environ["DATABASE_USER"]
-DB_PASSWORD = os.environ["DATABASE_PASSWORD"]
-DB_NAME = os.environ["DATABASE_NAME"]
+DB_HOST = os.environ.get("DATABASE_HOST", "")
+DB_PORT = os.environ.get("DATABASE_PORT", "")
+DB_USER = os.environ.get("DATABASE_USER", "")
+DB_PASSWORD = os.environ.get("DATABASE_PASSWORD", "")
+DB_NAME = os.environ.get("DATABASE_NAME", "")
 
 """auth settings"""
-VALID_API_KEYS = json.loads(os.environ["API_KEYS"])
+VALID_API_KEYS = json.loads(os.environ.get("API_KEYS", "[]"))
 JWT_SECRET = os.environ["JWT_SECRET"]
 
 # how long a login token should last before expiring
@@ -34,7 +34,7 @@ INVITE_TTL = timedelta(days=7)
 PASSWORD_RESET_TTL = timedelta(minutes=30)
 
 """email settings"""
-EMAIL_FROM = os.environ["EMAIL_FROM"]
+EMAIL_FROM = os.environ.get("EMAIL_FROM", "auto@fullfact.org")
 SMTP_HOST = os.environ.get("SMTP_HOST", "")
 SMTP_PORT = os.environ.get("SMTP_PORT", "")
 SMTP_USERNAME = os.environ.get("SMTP_USERNAME", "")
