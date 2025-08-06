@@ -67,13 +67,14 @@ async def extract_transcript_and_claims(
 
     result = await genai.generate_transcript(video.source_url)
     sentences = [TranscriptSentence(**x.model_dump()) for x in result]
+    org = video.metadata["organisation"]
     claims = await get_claims(
-        keywords=KEYWORDS,
+        keywords=KEYWORDS[org],
         sentences=[
             HarmfulClaimFinderSentence(**(s.model_dump() | {"video_id": video.id}))
             for s in sentences
         ],
-        country_codes=COUNTRIES["org"],
+        country_codes=COUNTRIES[org],
     )  # this list currently needs to be converted to correct format
 
     if sentences:
@@ -113,14 +114,16 @@ async def analyze_for_narratives(video: Video, video_claims: VideoClaims) -> Non
 
     claims_data = []
     for claim in video_claims.claims:
-        claims_data.append({
-            "id": str(claim.id),
-            "claim": claim.claim,
-            "video_id": str(video.id),
-            "claim_api_url": urljoin(
-                app_base_url, "/api/videos/{video_id}/claims/{claim_id}"
-            ),
-        })
+        claims_data.append(
+            {
+                "id": str(claim.id),
+                "claim": claim.claim,
+                "video_id": str(video.id),
+                "claim_api_url": urljoin(
+                    app_base_url, "/api/videos/{video_id}/claims/{claim_id}"
+                ),
+            }
+        )
 
     payload = {
         "claims": claims_data,
