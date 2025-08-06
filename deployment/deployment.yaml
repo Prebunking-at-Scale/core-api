@@ -18,7 +18,7 @@ spec:
       serviceAccountName: workload-identity-sa
       containers:
         - name: core-api
-          image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api:v0.5.0-dev.0
+          image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api:v0.9.1-dev.0
           imagePullPolicy: Always
           ports:
             - containerPort: 8000
@@ -69,7 +69,7 @@ spec:
             - name: GEMINI_LOCATION
               value: global
             - name: GEMINI_MODEL
-              value: gemini-2.0-flash-lite-001
+              value: gemini-2.5-flash-lite
         - name: cloud-sql-proxy
           image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.17.1
           args:
