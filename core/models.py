@@ -11,7 +11,7 @@ class Video(BaseModel):
     description: str
     platform: str
     source_url: str
-    destination_path: str
+    destination_path: str = ""
     uploaded_at: datetime | None
     views: int | None = None
     likes: int | None = None
