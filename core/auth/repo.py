@@ -178,7 +178,7 @@ class AuthRepository:
             UPDATE organisations SET
                 deactivated = now()
             WHERE
-                AND organisation_id = %(organisation_id)s
+                id = %(organisation_id)s
                 AND deactivated IS NULL
             """,
             {"organisation_id": organisation_id},
@@ -316,6 +316,7 @@ class AuthRepository:
                 LEFT OUTER JOIN is_super_admin ON TRUE
                 WHERE
                     o.id = %(organisation_id)s
+                    AND o.deactivated IS NULL
                     AND (is_admin is NOT NULL OR is_super_admin)
             """,
             {
@@ -353,6 +354,7 @@ class AuthRepository:
                 LEFT OUTER JOIN is_organisation_admin oa ON oa.organisation_id = o.id
                 LEFT OUTER JOIN is_super_admin sa ON TRUE
                 WHERE (is_admin is NOT NULL OR is_super_admin)
+                AND o.deactivated IS NULL
             """,
             {"user_id": user_id},
         )

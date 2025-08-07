@@ -42,10 +42,17 @@ class AuthService:
         assert self.connection_factory is not None
         return uow(AuthRepository, self.connection_factory)
 
+    async def as_auth_token(self, token: str) -> AuthToken:
+        decoded = jwt.decode(
+            token,
+            algorithms=[self.jwt_auth.algorithm],
+            key=self.jwt_auth.token_secret,
+        )
+        return AuthToken(**decoded)
+
     async def retrieve_jwt_identity(
         self, token: AuthToken, connection: ASGIConnection
     ) -> Identity:
-        print(token)
         async with self.repo() as repo:
             if token.is_api_user:
                 user = await repo.get_user_by_email("api@pas")
@@ -60,6 +67,9 @@ class AuthService:
                 organisation, is_admin = await repo.organisation_and_role(
                     user.id, organisation_id
                 )
+
+                if organisation.deactivated is not None and not user.is_super_admin:
+                    raise NotAuthorizedError("organisation has been deactivated")
 
             return Identity(
                 user=user,

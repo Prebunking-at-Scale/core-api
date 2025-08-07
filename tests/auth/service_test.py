@@ -2,9 +2,10 @@ import uuid
 
 from pytest import raises
 
+from core import auth
 from core.auth.models import Organisation, User
 from core.auth.service import AuthService
-from core.errors import NotFoundError
+from core.errors import NotAuthorizedError, NotFoundError
 from tests.auth.conftest import OrganisationFactory
 
 
@@ -38,6 +39,37 @@ async def test_invite_user(
 
 
 async def test_password_reset(auth_service: AuthService, user: User) -> None:
-    new_password = "new-password-test"
     token = await auth_service.password_reset_token(user.email)
-    # await auth_service.update_password()
+    assert token is not None
+
+
+async def test_deactivate_organisation(
+    auth_service: AuthService, organisation: Organisation
+) -> None:
+    fetched_org = await auth_service.get_organisation(organisation.id)
+    assert fetched_org.deactivated is None
+
+    await auth_service.deactivate_organisation(organisation.id)
+    fetched_org = await auth_service.get_organisation(organisation.id)
+    assert fetched_org.deactivated is not None
+
+
+async def test_deactivate_organisation_no_membership(
+    auth_service: AuthService,
+    organisation: Organisation,
+    user: User,
+) -> None:
+    fetched_org = await auth_service.get_organisation(organisation.id)
+    assert fetched_org.deactivated is None
+
+    async with auth_service.repo() as repo:
+        org, role = await repo.organisation_and_role(user.id, organisation.id)
+        assert org == organisation
+
+    await auth_service.deactivate_organisation(organisation.id)
+    fetched_org = await auth_service.get_organisation(organisation.id)
+    assert fetched_org.deactivated is not None
+
+    with raises(NotAuthorizedError):
+        async with auth_service.repo() as repo:
+            await repo.organisation_and_role(user.id, organisation.id)
