@@ -37,6 +37,8 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 5
           env:
+            - name: APP_BASE_URL
+              value: https://pas-dev.fullfact.org
             - name: DATABASE_HOST
               value: 127.0.0.1
             - name: DATABASE_PORT
@@ -50,15 +52,31 @@ spec:
                 secretKeyRef:
                   name: db
                   key: password
-            - name: NARRATIVES_BASE_ENDPOINT
-              value: https://pas-narratives.fundacionmaldita.es
-            - name: APP_BASE_URL
-              value: https://pas-dev.fullfact.org
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: jwt_secret
+                  key: key
             - name: API_KEYS
               valueFrom:
                 secretKeyRef:
                   name: core-api-keys
                   key: keys
+            - name: EMAIL_FROM
+              value: "auto@fullfact.org"
+            - name: SMTP_HOST
+              value: smtp.gmail.com
+            - name: SMTP_PORT
+              value: "465"
+            - name: SMTP_USERNAME
+              value: "auto@fullfact.org"
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: core-api-keys
+                  key: keys
+            - name: NARRATIVES_BASE_ENDPOINT
+              value: https://pas-narratives.fundacionmaldita.es
             - name: NARRATIVES_API_KEY
               valueFrom:
                 secretKeyRef:
