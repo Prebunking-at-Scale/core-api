@@ -42,14 +42,6 @@ class AuthService:
         assert self.connection_factory is not None
         return uow(AuthRepository, self.connection_factory)
 
-    async def as_auth_token(self, token: str) -> AuthToken:
-        decoded = jwt.decode(
-            token,
-            algorithms=[self.jwt_auth.algorithm],
-            key=self.jwt_auth.token_secret,
-        )
-        return AuthToken(**decoded)
-
     async def retrieve_jwt_identity(
         self, token: AuthToken, connection: ASGIConnection
     ) -> Identity:
@@ -117,11 +109,14 @@ class AuthService:
             return await repo.get_organisation(organisation_id)
 
     async def update_organisation(
-        self, organisation_id: UUID, data: DTOData[Organisation]
+        self, organisation_id: UUID, data: DTOData[Organisation] | Organisation
     ) -> Organisation:
         async with self.repo() as repo:
-            organisation = await repo.get_organisation(organisation_id)
-            updated = data.update_instance(organisation)
+            if not isinstance(data, Organisation):
+                organisation = await repo.get_organisation(organisation_id)
+                updated = data.update_instance(organisation)
+            else:
+                updated = data
             return await repo.update_organisation(updated)
 
     async def deactivate_organisation(self, organisation_id: UUID) -> None:
