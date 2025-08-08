@@ -90,7 +90,8 @@ class AlertRepository:
             f"SELECT COUNT(*) FROM alerts WHERE {where_clause}",
             base_params,
         )
-        total = (await self._session.fetchone())["count"]
+        count_row = await self._session.fetchone()
+        total = count_row["count"] if count_row else 0
 
         # Get paginated results
         await self._session.execute(
@@ -116,7 +117,7 @@ class AlertRepository:
         keyword: str | None = None,
     ) -> Alert | None:
         updates = []
-        params = {"alert_id": alert_id}
+        params: dict[str, UUID | str | bool | int] = {"alert_id": alert_id}
 
         if name is not None:
             updates.append("name = %(name)s")
