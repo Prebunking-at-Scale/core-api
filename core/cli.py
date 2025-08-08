@@ -7,6 +7,7 @@ import click
 import httpx
 from dotenv import load_dotenv
 
+from core.alerts.service import AlertService
 from core.app import pool_factory, postgres_url
 from core.videos.claims.repo import ClaimRepository
 
@@ -104,5 +105,41 @@ def start_narratives(num_claims):
     asyncio.run(main())
 
 
+@click.command()
+def process_alerts():
+    """Process all active alerts and send notifications."""
+    
+    async def main():
+        pool = pool_factory(postgres_url)
+        await pool.open()
+        try:
+            click.echo("Processing alerts...")
+            alert_service = AlertService(connection_factory=pool.connection)
+            execution = await alert_service.process_alerts()
+            
+            click.echo(f"Alerts processed successfully!")
+            click.echo(f"  - Alerts checked: {execution.alerts_checked}")
+            click.echo(f"  - Alerts triggered: {execution.alerts_triggered}")
+            click.echo(f"  - Emails sent: {execution.emails_sent}")
+            
+        except Exception as e:
+            click.echo(f"Error processing alerts: {e}", err=True)
+            sys.exit(1)
+        finally:
+            await pool.close()
+    
+    asyncio.run(main())
+
+
+@click.group()
+def cli():
+    """PAS Core CLI commands."""
+    pass
+
+
+cli.add_command(start_narratives)
+cli.add_command(process_alerts)
+
+
 if __name__ == "__main__":
-    start_narratives()
+    cli()
