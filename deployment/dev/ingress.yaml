@@ -26,13 +26,6 @@ spec:
     - host: pas-dev.fullfact.org
       http:
         paths:
-          # - path: /api/*
-          #   pathType: ImplementationSpecific
-          #   backend:
-          #     service:
-          #       name: core-api
-          #       port:
-          #         number: 8000
           - path: /schema/*
             pathType: ImplementationSpecific
             backend:

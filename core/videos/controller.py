@@ -17,6 +17,7 @@ from litestar.exceptions import NotFoundException
 from litestar.params import Parameter
 
 from core.analysis import genai
+from core.config import APP_BASE_URL, NARRATIVES_API_KEY, NARRATIVES_BASE_URL
 from core.errors import ConflictError
 from core.models import Claim, Transcript, TranscriptSentence, Video
 from core.narratives.service import NarrativeService
@@ -33,10 +34,6 @@ from core.videos.service import VideoService
 from core.videos.transcripts.service import TranscriptService
 
 log = logging.getLogger(__name__)
-
-narratives_base_url = os.environ.get("NARRATIVES_BASE_ENDPOINT")
-narratives_api_key = os.environ.get("NARRATIVES_API_KEY")
-app_base_url = os.environ.get("APP_BASE_URL")
 
 
 async def video_service(state: State) -> VideoService:
@@ -103,11 +100,11 @@ async def analyze_for_narratives(video: Video, video_claims: VideoClaims) -> Non
         # We don't want to run this during tests
         return
 
-    if not narratives_base_url or not narratives_api_key:
+    if not NARRATIVES_BASE_URL or not NARRATIVES_API_KEY:
         log.warning("Narratives API configuration missing, skipping narrative analysis")
         return
 
-    if not app_base_url:
+    if not APP_BASE_URL:
         log.warning("APP_BASE_URL not configured, skipping narrative analysis")
         return
 
@@ -119,24 +116,21 @@ async def analyze_for_narratives(video: Video, video_claims: VideoClaims) -> Non
             "score": claim.metadata.get("score", 0),
             "video_id": str(video.id),
             "claim_api_url": urljoin(
-                app_base_url, "/api/videos/{video_id}/claims/{claim_id}"
+                APP_BASE_URL, "/api/videos/{video_id}/claims/{claim_id}"
             ),
         })
 
     payload = {
         "claims": claims_data,
-        "narratives_api_url": urljoin(app_base_url, "/api/narratives"),
+        "narratives_api_url": urljoin(APP_BASE_URL, "/api/narratives"),
     }
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
-            url = f"{narratives_base_url}/add-contents"
-
+            url = f"{NARRATIVES_BASE_URL}/add-contents"
             response = await client.post(
-                url, json=payload, headers={"X-API-TOKEN": narratives_api_key}
+                url, json=payload, headers={"X-API-TOKEN": NARRATIVES_API_KEY}
             )
-
-            log.info(f"Received response: {response.status_code}")
 
             if response.status_code == 202:
                 log.debug(
