@@ -292,7 +292,17 @@ class AlertRepository:
                 LEFT JOIN claim_narratives cn ON n.id = cn.narrative_id
                 LEFT JOIN video_claims c ON cn.claim_id = c.id
                 LEFT JOIN videos v ON c.video_id = v.id
-                WHERE TRUE
+                WHERE 
+                    -- Only include narratives created or with videos updated since last check
+                    (%(since)s::timestamp IS NULL 
+                     OR n.created_at >= %(since)s::timestamp
+                     OR EXISTS (
+                        SELECT 1 FROM claim_narratives cn2
+                        JOIN video_claims vc2 ON cn2.claim_id = vc2.id
+                        JOIN videos v2 ON vc2.video_id = v2.id
+                        WHERE cn2.narrative_id = n.id
+                        AND v2.updated_at >= %(since)s::timestamp
+                     ))
                 GROUP BY n.id
             ),
             relevant_alerts AS (
@@ -343,7 +353,8 @@ class AlertRepository:
                 END >= ra.threshold
         """
         
-        await self._session.execute(query, {"since": since})
+        params = {"since": since.isoformat() if since else None}
+        await self._session.execute(query, params)
         rows = await self._session.fetchall()
         
         results = []
@@ -383,10 +394,19 @@ class AlertRepository:
             JOIN narratives n ON nt.narrative_id = n.id
             WHERE a.enabled = TRUE
             AND a.alert_type = 'narrative_with_topic'
-            AND (%(since)s IS NULL OR n.created_at >= %(since)s)
+            AND (%(since)s::timestamp IS NULL 
+                 OR n.created_at >= %(since)s::timestamp
+                 OR EXISTS (
+                    SELECT 1 FROM claim_narratives cn
+                    JOIN video_claims vc ON cn.claim_id = vc.id
+                    JOIN videos v ON vc.video_id = v.id
+                    WHERE cn.narrative_id = n.id
+                    AND v.updated_at >= %(since)s::timestamp
+                 ))
         """
         
-        await self._session.execute(query, {"since": since})
+        params = {"since": since.isoformat() if since else None}
+        await self._session.execute(query, params)
         rows = await self._session.fetchall()
         
         results = []
@@ -419,9 +439,17 @@ class AlertRepository:
         
         query = """
             WITH recent_narratives AS (
-                SELECT id, title, description 
-                FROM narratives 
-                WHERE (%(since)s IS NULL OR created_at >= %(since)s)
+                SELECT n.id, n.title, n.description 
+                FROM narratives n
+                WHERE (%(since)s::timestamp IS NULL 
+                       OR n.created_at >= %(since)s::timestamp
+                       OR EXISTS (
+                          SELECT 1 FROM claim_narratives cn
+                          JOIN video_claims vc ON cn.claim_id = vc.id
+                          JOIN videos v ON vc.video_id = v.id
+                          WHERE cn.narrative_id = n.id
+                          AND v.updated_at >= %(since)s::timestamp
+                       ))
             )
             SELECT DISTINCT a.id, a.user_id, a.organisation_id, a.name, a.alert_type,
                    a.scope, a.threshold, a.topic_id, a.keyword, a.enabled,
@@ -435,7 +463,8 @@ class AlertRepository:
             AND a.alert_type = 'keyword'
         """
         
-        await self._session.execute(query, {"since": since})
+        params = {"since": since.isoformat() if since else None}
+        await self._session.execute(query, params)
         rows = await self._session.fetchall()
         
         results = []

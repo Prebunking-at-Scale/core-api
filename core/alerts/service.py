@@ -162,15 +162,15 @@ class AlertService:
                 alerts_triggered = 0
                 triggered_alerts = []
 
-                stats_alerts = await alert_repo.check_narrative_stats_alerts(since=None)
+                stats_alerts = await alert_repo.check_narrative_stats_alerts(since)
                 for alert, narrative_id, current_value in stats_alerts:
                     alerts_checked += 1
                     
                     triggered = await alert_repo.record_alert_trigger(
                         alert_id=alert.id,
                         narrative_id=narrative_id,
-                        trigger_value=current_value,  # Store actual value for logging
-                        threshold_crossed=alert.threshold,  # Use threshold for uniqueness
+                        trigger_value=current_value, 
+                        threshold_crossed=alert.threshold, 
                         metadata={"alert_type": alert.alert_type.value},
                     )
                     
