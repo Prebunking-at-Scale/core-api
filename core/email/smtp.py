@@ -17,7 +17,7 @@ class SMTPEmailer:
     def send(self, to: str, subject: str, html: str) -> None:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
-        msg["From"] = formataddr(("Prebunking at Scale", "auto@fullfact.org"))
+        msg["From"] = formataddr(("Prebunking at Scale", self._email_from))
         msg["To"] = to
         msg.attach(MIMEText(html, "html"))
 
