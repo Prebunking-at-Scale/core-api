@@ -56,12 +56,20 @@ async def perform_migrations(app: Litestar) -> None:
     await migrate(app.state.connection_factory, MIGRATION_TARGET_VERSION)
 
 
-@get("/", include_in_schema=False)
+@get(
+    "/",
+    include_in_schema=False,
+    exclude_from_auth=True,
+)
 async def hello_world() -> str:
     return "Hello, world!"
 
 
-@get("/health", include_in_schema=False)
+@get(
+    "/health",
+    include_in_schema=False,
+    exclude_from_auth=True,
+)
 async def health(state: State) -> str:
     async with state.connection_factory() as conn:
         cur = await conn.execute(
