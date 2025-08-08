@@ -35,6 +35,7 @@ class AlertController(Controller):
     ) -> Alert:
         return await alert_service.create_alert(
             identity=request.user,
+            name=data.name,
             alert_type=data.alert_type,
             scope=data.scope,
             narrative_id=data.narrative_id,
@@ -98,6 +99,7 @@ class AlertController(Controller):
         return await alert_service.update_alert(
             alert_id=alert_id,
             identity=request.user,
+            name=data.name,
             enabled=data.enabled,
             threshold=data.threshold,
             keyword=data.keyword,

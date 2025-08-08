@@ -23,6 +23,7 @@ class Alert(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     user_id: UUID
     organisation_id: UUID
+    name: str
     alert_type: AlertType
     scope: AlertScope
     narrative_id: UUID | None = None
@@ -60,12 +61,14 @@ class CreateAlertRequest(BaseModel):
         json_schema_extra={
             "examples": [
                 {
+                    "name": "High View Count Alert",
                     "alert_type": "narrative_views",
                     "scope": "general",
-                    "threshold": 1000,
-                    "metadata": {"description": "Alert when any narrative exceeds 1000 views"}
+                    "threshold": 100000,
+                    "metadata": {"description": "Alert when any narrative exceeds 100000 views"}
                 },
                 {
+                    "name": "Claims Threshold Alert",
                     "alert_type": "narrative_claims_count",
                     "scope": "specific",
                     "narrative_id": "123e4567-e89b-12d3-a456-426614174000",
@@ -73,12 +76,14 @@ class CreateAlertRequest(BaseModel):
                     "metadata": {"description": "Alert when specific narrative has 50+ claims"}
                 },
                 {
+                    "name": "Climate Topic Monitor",
                     "alert_type": "narrative_with_topic",
                     "scope": "general",
                     "topic_id": "456e7890-e89b-12d3-a456-426614174000",
                     "metadata": {"description": "Alert for new narratives with climate topic"}
                 },
                 {
+                    "name": "Vaccine Keyword Tracker",
                     "alert_type": "keyword",
                     "scope": "general",
                     "keyword": "vaccine",
@@ -88,6 +93,7 @@ class CreateAlertRequest(BaseModel):
         }
     )
     
+    name: str = Field(..., description="Name to identify the alert", min_length=1, max_length=255)
     alert_type: AlertType = Field(..., description="Type of alert to create")
     scope: AlertScope = Field(..., description="Scope of the alert (general for all narratives, specific for one)")
     narrative_id: UUID | None = Field(None, description="Required for specific scope alerts. Cannot be used with general scope")
@@ -148,9 +154,11 @@ class UpdateAlertRequest(BaseModel):
         json_schema_extra={
             "examples": [
                 {
+                    "name": "Updated Alert Name",
                     "enabled": False
                 },
                 {
+                    "name": "High Priority Alert",
                     "threshold": 2000,
                     "enabled": True
                 },
@@ -161,6 +169,7 @@ class UpdateAlertRequest(BaseModel):
         }
     )
     
+    name: str | None = Field(None, description="New name for the alert", min_length=1, max_length=255)
     enabled: bool | None = Field(None, description="Enable or disable the alert")
     threshold: int | None = Field(None, description="New threshold value", ge=1)
     keyword: str | None = Field(None, description="New keyword to search for", min_length=1, max_length=255)

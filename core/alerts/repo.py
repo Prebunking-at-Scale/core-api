@@ -18,6 +18,7 @@ class AlertRepository:
         self,
         user_id: UUID,
         organisation_id: UUID,
+        name: str,
         alert_type: AlertType,
         scope: AlertScope,
         narrative_id: UUID | None = None,
@@ -30,10 +31,10 @@ class AlertRepository:
             await self._session.execute(
                 """
                 INSERT INTO alerts (
-                    user_id, organisation_id, alert_type, scope,
+                    user_id, organisation_id, name, alert_type, scope,
                     narrative_id, threshold, topic_id, keyword, metadata
                 ) VALUES (
-                    %(user_id)s, %(organisation_id)s, %(alert_type)s, %(scope)s,
+                    %(user_id)s, %(organisation_id)s, %(name)s, %(alert_type)s, %(scope)s,
                     %(narrative_id)s, %(threshold)s, %(topic_id)s, %(keyword)s, %(metadata)s
                 )
                 RETURNING *
@@ -41,6 +42,7 @@ class AlertRepository:
                 {
                     "user_id": user_id,
                     "organisation_id": organisation_id,
+                    "name": name,
                     "alert_type": alert_type.value,
                     "scope": scope.value,
                     "narrative_id": narrative_id,
@@ -108,12 +110,17 @@ class AlertRepository:
     async def update_alert(
         self,
         alert_id: UUID,
+        name: str | None = None,
         enabled: bool | None = None,
         threshold: int | None = None,
         keyword: str | None = None,
     ) -> Alert | None:
         updates = []
         params = {"alert_id": alert_id}
+
+        if name is not None:
+            updates.append("name = %(name)s")
+            params["name"] = name
 
         if enabled is not None:
             updates.append("enabled = %(enabled)s")
@@ -344,6 +351,7 @@ class AlertRepository:
                 id=row["id"],
                 user_id=row["user_id"],
                 organisation_id=row["organisation_id"],
+                name=row.get("name", "Unnamed Alert"),
                 alert_type=row["alert_type"],
                 scope=row["scope"],
                 narrative_id=row["narrative_id"],
@@ -384,6 +392,7 @@ class AlertRepository:
                 id=row["id"],
                 user_id=row["user_id"],
                 organisation_id=row["organisation_id"],
+                name=row.get("name", "Unnamed Alert"),
                 alert_type=row["alert_type"],
                 scope=row["scope"],
                 narrative_id=row["narrative_id"],
@@ -430,6 +439,7 @@ class AlertRepository:
                 id=row["id"],
                 user_id=row["user_id"],
                 organisation_id=row["organisation_id"],
+                name=row.get("name", "Unnamed Alert"),
                 alert_type=row["alert_type"],
                 scope=row["scope"],
                 narrative_id=row["narrative_id"],

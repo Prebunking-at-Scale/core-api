@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS alerts (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     organisation_id uuid NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
     alert_type alert_type NOT NULL,
     scope alert_scope NOT NULL,
     narrative_id uuid REFERENCES narratives(id) ON DELETE CASCADE,

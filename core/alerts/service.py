@@ -26,6 +26,7 @@ class AlertService:
     async def create_alert(
         self,
         identity: Identity,
+        name: str,
         alert_type: AlertType,
         scope: AlertScope,
         narrative_id: UUID | None = None,
@@ -64,6 +65,7 @@ class AlertService:
                 return await alert_repo.create_alert(
                     user_id=identity.user.id,
                     organisation_id=identity.organisation.id,
+                    name=name,
                     alert_type=alert_type,
                     scope=scope,
                     narrative_id=narrative_id,
@@ -79,11 +81,23 @@ class AlertService:
                 alert_repo = AlertRepository(cur)
                 alert = await alert_repo.get_alert(alert_id)
                 
-        if not alert:
-            raise NotFoundError("Alert not found")
+                if not alert:
+                    raise NotFoundError("Alert not found")
 
-        if not identity.organisation or alert.organisation_id != identity.organisation.id:
-            raise NotAuthorizedError("Not authorized to view this alert")
+                if not identity.organisation or alert.organisation_id != identity.organisation.id:
+                    raise NotAuthorizedError("Not authorized to view this alert")
+
+                # If alert is for a specific narrative, include narrative details
+                if alert.narrative_id:
+                    narrative_repo = NarrativeRepository(cur)
+                    narrative = await narrative_repo.get_narrative(alert.narrative_id)
+                    if narrative:
+                        alert.narrative = {
+                            "id": str(narrative.id),
+                            "title": narrative.title,
+                            "description": narrative.description,
+                            "created_at": narrative.created_at.isoformat() if narrative.created_at else None,
+                        }
 
         return alert
 
@@ -100,18 +114,41 @@ class AlertService:
         async with self._connection_factory() as conn:
             async with conn.cursor() as cur:
                 alert_repo = AlertRepository(cur)
-                return await alert_repo.get_user_alerts(
+                alerts, total = await alert_repo.get_user_alerts(
                     user_id=identity.user.id,
                     organisation_id=identity.organisation.id,
                     enabled_only=enabled_only,
                     limit=limit,
                     offset=offset,
                 )
+                
+                # Add narrative details for specific alerts
+                narrative_repo = NarrativeRepository(cur)
+                narrative_ids = {alert.narrative_id for alert in alerts if alert.narrative_id}
+                
+                if narrative_ids:
+                    narratives = {}
+                    for narrative_id in narrative_ids:
+                        narrative = await narrative_repo.get_narrative(narrative_id)
+                        if narrative:
+                            narratives[narrative_id] = {
+                                "id": str(narrative.id),
+                                "title": narrative.title,
+                                "description": narrative.description,
+                                "created_at": narrative.created_at.isoformat() if narrative.created_at else None,
+                            }
+                    
+                    for alert in alerts:
+                        if alert.narrative_id and alert.narrative_id in narratives:
+                            alert.narrative = narratives[alert.narrative_id]
+                
+                return alerts, total
 
     async def update_alert(
         self,
         alert_id: UUID,
         identity: Identity,
+        name: str | None = None,
         enabled: bool | None = None,
         threshold: int | None = None,
         keyword: str | None = None,
@@ -123,6 +160,7 @@ class AlertService:
                 alert_repo = AlertRepository(cur)
                 updated = await alert_repo.update_alert(
                     alert_id=alert_id,
+                    name=name,
                     enabled=enabled,
                     threshold=threshold,
                     keyword=keyword,
