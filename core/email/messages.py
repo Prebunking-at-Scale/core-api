@@ -65,6 +65,7 @@ def alerts_message(
     
     alert_items_html = ""
     for alert in alerts:
+        alert_name = alert.get("alert_name", "Unnamed Alert")
         alert_type = alert["alert_type"]
         narrative_title = alert["narrative_title"]
         
@@ -83,8 +84,11 @@ def alerts_message(
         
         alert_items_html += f"""
         <div style="background: white; border-left: 4px solid #00533D; margin: 1em 0; padding: 1em; text-align: left;">
-            <p style="margin: 0; font-weight: bold; color: #00533D;">{alert_type.replace('_', ' ').title()}</p>
-            <p style="margin: 0.5em 0 0 0; color: #666;">{description}</p>
+            <h3 style="margin: 0 0 0.5em 0; color: #1F2937; font-size: 1.1em;">{alert_name}</h3>
+            <span style="display: inline-block; background: white; color: #333; border: 1px solid #333; padding: 2px 6px; border-radius: 3px; font-size: 0.7em; font-weight: 500; text-transform: uppercase;">
+                {alert_type.replace('_', ' ')}
+            </span>
+            <p style="margin: 0.75em 0 0 0; color: #666;">{description}</p>
             <p style="margin: 0.5em 0 0 0;">
                 <a href="{config.APP_BASE_URL}/narratives/{alert['narrative_id']}" style="color: #00533D; text-decoration: underline;">
                     View Narrative →
