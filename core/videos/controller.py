@@ -113,6 +113,7 @@ async def analyze_for_narratives(video: Video, video_claims: VideoClaims) -> Non
         claims_data.append({
             "id": str(claim.id),
             "claim": claim.claim,
+            "score": claim.metadata.get("score", 0),
             "video_id": str(video.id),
             "claim_api_url": urljoin(
                 APP_BASE_URL, "/api/videos/{video_id}/claims/{claim_id}"

@@ -51,7 +51,6 @@ i18n.set("skip_locale_root_data", True)
 i18n.set("fallback", "en")
 i18n.set("enable_memoization", True)
 
-locales_path = "./i18n/locales"
-if DEV_MODE:
-    locales_path = "./core/i18n/locales"
+
+locales_path = "./core/i18n/locales"
 i18n.set("load_path", [locales_path])
