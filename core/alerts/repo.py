@@ -290,9 +290,9 @@ class AlertRepository:
                     COUNT(DISTINCT v.id) AS videos_count
                 FROM narratives n
                 LEFT JOIN claim_narratives cn ON n.id = cn.narrative_id
-                LEFT JOIN claims c ON cn.claim_id = c.id
+                LEFT JOIN video_claims c ON cn.claim_id = c.id
                 LEFT JOIN videos v ON c.video_id = v.id
-                WHERE (%(since)s IS NULL OR n.created_at >= %(since)s)
+                WHERE TRUE
                 GROUP BY n.id
             ),
             relevant_alerts AS (
@@ -300,6 +300,7 @@ class AlertRepository:
                     a.id,
                     a.user_id,
                     a.organisation_id,
+                    a.name,
                     a.alert_type,
                     a.scope,
                     a.narrative_id AS specific_narrative,
@@ -354,7 +355,7 @@ class AlertRepository:
                 name=row.get("name", "Unnamed Alert"),
                 alert_type=row["alert_type"],
                 scope=row["scope"],
-                narrative_id=row["narrative_id"],
+                narrative_id=row["specific_narrative"],
                 threshold=row["threshold"],
                 topic_id=row["topic_id"],
                 keyword=row["keyword"],
@@ -374,7 +375,9 @@ class AlertRepository:
         Returns list of (alert, narrative_id) tuples."""
         
         query = """
-            SELECT DISTINCT a.*, nt.narrative_id
+            SELECT DISTINCT a.id, a.user_id, a.organisation_id, a.name, a.alert_type, 
+                   a.scope, a.threshold, a.topic_id, a.keyword, a.enabled, 
+                   a.metadata, a.created_at, a.updated_at, nt.narrative_id
             FROM alerts a
             JOIN narrative_topics nt ON a.topic_id = nt.topic_id
             JOIN narratives n ON nt.narrative_id = n.id
@@ -395,7 +398,7 @@ class AlertRepository:
                 name=row.get("name", "Unnamed Alert"),
                 alert_type=row["alert_type"],
                 scope=row["scope"],
-                narrative_id=row["narrative_id"],
+                narrative_id=None,
                 threshold=row["threshold"],
                 topic_id=row["topic_id"],
                 keyword=row["keyword"],
@@ -420,7 +423,9 @@ class AlertRepository:
                 FROM narratives 
                 WHERE (%(since)s IS NULL OR created_at >= %(since)s)
             )
-            SELECT DISTINCT a.*, n.id as narrative_id
+            SELECT DISTINCT a.id, a.user_id, a.organisation_id, a.name, a.alert_type,
+                   a.scope, a.threshold, a.topic_id, a.keyword, a.enabled,
+                   a.metadata, a.created_at, a.updated_at, n.id as narrative_id
             FROM alerts a
             JOIN recent_narratives n ON (
                 LOWER(n.title) LIKE LOWER('%%' || a.keyword || '%%')
@@ -442,7 +447,7 @@ class AlertRepository:
                 name=row.get("name", "Unnamed Alert"),
                 alert_type=row["alert_type"],
                 scope=row["scope"],
-                narrative_id=row["narrative_id"],
+                narrative_id=None,
                 threshold=row["threshold"],
                 topic_id=row["topic_id"],
                 keyword=row["keyword"],

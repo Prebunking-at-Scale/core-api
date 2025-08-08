@@ -81,23 +81,11 @@ class AlertService:
                 alert_repo = AlertRepository(cur)
                 alert = await alert_repo.get_alert(alert_id)
                 
-                if not alert:
-                    raise NotFoundError("Alert not found")
+        if not alert:
+            raise NotFoundError("Alert not found")
 
-                if not identity.organisation or alert.organisation_id != identity.organisation.id:
-                    raise NotAuthorizedError("Not authorized to view this alert")
-
-                # If alert is for a specific narrative, include narrative details
-                if alert.narrative_id:
-                    narrative_repo = NarrativeRepository(cur)
-                    narrative = await narrative_repo.get_narrative(alert.narrative_id)
-                    if narrative:
-                        alert.narrative = {
-                            "id": str(narrative.id),
-                            "title": narrative.title,
-                            "description": narrative.description,
-                            "created_at": narrative.created_at.isoformat() if narrative.created_at else None,
-                        }
+        if not identity.organisation or alert.organisation_id != identity.organisation.id:
+            raise NotAuthorizedError("Not authorized to view this alert")
 
         return alert
 
@@ -114,35 +102,13 @@ class AlertService:
         async with self._connection_factory() as conn:
             async with conn.cursor() as cur:
                 alert_repo = AlertRepository(cur)
-                alerts, total = await alert_repo.get_user_alerts(
+                return await alert_repo.get_user_alerts(
                     user_id=identity.user.id,
                     organisation_id=identity.organisation.id,
                     enabled_only=enabled_only,
                     limit=limit,
                     offset=offset,
                 )
-                
-                # Add narrative details for specific alerts
-                narrative_repo = NarrativeRepository(cur)
-                narrative_ids = {alert.narrative_id for alert in alerts if alert.narrative_id}
-                
-                if narrative_ids:
-                    narratives = {}
-                    for narrative_id in narrative_ids:
-                        narrative = await narrative_repo.get_narrative(narrative_id)
-                        if narrative:
-                            narratives[narrative_id] = {
-                                "id": str(narrative.id),
-                                "title": narrative.title,
-                                "description": narrative.description,
-                                "created_at": narrative.created_at.isoformat() if narrative.created_at else None,
-                            }
-                    
-                    for alert in alerts:
-                        if alert.narrative_id and alert.narrative_id in narratives:
-                            alert.narrative = narratives[alert.narrative_id]
-                
-                return alerts, total
 
     async def update_alert(
         self,
@@ -196,13 +162,10 @@ class AlertService:
                 alerts_triggered = 0
                 triggered_alerts = []
 
-                # Check narrative stats alerts (views, claims count, videos count)
-                stats_alerts = await alert_repo.check_narrative_stats_alerts(since)
+                stats_alerts = await alert_repo.check_narrative_stats_alerts(since=None)
                 for alert, narrative_id, current_value in stats_alerts:
                     alerts_checked += 1
                     
-                    # Record the trigger (will return None if already triggered)
-                    # Use the threshold as the unique key, not the actual value
                     triggered = await alert_repo.record_alert_trigger(
                         alert_id=alert.id,
                         narrative_id=narrative_id,
@@ -215,18 +178,15 @@ class AlertService:
                         alerts_triggered += 1
                         triggered_alerts.append((alert, triggered, narrative_id))
 
-                # Check topic alerts
                 topic_alerts = await alert_repo.check_topic_alerts(since)
                 for alert, narrative_id in topic_alerts:
                     alerts_checked += 1
                     
-                    # For topic alerts, we use narrative_id as the unique identifier
-                    # This ensures one alert per narrative-topic combination
                     triggered = await alert_repo.record_alert_trigger(
                         alert_id=alert.id,
                         narrative_id=narrative_id,
                         trigger_value=None,
-                        threshold_crossed=None,  # No threshold for topic alerts
+                        threshold_crossed=None,
                         metadata={"alert_type": "topic", "topic_id": str(alert.topic_id)},
                     )
                     
@@ -234,18 +194,15 @@ class AlertService:
                         alerts_triggered += 1
                         triggered_alerts.append((alert, triggered, narrative_id))
 
-                # Check keyword alerts
                 keyword_alerts = await alert_repo.check_keyword_alerts(since)
                 for alert, narrative_id in keyword_alerts:
                     alerts_checked += 1
                     
-                    # For keyword alerts, we use narrative_id as the unique identifier
-                    # This ensures one alert per narrative-keyword combination
                     triggered = await alert_repo.record_alert_trigger(
                         alert_id=alert.id,
                         narrative_id=narrative_id,
                         trigger_value=None,
-                        threshold_crossed=None,  # No threshold for keyword alerts
+                        threshold_crossed=None,
                         metadata={"alert_type": "keyword", "keyword": alert.keyword},
                     )
                     
@@ -253,12 +210,10 @@ class AlertService:
                         alerts_triggered += 1
                         triggered_alerts.append((alert, triggered, narrative_id))
 
-                # Send notifications
                 emails_sent = await self._send_alert_notifications(
                     triggered_alerts, alert_repo, auth_repo, narrative_repo
                 )
 
-                # Record execution
                 execution = await alert_repo.record_execution(
                     alerts_checked=alerts_checked,
                     alerts_triggered=alerts_triggered,
@@ -290,7 +245,7 @@ class AlertService:
         
         for (user_id, org_id), alerts in user_alerts.items():
             user = await auth_repo.get_user_by_id(user_id)
-            org = await auth_repo.get_organisation_by_id(org_id)
+            org = await auth_repo.get_organisation(org_id)
             
             if not user or not org:
                 continue
@@ -300,6 +255,7 @@ class AlertService:
                 narrative = await narrative_repo.get_narrative(narrative_id)
                 if narrative:
                     alert_details.append({
+                        "alert_name": alert.name,
                         "alert_type": alert.alert_type.value,
                         "narrative_title": narrative.title,
                         "narrative_id": str(narrative_id),
@@ -316,18 +272,20 @@ class AlertService:
                     locale=org.language,
                 )
                 
-                # Get emailer and send immediately (in CLI context)
-                # In API context, this could be done with BackgroundTask
-                emailer = await get_emailer()
-                emailer.send(
-                    to=user.email,
-                    subject=subject,
-                    html=body,
-                )
-                
-                emails_sent += 1
-                
-                for _, triggered, _ in alerts:
-                    await alert_repo.mark_notification_sent(triggered.id)
+                try:
+                    emailer = await get_emailer()
+                    emailer.send(
+                        to=user.email,
+                        subject=subject,
+                        html=body,
+                    )
+                    emails_sent += 1
+                    
+                    for _, triggered, _ in alerts:
+                        await alert_repo.mark_notification_sent(triggered.id)
+                except Exception as e:
+                    print(f"Warning: Failed to send email to {user.email}: {e}")
+                    for _, triggered, _ in alerts:
+                        await alert_repo.mark_notification_sent(triggered.id)
 
         return emails_sent
