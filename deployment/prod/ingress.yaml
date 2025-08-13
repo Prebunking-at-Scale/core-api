@@ -6,6 +6,15 @@ spec:
   domains:
     - prebunking.efcsn.com
 ---
+apiVersion: networking.gke.io/v1beta1
+kind: FrontendConfig
+metadata:
+  name: frontend-frontend-config
+spec:
+  redirectToHttps:
+    enabled: true
+    responseCodeName: MOVED_PERMANENTLY_DEFAULT
+---
 apiVersion: cloud.google.com/v1
 kind: BackendConfig
 metadata:
@@ -27,7 +36,8 @@ metadata:
   annotations:
     kubernetes.io/ingress.class: "gce"
     kubernetes.io/ingress.global-static-ip-name: pas-static-ip
-    networking.gke.io/managed-certificates: managed-cert
+    networking.gke.io/managed-certificates: managed-cert-prod
+    networking.gke.io/v1beta1.FrontendConfig: frontend-frontend-config
   labels:
     app: frontend
 spec:
