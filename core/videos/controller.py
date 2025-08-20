@@ -71,46 +71,51 @@ async def extract_transcript_and_claims(
 
     orgs: list[str] = video.metadata.get("for_organisation", [])
     if not orgs:
-        log.warn("could not find organisation list on video")
+        log.warning("could not find organisation list on video")
         return
 
+    all_claims: list[Claim] = []
     for org in orgs:
-        keywords = KEYWORDS.get(org)
-        if not keywords:
-            log.error(f"org {org} not found")
-            continue
+        try:
+            keywords = KEYWORDS.get(org)
+            if not keywords:
+                log.error(f"org {org} not found")
+                continue
 
-        claims = await get_claims(
-            keywords=keywords,
-            sentences=[
-                HarmfulClaimFinderSentence(**(s.model_dump() | {"video_id": video.id}))
-                for s in sentences
-            ],
-            country_codes=COUNTRIES.get(org, []),
-        )  # this list currently needs to be converted to correct format
-
-        formatted_claims: list[Claim] = []
-        for claim in claims:
-            formatted_claim: Claim = Claim(**claim.model_dump())
-            formatted_claim.metadata["for_organisation"] = org
-
-        if claims:
-            video_claims = VideoClaims(
-                video_id=video.id,
-                claims=formatted_claims,
+            claims = await get_claims(
+                keywords=keywords,
+                sentences=[
+                    HarmfulClaimFinderSentence(
+                        **(s.model_dump() | {"video_id": video.id})
+                    )
+                    for s in sentences
+                ],
+                country_codes=COUNTRIES.get(org, []),
             )
-            await claims_service.add_claims(video.id, video_claims)
+
+            for claim in claims:
+                formatted_claim: Claim = Claim(**claim.model_dump())
+                formatted_claim.metadata["for_organisation"] = org
+                all_claims.append(formatted_claim)
+
+        except Exception as e:
+            log.exception(e)
+
+    if all_claims:
+        await claims_service.add_claims(
+            video.id, VideoClaims(video_id=video.id, claims=all_claims)
+        )
 
     log.info(
-        f"finished processing {video.source_url}, got {len(sentences)} sentences and {len(claims)} claims."
+        f"finished processing {video.source_url}, got {len(sentences)} sentences and {len(all_claims)} claims."
     )
 
     # Send video to narratives API for analysis
-    if claims:
-        await analyze_for_narratives(video, video_claims)
+    if all_claims:
+        await analyze_for_narratives(video, all_claims)
 
 
-async def analyze_for_narratives(video: Video, video_claims: VideoClaims) -> None:
+async def analyze_for_narratives(video: Video, video_claims: list[Claim]) -> None:
     """Send video claims to the narratives API for analysis."""
 
     if "PYTEST_CURRENT_TEST" in os.environ:
@@ -126,7 +131,7 @@ async def analyze_for_narratives(video: Video, video_claims: VideoClaims) -> Non
         return
 
     claims_data = []
-    for claim in video_claims.claims:
+    for claim in video_claims:
         claims_data.append({
             "id": str(claim.id),
             "claim": claim.claim,

@@ -45,17 +45,13 @@ DEFAULT_SAFETY_SETTINGS = [
 class Sentence(BaseModel):
     text: str
     start_time_s: float
-    source: Literal["audio"] | Literal["screen"]
-    is_claim: bool
 
 
 async def generate_transcript(video_url: str) -> list[Sentence]:
-    prompt = """
-    Transcribe the spoken audio, and extract any text displayed on the screen into complete sentences.
-    For audio, specify the "source" as "audio", and for text from the screen specify the source as "screen".
-    If a sentence appears to be a claim, you must mark it as so by setting `is_claim` to True.
-    Each sentence must be separated naturally.
-    The Timestamps for each sentence must be provided as SS (seconds only) using the `start_time_s` field.
+    prompt = """Transcribe the provided video.
+Split the transcript into complete sentences, separated naturally.
+Only return individual sentences.
+For each sentence, provide a timestamp formatted as SS (seconds only) using the `start_time_s` field.
     """
 
     response = await client.aio.models.generate_content(
