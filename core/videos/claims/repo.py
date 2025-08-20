@@ -16,6 +16,9 @@ class ClaimRepository:
         self._session = session
 
     async def add_claims(self, video_id: UUID, claims: list[Claim]) -> list[Claim]:
+        if not claims:
+            return []
+
         try:
             await self._session.executemany(
                 """
