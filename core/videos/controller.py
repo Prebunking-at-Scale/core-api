@@ -72,15 +72,24 @@ async def extract_transcript_and_claims(
         transcript = Transcript(video_id=video.id, sentences=sentences)
         await transcript_service.add_transcript(video.id, transcript)
 
-    orgs: list[str] = video.metadata["for_organisation"]
+    orgs: list[str] = video.metadata.get("for_organisation", [])
+    if not orgs:
+        log.warn("could not find organisation list on video")
+        return
+
     for org in orgs:
+        keywords = KEYWORDS.get(org)
+        if not keywords:
+            log.error(f"org {org} not found")
+            continue
+
         claims = await get_claims(
-            keywords=KEYWORDS[org],
+            keywords=keywords,
             sentences=[
                 HarmfulClaimFinderSentence(**(s.model_dump() | {"video_id": video.id}))
                 for s in sentences
             ],
-            country_codes=COUNTRIES[org],
+            country_codes=COUNTRIES.get(org, []),
         )  # this list currently needs to be converted to correct format
 
         formatted_claims: list[Claim] = []
@@ -121,16 +130,14 @@ async def analyze_for_narratives(video: Video, video_claims: VideoClaims) -> Non
 
     claims_data = []
     for claim in video_claims.claims:
-        claims_data.append(
-            {
-                "id": str(claim.id),
-                "claim": claim.claim,
-                "video_id": str(video.id),
-                "claim_api_url": urljoin(
-                    app_base_url, "/api/videos/{video_id}/claims/{claim_id}"
-                ),
-            }
-        )
+        claims_data.append({
+            "id": str(claim.id),
+            "claim": claim.claim,
+            "video_id": str(video.id),
+            "claim_api_url": urljoin(
+                app_base_url, "/api/videos/{video_id}/claims/{claim_id}"
+            ),
+        })
 
     payload = {
         "claims": claims_data,
