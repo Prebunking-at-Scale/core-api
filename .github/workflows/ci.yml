@@ -44,6 +44,8 @@ jobs:
           sudo apt-get install postgresql-16-pgvector
       - name: Run tests
         run: uv run pytest
+        env:
+          JWT_SECRET: "somerandomstringtouseforjwttestsonly"
 
   build:
     name: Build & Push

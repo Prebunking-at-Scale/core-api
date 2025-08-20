@@ -1,0 +1,17 @@
+{
+    "email": {
+        "invite": {
+            "subject": "Invitation to join %{organisation_name} on Prebunking at Scale!",
+            "message": "You have been invited to join %{organisation_name} on Prebunking at Scale.",
+            "description": "To accept your invite, click the button below:",
+            "accept_invite": "ACCEPT INVITATION"
+        },
+        "password_reset": {
+            "subject": "Reset your password on Prebunking at Scale",
+            "message": "Someone is trying to reset your password.",
+            "not_you": "If this was not you, you can safely ignore this email.",
+            "reset_message": "To reset your password, click the button bellow:",
+            "reset_link": "RESET PASSWORD"
+        }
+    }
+}

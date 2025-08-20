@@ -6,16 +6,40 @@ spec:
   domains:
     - pas-dev.fullfact.org
 ---
+apiVersion: networking.gke.io/v1beta1
+kind: FrontendConfig
+metadata:
+  name: frontend-frontend-config
+spec:
+  redirectToHttps:
+    enabled: true
+    responseCodeName: MOVED_PERMANENTLY_DEFAULT
+---
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: frontend-backend-config
+spec:
+  timeoutSec: 40
+  connectionDraining:
+    drainingTimeoutSec: 60
+  healthCheck:
+    checkIntervalSec: 30
+    timeoutSec: 5
+    requestPath: /login
+    port: 3000
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: core-api
+  name: frontend
   annotations:
     kubernetes.io/ingress.class: "gce"
     kubernetes.io/ingress.global-static-ip-name: pas-static-ip
     networking.gke.io/managed-certificates: managed-cert
+    networking.gke.io/v1beta1.FrontendConfig: frontend-frontend-config
   labels:
-    app: core-api
+    app: frontend
 spec:
   defaultBackend:
     service:
@@ -23,16 +47,8 @@ spec:
       port:
         number: 3000
   rules:
-    - host: pas-dev.fullfact.org
-      http:
+    - http:
         paths:
-          # - path: /api/*
-          #   pathType: ImplementationSpecific
-          #   backend:
-          #     service:
-          #       name: core-api
-          #       port:
-          #         number: 8000
           - path: /schema/*
             pathType: ImplementationSpecific
             backend:
@@ -62,6 +78,9 @@ metadata:
   name: frontend
   labels:
     app: frontend
+  annotations:
+    cloud.google.com/backend-config: '{"ports": {"3000":"frontend-backend-config"}}'
+    cloud.google.com/neg: '{"ingress": true}'
 spec:
   type: NodePort
   selector:
@@ -69,4 +88,3 @@ spec:
     tier: web
   ports:
     - port: 3000
-      targetPort: 3000
