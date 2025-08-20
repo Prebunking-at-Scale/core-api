@@ -18,7 +18,7 @@ spec:
       serviceAccountName: workload-identity-sa
       containers:
         - name: core-api
-          image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api:v0.10.0-dev.0
+          image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api:v0.11.0-dev.0
           imagePullPolicy: Always
           ports:
             - containerPort: 8000
@@ -73,8 +73,8 @@ spec:
             - name: SMTP_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: core-api-keys
-                  key: keys
+                  name: smtp-details
+                  key: password
             - name: NARRATIVES_BASE_ENDPOINT
               value: https://pas-narratives.fundacionmaldita.es
             - name: NARRATIVES_API_KEY

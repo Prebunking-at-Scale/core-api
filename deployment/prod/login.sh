@@ -1,0 +1,1 @@
+gcloud container clusters get-credentials prod-cluster --project pas-production-1 --location europe-west4-b
