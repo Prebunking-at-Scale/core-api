@@ -44,15 +44,19 @@ DEFAULT_SAFETY_SETTINGS = [
 
 class Sentence(BaseModel):
     text: str
-    source: Literal["audio", "screen"]
+    source: Literal["audio", "video"]
     start_time_s: float
 
 
 async def generate_transcript(video_url: str) -> list[Sentence]:
     prompt = """
-Transcribe the audio into complete sentences and set the `source` field as "audio".
-If text is displayed on the screen that does not match the audio, include it in the transcript and set the `source` field to "screen".
-Only return one copy of each complete sentence from the transcript.
+Transcribe the audio into sentences, splitting into complete sentences naturally.
+If text is displayed in the video that is in the audio transcript, ignore the text.
+If text is displayed in the video one word at a time, ignore the text.
+For all other text, if it can be combined to form complete sentences, then include the sentences in the transcript.
+For each transcript sentence, set the source to "audio" if it was extracted from the audio, or "video" otherwise.
+Return the transcript in the language it is spoken in the video.
+Do not translate the transcript.
 For each sentence, provide a timestamp formatted as SS (seconds only) using the `start_time_s` field.
 """
 
