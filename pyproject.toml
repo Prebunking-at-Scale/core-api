@@ -46,7 +46,7 @@ explicit = true
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu" }]
-harmful-claim-finder = { git = "https://github.com/Prebunking-at-Scale/harmful-claim-finder.git" }
+harmful-claim-finder = { git = "https://github.com/Prebunking-at-Scale/harmful-claim-finder.git" , branch = "make-country-codes-optional-in-pastel-pas-ai-1404"}
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
