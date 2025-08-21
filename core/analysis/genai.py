@@ -44,15 +44,21 @@ DEFAULT_SAFETY_SETTINGS = [
 
 class Sentence(BaseModel):
     text: str
+    source: Literal["audio", "video"]
     start_time_s: float
 
 
 async def generate_transcript(video_url: str) -> list[Sentence]:
-    prompt = """Transcribe the provided video.
-Split the transcript into complete sentences, separated naturally.
-Only return individual sentences.
+    prompt = """
+Transcribe the audio into sentences, splitting into complete sentences naturally.
+If text is displayed in the video that is in the audio transcript, ignore the text.
+If text is displayed in the video one word at a time, ignore the text.
+For all other text, if it can be combined to form complete sentences, then include the sentences in the transcript.
+For each transcript sentence, set the source to "audio" if it was extracted from the audio, or "video" otherwise.
+Return the transcript in the language it is spoken in the video.
+Do not translate the transcript.
 For each sentence, provide a timestamp formatted as SS (seconds only) using the `start_time_s` field.
-    """
+"""
 
     response = await client.aio.models.generate_content(
         model=os.environ["GEMINI_MODEL"],
@@ -80,5 +86,7 @@ For each sentence, provide a timestamp formatted as SS (seconds only) using the 
         raise ValueError(
             f"Did not get expected response from Gemini: {response.parsed}"
         )
+
+    print(response)
 
     return response.parsed
