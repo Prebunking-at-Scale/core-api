@@ -5,6 +5,7 @@ metadata:
   labels:
     app: core-api
 spec:
+  replicas: 2
   selector:
     matchLabels:
       app: core-api
@@ -18,13 +19,17 @@ spec:
       serviceAccountName: workload-identity-sa
       containers:
         - name: core-api
-          image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api:v0.11.0-dev.0
+          image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api:v1.1.4
           imagePullPolicy: Always
           ports:
             - containerPort: 8000
           resources:
             requests:
-              cpu: 200m
+              cpu: 1
+              memory: 5G
+            limits:
+              cpu: 3
+              memory: 7.5G
           readinessProbe:
             httpGet:
               path: /health
@@ -33,9 +38,9 @@ spec:
             httpGet:
               path: /health
               port: 8000
-            initialDelaySeconds: 5
-            periodSeconds: 10
-            timeoutSeconds: 5
+            initialDelaySeconds: 10
+            periodSeconds: 60
+            timeoutSeconds: 30
           env:
             - name: APP_BASE_URL
               value: https://prebunking.efcsn.com
