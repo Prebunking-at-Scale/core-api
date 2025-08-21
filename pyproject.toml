@@ -9,7 +9,7 @@ dependencies = [
     "click>=8.1.0",
     "google-genai>=1.25.0",
     "httpx>=0.27.0",
-    "harmful-claim-finder>=0.1.0",
+    "harmful-claim-finder",
     "email-validator>=2.2.0",
     "google-genai>=1.25.0",
     "litestar[jwt,opentelemetry,pydantic,standard,structlog]>=2.16.0",
@@ -46,7 +46,7 @@ explicit = true
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu" }]
-harmful-claim-finder = { git = "https://github.com/Prebunking-at-Scale/harmful-claim-finder.git"}
+harmful-claim-finder = { git = "https://github.com/Prebunking-at-Scale/harmful-claim-finder.git", tag = "0.1.0" }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
