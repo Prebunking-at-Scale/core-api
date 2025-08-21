@@ -29,7 +29,7 @@ from core.videos.models import (
     VideoFilters,
     VideoPatch,
 )
-from core.videos.pastel import COUNTRIES, KEYWORDS
+from core.videos.pastel import KEYWORDS
 from core.videos.service import VideoService
 from core.videos.transcripts.service import TranscriptService
 
@@ -90,7 +90,6 @@ async def extract_transcript_and_claims(
                     )
                     for s in sentences
                 ],
-                country_codes=COUNTRIES.get(org, []),
             )
 
             for claim in claims:
@@ -132,15 +131,17 @@ async def analyze_for_narratives(video: Video, video_claims: list[Claim]) -> Non
 
     claims_data = []
     for claim in video_claims:
-        claims_data.append({
-            "id": str(claim.id),
-            "claim": claim.claim,
-            "score": claim.metadata.get("score", 0),
-            "video_id": str(video.id),
-            "claim_api_url": urljoin(
-                APP_BASE_URL, "/api/videos/{video_id}/claims/{claim_id}"
-            ),
-        })
+        claims_data.append(
+            {
+                "id": str(claim.id),
+                "claim": claim.claim,
+                "score": claim.metadata.get("score", 0),
+                "video_id": str(video.id),
+                "claim_api_url": urljoin(
+                    APP_BASE_URL, "/api/videos/{video_id}/claims/{claim_id}"
+                ),
+            }
+        )
 
     payload = {
         "claims": claims_data,
