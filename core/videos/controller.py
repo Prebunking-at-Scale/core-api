@@ -148,7 +148,7 @@ async def analyze_for_narratives(video: Video, video_claims: list[Claim]) -> Non
         "narratives_api_url": urljoin(APP_BASE_URL, "/api/narratives"),
     }
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=60.0) as client:
         try:
             url = f"{NARRATIVES_BASE_URL}/add-contents"
             response = await client.post(
