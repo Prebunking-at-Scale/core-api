@@ -195,15 +195,25 @@ class ClaimRepository:
         return Video(**row) if row else None
 
     async def get_all_claims(
-        self, limit: int = 100, offset: int = 0, topic_id: UUID | None = None
+        self, 
+        limit: int = 100, 
+        offset: int = 0, 
+        topic_id: UUID | None = None,
+        text: str | None = None
     ) -> tuple[list[EnrichedClaim], int]:
         # Build the query conditionally
-        where_clause = ""
-        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        where_conditions = []
+        params: dict[str, int | UUID | str] = {"limit": limit, "offset": offset}
 
         if topic_id:
-            where_clause = "WHERE ct.topic_id = %(topic_id)s"
+            where_conditions.append("ct.topic_id = %(topic_id)s")
             params["topic_id"] = topic_id
+            
+        if text:
+            where_conditions.append("LOWER(c.claim) LIKE LOWER(%(text)s)")
+            params["text"] = f"%{text}%"
+            
+        where_clause = "WHERE " + " AND ".join(where_conditions) if where_conditions else ""
 
         # Get total count
         count_query = f"""

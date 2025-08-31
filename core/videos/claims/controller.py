@@ -125,17 +125,18 @@ class RootClaimController(Controller):
 
     @get(
         path="/",
-        summary="Get all claims with optional topic filter",
+        summary="Get all claims with optional topic and text filters",
     )
     async def get_all_claims(
         self,
         claims_service: ClaimsService,
         topic_id: UUID | None = Parameter(None, query="topic_id"),
+        text: str | None = Parameter(None, query="text"),
         limit: int = Parameter(100, query="limit", gt=0, le=1000),
         offset: int = Parameter(0, query="offset", ge=0),
     ) -> PaginatedJSON[list[EnrichedClaim]]:
         claims, total = await claims_service.get_all_claims(
-            limit=limit, offset=offset, topic_id=topic_id
+            limit=limit, offset=offset, topic_id=topic_id, text=text
         )
         page = (offset // limit) + 1 if limit > 0 else 1
         return PaginatedJSON(
