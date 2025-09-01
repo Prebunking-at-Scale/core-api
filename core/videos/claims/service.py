@@ -56,11 +56,18 @@ class ClaimsService:
         limit: int = 100, 
         offset: int = 0, 
         topic_id: UUID | None = None,
-        text: str | None = None
+        text: str | None = None,
+        min_score: float | None = None,
+        max_score: float | None = None
     ) -> tuple[list[EnrichedClaim], int]:
         async with self.repo() as repo:
             return await repo.get_all_claims(
-                limit=limit, offset=offset, topic_id=topic_id, text=text
+                limit=limit, 
+                offset=offset, 
+                topic_id=topic_id, 
+                text=text,
+                min_score=min_score,
+                max_score=max_score
             )
 
     async def associate_topics_with_claim(
