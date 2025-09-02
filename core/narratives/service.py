@@ -33,7 +33,7 @@ class NarrativeService:
                     existing_topic_ids = [topic.id for topic in existing_narrative.topics]
                     merged_topic_ids = list(set(existing_topic_ids + narrative.topic_ids))
                     
-                    return await repo.update_narrative(
+                    updated_narrative = await repo.update_narrative(
                         narrative_id=existing_narrative.id,
                         title=narrative.title,
                         description=narrative.description,
@@ -41,6 +41,9 @@ class NarrativeService:
                         topic_ids=merged_topic_ids,
                         metadata=narrative.metadata,
                     )
+                    if updated_narrative is None:
+                        raise ValueError(f"Failed to update narrative with ID {existing_narrative.id}")
+                    return updated_narrative
 
             return await repo.create_narrative(
                 title=narrative.title,
