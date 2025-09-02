@@ -19,6 +19,29 @@ class NarrativeService:
             if not await repo.claims_exist(narrative.claim_ids):
                 raise ValueError("one or more claims not found")
 
+            narrative_id_in_metadata = narrative.metadata.get("narrative_id")
+            if narrative_id_in_metadata:
+                existing_narrative = await repo.find_by_narrative_id_in_metadata(
+                    narrative_id_in_metadata
+                )
+                
+                if existing_narrative:
+                    # Merge claim_ids and topic_ids with existing ones
+                    existing_claim_ids = [claim.id for claim in existing_narrative.claims]
+                    merged_claim_ids = list(set(existing_claim_ids + narrative.claim_ids))
+                    
+                    existing_topic_ids = [topic.id for topic in existing_narrative.topics]
+                    merged_topic_ids = list(set(existing_topic_ids + narrative.topic_ids))
+                    
+                    return await repo.update_narrative(
+                        narrative_id=existing_narrative.id,
+                        title=narrative.title,
+                        description=narrative.description,
+                        claim_ids=merged_claim_ids,
+                        topic_ids=merged_topic_ids,
+                        metadata=narrative.metadata,
+                    )
+
             return await repo.create_narrative(
                 title=narrative.title,
                 description=narrative.description,
