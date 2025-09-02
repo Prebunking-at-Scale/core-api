@@ -208,8 +208,9 @@ class VideoController(Controller):
         video_service: VideoService,
         transcript_service: TranscriptService,
         claims_service: ClaimsService,
-        platform: list[str] | None = Parameter(None, query="platform"),
-        channel: list[str] | None = Parameter(None, query="channel"),
+        platform: str | None = Parameter(None, query="platform"),
+        channel: str | None = Parameter(None, query="channel"),
+        text: str | None = Parameter(None, query="text"),
         limit: int = Parameter(25, query="limit", gt=0, le=100),
         offset: int = Parameter(0, query="offset", ge=0),
     ) -> PaginatedJSON[list[AnalysedVideo]]:
@@ -218,6 +219,7 @@ class VideoController(Controller):
             offset=offset,
             platform=platform,
             channel=channel,
+            text=text,
         )
 
         # Fetch claims and narratives for each video

@@ -36,11 +36,20 @@ class NarrativeService:
             return await repo.get_narratives_by_claim(claim_id)
 
     async def get_all_narratives(
-        self, limit: int = 100, offset: int = 0
+        self, 
+        limit: int = 100, 
+        offset: int = 0,
+        topic_id: UUID | None = None,
+        text: str | None = None
     ) -> tuple[list[Narrative], int]:
         async with self.repo() as repo:
-            narratives = await repo.get_all_narratives(limit=limit, offset=offset)
-            total = await repo.count_all_narratives()
+            narratives = await repo.get_all_narratives(
+                limit=limit, 
+                offset=offset, 
+                topic_id=topic_id, 
+                text=text
+            )
+            total = await repo.count_all_narratives(topic_id=topic_id, text=text)
             return narratives, total
 
     async def update_narrative(
