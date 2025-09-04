@@ -7,7 +7,7 @@ from litestar.exceptions import NotFoundException
 
 from core.errors import ConflictError
 from core.models import Narrative
-from core.narratives.models import NarrativeInput
+from core.narratives.models import NarrativeInput, NarrativeUpdate
 from core.narratives.service import NarrativeService
 from core.response import JSON, PaginatedJSON
 from core.uow import ConnectionFactory
@@ -124,7 +124,7 @@ class NarrativeController(Controller):
         self,
         narrative_service: NarrativeService,
         narrative_id: UUID,
-        data: NarrativeInput,
+        data: NarrativeUpdate,
     ) -> JSON[Narrative]:
         narrative = await narrative_service.update_narrative(narrative_id, data)
         if not narrative:
