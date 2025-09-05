@@ -1,8 +1,11 @@
 """Background tasks for the alert system."""
 
+import logging
 from typing import Any
 
 from core.email import Emailer
+
+log = logging.getLogger(__name__)
 
 
 async def send_alert_email(
@@ -24,4 +27,4 @@ async def send_alert_email(
     
     emailer.send(to, subject, body)
     
-    print(f"Sent alert email to {to} for alerts: {alert_ids}")
+    log.info(f"Sent alert email to {to} for alerts: {alert_ids}")
