@@ -2,7 +2,7 @@ from typing import Any, AsyncContextManager
 from uuid import UUID
 
 from core.models import Narrative
-from core.narratives.models import NarrativeInput
+from core.narratives.models import NarrativeInput, NarrativeUpdate
 from core.narratives.repo import NarrativeRepository
 from core.uow import ConnectionFactory, uow
 
@@ -81,9 +81,15 @@ class NarrativeService:
     async def update_narrative(
         self,
         narrative_id: UUID,
-        data: NarrativeInput,
+        data: NarrativeUpdate,
     ) -> Narrative | None:
         async with self.repo() as repo:
+            # Get existing narrative first to preserve unchanged fields
+            existing = await repo.get_narrative(narrative_id)
+            if not existing:
+                return None
+            
+            # Call update_narrative with only provided fields
             return await repo.update_narrative(
                 narrative_id=narrative_id,
                 title=data.title,
