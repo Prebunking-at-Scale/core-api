@@ -89,20 +89,15 @@ class NarrativeService:
             if not existing:
                 return None
             
-            # Build update params with only provided fields
-            update_params = {"narrative_id": narrative_id}
-            if data.title is not None:
-                update_params["title"] = data.title
-            if data.description is not None:
-                update_params["description"] = data.description
-            if data.claim_ids is not None:
-                update_params["claim_ids"] = data.claim_ids
-            if data.topic_ids is not None:
-                update_params["topic_ids"] = data.topic_ids
-            if data.metadata is not None:
-                update_params["metadata"] = data.metadata
-            
-            return await repo.update_narrative(**update_params)
+            # Call update_narrative with only provided fields
+            return await repo.update_narrative(
+                narrative_id=narrative_id,
+                title=data.title,
+                description=data.description,
+                claim_ids=data.claim_ids,
+                topic_ids=data.topic_ids,
+                metadata=data.metadata,
+            )
 
     async def delete_narrative(self, narrative_id: UUID) -> None:
         async with self.repo() as repo:
