@@ -14,6 +14,7 @@ from core import config, email
 from core.auth import dependencies, middleware
 from core.auth.controller import AuthController
 from core.auth.service import AuthService
+from core.media_feeds.controller import MediaFeedController
 from core.migrate import migrate
 from core.narratives.controller import NarrativeController
 from core.topics.controller import TopicController
@@ -21,7 +22,7 @@ from core.videos.claims.controller import ClaimController, RootClaimController
 from core.videos.controller import VideoController
 from core.videos.transcripts.controller import TranscriptController
 
-MIGRATION_TARGET_VERSION = 10
+MIGRATION_TARGET_VERSION = 11
 
 
 postgres_url = f"postgresql://{config.DB_USER}:{config.DB_PASSWORD}@{config.DB_HOST}:{config.DB_PORT}/{config.DB_NAME}"
@@ -94,6 +95,7 @@ api_router = Router(
         RootClaimController,
         NarrativeController,
         TopicController,
+        MediaFeedController,
     ],
 )
 
