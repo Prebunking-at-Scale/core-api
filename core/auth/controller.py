@@ -13,6 +13,7 @@ from core.auth.models import (
     AdminStatus,
     AuthToken,
     Identity,
+    InvitedUser,
     Login,
     LoginOptions,
     Organisation,
@@ -281,3 +282,15 @@ class AuthController(Controller):
         organisation: Organisation,
     ) -> JSON[list[User]]:
         return JSON(await auth_service.organisation_users(organisation.id))
+
+    @get(
+        path="/organisation/invited",
+        summary="List users who have been invited but not yet accepted",
+        tags=["organisations"],
+    )
+    async def invited_users(
+        self,
+        auth_service: AuthService,
+        organisation: Organisation,
+    ) -> JSON[list[InvitedUser]]:
+        return JSON(await auth_service.invited_users(organisation.id))
