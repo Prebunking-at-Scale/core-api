@@ -4,7 +4,12 @@ from pytest import raises
 
 from core.auth.models import AuthToken, Organisation, User
 from core.auth.service import AuthService
-from core.errors import InvalidInviteError, NotAuthorizedError, NotFoundError
+from core.errors import (
+    ConflictError,
+    InvalidInviteError,
+    NotAuthorizedError,
+    NotFoundError,
+)
 from tests.auth.conftest import OrganisationFactory, create_organisation
 
 
@@ -223,3 +228,49 @@ async def test_can_re_invite_after_removal(
 
     login = await auth_service.login(user.email, password)
     assert len(login.organisations) == 1
+
+
+async def test_resend_invite_token(
+    auth_service: AuthService, organisation: Organisation
+) -> None:
+    email = "test@example.com"
+
+    # First invite
+    token1 = await auth_service.invite_token(
+        organisation_id=organisation.id,
+        email=email,
+        as_admin=False,
+        auto_accept=False,
+    )
+    assert token1
+
+    # Resend invite
+    token2 = await auth_service.resend_invite_token(
+        organisation_id=organisation.id,
+        email=email,
+    )
+    assert token2
+
+    options = await auth_service.accept_invite(token2)
+    assert options.user.email == email
+    assert len(options.organisations) == 1
+
+
+async def test_resend_invite_already_accepted_fails(
+    auth_service: AuthService, organisation: Organisation
+) -> None:
+    email = "test@example.com"
+
+    # Auto-accept invite
+    await auth_service.invite_token(
+        organisation_id=organisation.id,
+        email=email,
+        as_admin=False,
+        auto_accept=True,
+    )
+
+    with raises(ConflictError, match="user has already accepted the invite"):
+        await auth_service.resend_invite_token(
+            organisation_id=organisation.id,
+            email=email,
+        )
