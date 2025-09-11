@@ -4,7 +4,7 @@ from uuid import UUID
 from litestar import Controller, delete, get, patch, post
 from litestar.di import Provide
 from litestar.dto import DTOData
-from litestar.exceptions import NotFoundException
+from litestar.exceptions import NotFoundException, ValidationException
 
 from core.auth.guards import api_only, organisation_admin
 from core.auth.models import Organisation
@@ -13,10 +13,11 @@ from core.media_feeds.models import (
     AllFeeds,
     ChannelFeed,
     ChannelFeedDTO,
+    ChannelURLRequest,
+    ChannelURLRequestDTO,
     Cursor,
     KeywordFeed,
     KeywordFeedDTO,
-    MediaFeed,
 )
 from core.media_feeds.service import MediaFeedService
 from core.response import JSON
@@ -135,6 +136,33 @@ class MediaFeedController(Controller):
                 organisation_id=channel_data.organisation_id,
                 channel=channel_data.channel,
                 platform=channel_data.platform,
+            )
+        )
+
+    @post(
+        path="/channels/from-url",
+        summary="Create a new channel feed from URL",
+        guards=[organisation_admin],
+        dto=ChannelURLRequestDTO,
+        return_dto=None,
+        raises=[ConflictError, ValidationException],
+    )
+    async def create_channel_feed_from_url(
+        self,
+        media_feeds_service: MediaFeedService,
+        organisation: Organisation,
+        data: DTOData[ChannelURLRequest],
+    ) -> JSON[ChannelFeed]:
+        url_data = data.create_instance()
+        try:
+            platform, channel = url_data.parse_channel_info()
+        except ValueError as e:
+            raise ValidationException(str(e))
+        return JSON(
+            await media_feeds_service.create_channel_feed(
+                organisation_id=organisation.id,
+                channel=channel,
+                platform=platform,
             )
         )
 

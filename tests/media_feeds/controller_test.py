@@ -35,6 +35,71 @@ async def test_create_channel_feed(
     assert response_data["is_archived"] is False
 
 
+async def test_create_channel_feed_from_url_youtube(
+    api_key_client: AsyncTestClient[Litestar],
+    organisation: Organisation,
+) -> None:
+    url_data = {"url": "https://www.youtube.com/@testchannel"}
+    response = await api_key_client.post(
+        "/api/media_feeds/channels/from-url",
+        params={"organisation_id": str(organisation.id)},
+        json=url_data,
+    )
+    assert response.status_code == 201
+    response_data = response.json()["data"]
+    assert response_data["organisation_id"] == str(organisation.id)
+    assert response_data["channel"] == "testchannel"
+    assert response_data["platform"] == "youtube"
+    assert response_data["is_archived"] is False
+
+
+async def test_create_channel_feed_from_url_instagram(
+    api_key_client: AsyncTestClient[Litestar],
+    organisation: Organisation,
+) -> None:
+    url_data = {"url": "https://www.instagram.com/testuser"}
+    response = await api_key_client.post(
+        "/api/media_feeds/channels/from-url",
+        params={"organisation_id": str(organisation.id)},
+        json=url_data,
+    )
+    assert response.status_code == 201
+    response_data = response.json()["data"]
+    assert response_data["organisation_id"] == str(organisation.id)
+    assert response_data["channel"] == "testuser"
+    assert response_data["platform"] == "instagram"
+
+
+async def test_create_channel_feed_from_url_tiktok(
+    api_key_client: AsyncTestClient[Litestar],
+    organisation: Organisation,
+) -> None:
+    url_data = {"url": "https://www.tiktok.com/@testuser"}
+    response = await api_key_client.post(
+        "/api/media_feeds/channels/from-url",
+        params={"organisation_id": str(organisation.id)},
+        json=url_data,
+    )
+    assert response.status_code == 201
+    response_data = response.json()["data"]
+    assert response_data["organisation_id"] == str(organisation.id)
+    assert response_data["channel"] == "testuser"
+    assert response_data["platform"] == "tiktok"
+
+
+async def test_create_channel_feed_from_url_invalid(
+    api_key_client: AsyncTestClient[Litestar],
+    organisation: Organisation,
+) -> None:
+    url_data = {"url": "https://www.example.com/invalid"}
+    response = await api_key_client.post(
+        "/api/media_feeds/channels/from-url",
+        params={"organisation_id": str(organisation.id)},
+        json=url_data,
+    )
+    assert response.status_code == 400
+
+
 async def test_create_channel_feed_conflict(
     api_key_client: AsyncTestClient[Litestar],
     organisation: Organisation,
