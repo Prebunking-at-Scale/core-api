@@ -237,6 +237,7 @@ class MediaFeedRepository:
             UPDATE keyword_feeds
             SET is_archived = true, updated_at = NOW()
             WHERE id = %(feed_id)s
+            AND NOT is_archived
             AND (%(organisation_id)s::uuid IS NULL OR organisation_id = %(organisation_id)s::uuid)
             """,
             {
