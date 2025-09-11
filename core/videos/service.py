@@ -42,13 +42,14 @@ class VideoService:
 
     async def get_videos_paginated(
         self,
-        limit: int,
-        offset: int,
-        platform: list[str] | None = None,
-        channel: list[str] | None = None,
+        limit: int = 100, 
+        offset: int = 0,
+        platform: str | None = None,
+        channel: str | None = None,
+        text: str | None = None,
     ) -> tuple[list[Video], int]:
         async with self.repo() as repo:
-            return await repo.get_videos_paginated(limit, offset, platform, channel)
+            return await repo.get_videos_paginated(limit, offset, platform, channel, text)
 
     async def get_narratives_for_video(self, video_id: UUID) -> list[Narrative]:
         async with self.repo() as repo:

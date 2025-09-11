@@ -1,0 +1,17 @@
+{
+    "email": {
+        "invite": {
+            "subject": "Invitation à rejoindre %{organisation_name} sur Prebunking at Scale!",
+            "message": "Vous avez été invité à rejoindre %{organisation_name} sur Prebunking at Scale.",
+            "description": "Pour accepter votre invitation, cliquez sur le bouton ci-dessous:",
+            "accept_invite": "ACCEPTER L'INVITATION"
+        },
+        "password_reset": {
+            "subject": "Réinitialisez votre mot de passe sur Prebunking at Scale",
+            "message": "Quelqu'un essaie de réinitialiser votre mot de passe.",
+            "not_you": "Si ce n'était pas vous, vous pouvez ignorer cet e-mail en toute sécurité.",
+            "reset_message": "Pour réinitialiser votre mot de passe, cliquez sur le bouton ci-dessous:",
+            "reset_link": "RÉINITIALISER LE MOT DE PASSE"
+        }
+    }
+}

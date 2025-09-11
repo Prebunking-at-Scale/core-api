@@ -46,7 +46,7 @@ explicit = true
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu" }]
-harmful-claim-finder = { git = "https://github.com/Prebunking-at-Scale/harmful-claim-finder.git" }
+harmful-claim-finder = { git = "https://github.com/Prebunking-at-Scale/harmful-claim-finder.git", tag = "0.1.0" }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

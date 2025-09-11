@@ -11,6 +11,7 @@ from psycopg.rows import DictRow, dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from core import config, email
+from core.alerts.controller import AlertController
 from core.auth import dependencies, middleware
 from core.auth.controller import AuthController
 from core.auth.service import AuthService
@@ -89,6 +90,7 @@ api_router = Router(
     ],
     route_handlers=[
         AuthController,
+        AlertController,
         VideoController,
         TranscriptController,
         ClaimController,

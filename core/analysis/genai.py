@@ -1,4 +1,6 @@
+import asyncio
 import os
+import random
 from typing import Literal
 
 from google import genai
@@ -44,45 +46,57 @@ DEFAULT_SAFETY_SETTINGS = [
 
 class Sentence(BaseModel):
     text: str
+    source: Literal["audio", "video"]
     start_time_s: float
-    source: Literal["audio"] | Literal["screen"]
-    is_claim: bool
 
 
-async def generate_transcript(video_url: str) -> list[Sentence]:
+class RetriesExceededError(Exception):
+    pass
+
+
+async def generate_transcript(video_url: str, retries: int = 3) -> list[Sentence]:
     prompt = """
-    Transcribe the spoken audio, and extract any text displayed on the screen into complete sentences.
-    For audio, specify the "source" as "audio", and for text from the screen specify the source as "screen".
-    If a sentence appears to be a claim, you must mark it as so by setting `is_claim` to True.
-    Each sentence must be separated naturally.
-    The Timestamps for each sentence must be provided as SS (seconds only) using the `start_time_s` field.
-    """
-
-    response = await client.aio.models.generate_content(
-        model=os.environ["GEMINI_MODEL"],
-        config=GenerateContentConfig(
-            safety_settings=DEFAULT_SAFETY_SETTINGS,
-            audio_timestamp=True,
-            response_mime_type="application/json",
-            response_schema=list[Sentence],
-        ),
-        contents=Content(
-            role="user",
-            parts=[
-                Part(
-                    file_data=FileData(
-                        file_uri=video_url,
-                        mime_type="video/mp4",
-                    )
+Transcribe the audio into sentences, splitting into complete sentences naturally.
+If text is displayed in the video that is in the audio transcript, ignore the text.
+If text is displayed in the video one word at a time, ignore the text.
+For all other text, if it can be combined to form complete sentences, then include the sentences in the transcript.
+For each transcript sentence, set the source to "audio" if it was extracted from the audio, or "video" otherwise.
+Return the transcript in the language it is spoken in the video.
+Do not translate the transcript.
+For each sentence, provide a timestamp formatted as SS (seconds only) using the `start_time_s` field.
+"""
+    for _ in range(retries):
+        try:
+            response = await client.aio.models.generate_content(
+                model=os.environ["GEMINI_MODEL"],
+                config=GenerateContentConfig(
+                    safety_settings=DEFAULT_SAFETY_SETTINGS,
+                    audio_timestamp=True,
+                    response_mime_type="application/json",
+                    response_schema=list[Sentence],
                 ),
-                Part(text=prompt),
-            ],
-        ),
-    )
+                contents=Content(
+                    role="user",
+                    parts=[
+                        Part(
+                            file_data=FileData(
+                                file_uri=video_url,
+                                mime_type="video/mp4",
+                            )
+                        ),
+                        Part(text=prompt),
+                    ],
+                ),
+            )
 
-    if not response.parsed or not isinstance(response.parsed, list):
-        raise ValueError(
-            f"Did not get expected response from Gemini: {response.parsed}"
-        )
+            if not response.parsed or not isinstance(response.parsed, list):
+                raise ValueError(
+                    f"Did not get expected response from Gemini: {response.parsed}"
+                )
+            return response.parsed
 
-    return response.parsed
+        except Exception:
+            await asyncio.sleep(random.randint(5, 30))
+            continue
+
+    raise RetriesExceededError(f"failed to get transcript after {retries} attempts")
