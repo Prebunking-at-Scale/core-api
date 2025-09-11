@@ -60,20 +60,6 @@ class MediaFeedController(Controller):
         return JSON(await media_feeds_service.get_all_feeds())
 
     @get(
-        path="/{feed_id:uuid}",
-        summary="Get a specific feed by ID",
-    )
-    async def get_feed_by_id(
-        self,
-        media_feeds_service: MediaFeedService,
-        feed_id: UUID,
-    ) -> JSON[MediaFeed]:
-        feed = await media_feeds_service.get_feed_by_id(feed_id)
-        if not feed:
-            raise NotFoundException()
-        return JSON(feed)
-
-    @get(
         path="/channels",
         summary="Get channel feeds",
     )

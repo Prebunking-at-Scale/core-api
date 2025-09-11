@@ -29,19 +29,6 @@ class MediaFeedRepository:
         )
         return [MediaFeed(**row) for row in await self._session.fetchall()]
 
-    async def get_feed_by_id(self, feed_id: UUID) -> MediaFeed | None:
-        await self._session.execute(
-            """
-            SELECT * FROM media_feeds
-            WHERE id = %(feed_id)s
-            """,
-            {"feed_id": str(feed_id)},
-        )
-        row = await self._session.fetchone()
-        if not row:
-            return None
-        return MediaFeed(**row)
-
     async def get_channel_feeds(
         self, organisation_id: UUID | None = None
     ) -> list[ChannelFeed]:

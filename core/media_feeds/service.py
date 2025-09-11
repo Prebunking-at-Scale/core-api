@@ -10,7 +10,6 @@ from core.media_feeds.models import (
     ChannelFeed,
     Cursor,
     KeywordFeed,
-    MediaFeed,
 )
 from core.media_feeds.repo import MediaFeedRepository
 from core.uow import ConnectionFactory, uow
@@ -29,10 +28,6 @@ class MediaFeedService:
                 channel_feeds=await repo.get_channel_feeds(organisation_id),
                 keyword_feeds=await repo.get_keyword_feeds(organisation_id),
             )
-
-    async def get_feed_by_id(self, feed_id: UUID) -> MediaFeed | None:
-        async with self.repo() as repo:
-            return await repo.get_feed_by_id(feed_id)
 
     async def get_channel_feeds(self, organisation_id: UUID) -> list[ChannelFeed]:
         async with self.repo() as repo:
