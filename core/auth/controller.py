@@ -13,6 +13,7 @@ from core.auth.models import (
     AdminStatus,
     AuthToken,
     Identity,
+    InvitedUser,
     Login,
     LoginOptions,
     Organisation,
@@ -291,5 +292,5 @@ class AuthController(Controller):
         self,
         auth_service: AuthService,
         organisation: Organisation,
-    ) -> JSON[list[User]]:
+    ) -> JSON[list[InvitedUser]]:
         return JSON(await auth_service.invited_users(organisation.id))

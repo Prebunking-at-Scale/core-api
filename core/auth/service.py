@@ -12,6 +12,7 @@ from litestar.security.jwt import JWTAuth
 from core.auth.models import (
     AuthToken,
     Identity,
+    InvitedUser,
     LoginOptions,
     Organisation,
     OrganisationToken,
@@ -127,7 +128,7 @@ class AuthService:
         async with self.repo() as repo:
             return await repo.organisation_users(organisation_id)
 
-    async def invited_users(self, organisation_id: UUID) -> list[User]:
+    async def invited_users(self, organisation_id: UUID) -> list[InvitedUser]:
         async with self.repo() as repo:
             return await repo.invited_users(organisation_id)
 

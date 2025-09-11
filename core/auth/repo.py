@@ -4,7 +4,7 @@ from uuid import UUID
 import psycopg
 from psycopg.rows import DictRow
 
-from core.auth.models import Organisation, User
+from core.auth.models import InvitedUser, Organisation, User
 from core.errors import (
     ConflictError,
     InvalidInviteError,
@@ -387,10 +387,10 @@ class AuthRepository:
 
         return [User(**row) for row in await self._session.fetchall()]
 
-    async def invited_users(self, organisation_id: UUID) -> list[User]:
+    async def invited_users(self, organisation_id: UUID) -> list[InvitedUser]:
         await self._session.execute(
             """
-            SELECT u.*
+            SELECT u.*, ou.invited
             FROM users u
             JOIN organisation_users ou ON ou.user_id = u.id
             WHERE
@@ -401,4 +401,9 @@ class AuthRepository:
             {"organisation_id": organisation_id},
         )
 
-        return [User(**row) for row in await self._session.fetchall()]
+        invited_users = []
+        for row in await self._session.fetchall():
+            invited_users.append(
+                InvitedUser(user=User(**row), invited_at=row["invited"])
+            )
+        return invited_users

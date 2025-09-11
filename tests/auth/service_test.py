@@ -2,7 +2,7 @@ import uuid
 
 from pytest import raises
 
-from core.auth.models import AuthToken, Organisation, User
+from core.auth.models import AuthToken, InvitedUser, Organisation, User
 from core.auth.service import AuthService
 from core.errors import InvalidInviteError, NotAuthorizedError, NotFoundError
 from tests.auth.conftest import OrganisationFactory, create_organisation
@@ -242,7 +242,9 @@ async def test_invited_users(
 
     invited = await auth_service.invited_users(organisation.id)
     assert len(invited) == 1
-    assert invited[0].email == email
+    assert isinstance(invited[0], InvitedUser)
+    assert invited[0].user.email == email
+    assert invited[0].invited_at is not None
 
     await auth_service.accept_invite(token)
 
@@ -260,7 +262,9 @@ async def test_invited_users(
 
     invited = await auth_service.invited_users(organisation.id)
     assert len(invited) == 1
-    assert invited[0].email == email2
+    assert isinstance(invited[0], InvitedUser)
+    assert invited[0].user.email == email2
+    assert invited[0].invited_at is not None
 
     user2 = await auth_service.get_user_by_email(email2)
     assert user2

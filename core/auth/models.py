@@ -60,6 +60,13 @@ class OrganisationInvite(BaseModel):
     as_admin: bool = False
 
 
+class InvitedUser(BaseModel):
+    """InvitedUser includes user details and when they were invited"""
+
+    user: User
+    invited_at: datetime
+
+
 class Login(BaseModel):
     email: str
     password: Annotated[SecretStr, Field(min_length=12)]
