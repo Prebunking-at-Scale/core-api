@@ -223,3 +223,48 @@ async def test_can_re_invite_after_removal(
 
     login = await auth_service.login(user.email, password)
     assert len(login.organisations) == 1
+
+
+async def test_invited_users(
+    auth_service: AuthService, organisation: Organisation
+) -> None:
+    invited = await auth_service.invited_users(organisation.id)
+    assert len(invited) == 0
+
+    email = "invited@example.com"
+    token = await auth_service.invite_token(
+        organisation_id=organisation.id,
+        email=email,
+        as_admin=False,
+        auto_accept=False,
+    )
+    assert token
+
+    invited = await auth_service.invited_users(organisation.id)
+    assert len(invited) == 1
+    assert invited[0].email == email
+
+    await auth_service.accept_invite(token)
+
+    invited = await auth_service.invited_users(organisation.id)
+    assert len(invited) == 0
+
+    email2 = "invited2@example.com"
+    token2 = await auth_service.invite_token(
+        organisation_id=organisation.id,
+        email=email2,
+        as_admin=True,
+        auto_accept=False,
+    )
+    assert token2
+
+    invited = await auth_service.invited_users(organisation.id)
+    assert len(invited) == 1
+    assert invited[0].email == email2
+
+    user2 = await auth_service.get_user_by_email(email2)
+    assert user2
+    await auth_service.remove_user(user2.id, organisation.id)
+
+    invited = await auth_service.invited_users(organisation.id)
+    assert len(invited) == 0

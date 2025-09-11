@@ -127,6 +127,10 @@ class AuthService:
         async with self.repo() as repo:
             return await repo.organisation_users(organisation_id)
 
+    async def invited_users(self, organisation_id: UUID) -> list[User]:
+        async with self.repo() as repo:
+            return await repo.invited_users(organisation_id)
+
     async def invite_token(
         self,
         organisation_id: UUID,

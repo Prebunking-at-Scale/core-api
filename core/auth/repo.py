@@ -386,3 +386,19 @@ class AuthRepository:
         )
 
         return [User(**row) for row in await self._session.fetchall()]
+
+    async def invited_users(self, organisation_id: UUID) -> list[User]:
+        await self._session.execute(
+            """
+            SELECT u.*
+            FROM users u
+            JOIN organisation_users ou ON ou.user_id = u.id
+            WHERE
+                ou.organisation_id = %(organisation_id)s
+                AND ou.accepted IS NULL
+                AND ou.deactivated IS NULL
+            """,
+            {"organisation_id": organisation_id},
+        )
+
+        return [User(**row) for row in await self._session.fetchall()]
