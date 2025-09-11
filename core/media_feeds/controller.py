@@ -1,3 +1,4 @@
+from typing import Any
 from uuid import UUID
 
 from litestar import Controller, delete, get, patch, post
@@ -5,12 +6,17 @@ from litestar.di import Provide
 from litestar.dto import DTOData
 from litestar.exceptions import NotFoundException
 
+from core.auth.guards import api_only, organisation_admin
+from core.auth.models import Organisation
 from core.errors import ConflictError
 from core.media_feeds.models import (
+    AllFeeds,
     ChannelFeed,
     ChannelFeedDTO,
+    Cursor,
     KeywordFeed,
     KeywordFeedDTO,
+    MediaFeed,
 )
 from core.media_feeds.service import MediaFeedService
 from core.response import JSON
@@ -31,49 +37,41 @@ class MediaFeedController(Controller):
         "media_feeds_service": Provide(media_feeds_service),
     }
 
-    @post(
-        path="/channels",
-        summary="Create a new channel feed",
-        dto=ChannelFeedDTO,
-        return_dto=None,
-        raises=[ConflictError],
+    @get(
+        path="/",
+        summary="Get all media feeds for the current organisation",
     )
-    async def create_channel_feed(
+    async def get_organisation_feeds(
         self,
         media_feeds_service: MediaFeedService,
-        data: DTOData[ChannelFeed],
-    ) -> JSON[ChannelFeed]:
-        channel_data = data.create_instance()
-        return JSON(
-            await media_feeds_service.create_channel_feed(
-                organisation_id=channel_data.organisation_id,
-                user_id=channel_data.created_by_user_id,
-                channel=channel_data.channel,
-                platform=channel_data.platform,
-            )
-        )
+        organisation: Organisation,
+    ) -> JSON[AllFeeds]:
+        return JSON(await media_feeds_service.get_all_feeds(organisation.id))
 
-    @post(
-        path="/keywords",
-        summary="Create a new keyword feed",
-        dto=KeywordFeedDTO,
-        return_dto=None,
-        raises=[ConflictError],
+    @get(
+        path="/all",
+        summary="Get all media feeds for all organisations",
+        guards=[api_only],
     )
-    async def create_keyword_feed(
+    async def get_all_feeds(
         self,
         media_feeds_service: MediaFeedService,
-        data: DTOData[KeywordFeed],
-    ) -> JSON[KeywordFeed]:
-        keyword_data = data.create_instance()
-        return JSON(
-            await media_feeds_service.create_keyword_feed(
-                organisation_id=keyword_data.organisation_id,
-                user_id=keyword_data.created_by_user_id,
-                topic=keyword_data.topic,
-                keywords=keyword_data.keywords,
-            )
-        )
+    ) -> JSON[AllFeeds]:
+        return JSON(await media_feeds_service.get_all_feeds())
+
+    @get(
+        path="/{feed_id:uuid}",
+        summary="Get a specific feed by ID",
+    )
+    async def get_feed_by_id(
+        self,
+        media_feeds_service: MediaFeedService,
+        feed_id: UUID,
+    ) -> JSON[MediaFeed]:
+        feed = await media_feeds_service.get_feed_by_id(feed_id)
+        if not feed:
+            raise NotFoundException()
+        return JSON(feed)
 
     @get(
         path="/channels",
@@ -82,9 +80,26 @@ class MediaFeedController(Controller):
     async def get_channel_feeds(
         self,
         media_feeds_service: MediaFeedService,
-        organisation_id: UUID | None = None,
+        organisation: Organisation,
     ) -> JSON[list[ChannelFeed]]:
-        return JSON(await media_feeds_service.get_channel_feeds(organisation_id))
+        return JSON(await media_feeds_service.get_channel_feeds(organisation.id))
+
+    @get(
+        path="/channels/{feed_id:uuid}",
+        summary="Get a specific channel feed by ID",
+    )
+    async def get_channel_feed_by_id(
+        self,
+        media_feeds_service: MediaFeedService,
+        organisation: Organisation,
+        feed_id: UUID,
+    ) -> JSON[ChannelFeed]:
+        feed = await media_feeds_service.get_channel_feed_by_id(
+            organisation.id, feed_id
+        )
+        if not feed:
+            raise NotFoundException()
+        return JSON(feed)
 
     @get(
         path="/keywords",
@@ -93,82 +108,203 @@ class MediaFeedController(Controller):
     async def get_keyword_feeds(
         self,
         media_feeds_service: MediaFeedService,
-        organisation_id: UUID | None = None,
+        organisation: Organisation,
     ) -> JSON[list[KeywordFeed]]:
-        return JSON(await media_feeds_service.get_keyword_feeds(organisation_id))
+        return JSON(await media_feeds_service.get_keyword_feeds(organisation.id))
 
-    @patch(
+    @get(
         path="/keywords/{feed_id:uuid}",
-        summary="Update a keyword feed",
-        dto=KeywordFeedDTO,
-        return_dto=None,
+        summary="Get a specific keyword feed by ID",
     )
-    async def update_keyword_feed(
+    async def get_keyword_feed_by_id(
         self,
         media_feeds_service: MediaFeedService,
+        organisation: Organisation,
         feed_id: UUID,
+    ) -> JSON[KeywordFeed]:
+        feed = await media_feeds_service.get_keyword_feed_by_id(
+            organisation.id, feed_id
+        )
+        if not feed:
+            raise NotFoundException()
+        return JSON(feed)
+
+    @post(
+        path="/channels",
+        summary="Create a new channel feed",
+        guards=[organisation_admin],
+        dto=ChannelFeedDTO,
+        return_dto=None,
+        raises=[ConflictError],
+    )
+    async def create_channel_feed(
+        self,
+        media_feeds_service: MediaFeedService,
+        organisation: Organisation,
+        data: DTOData[ChannelFeed],
+    ) -> JSON[ChannelFeed]:
+        channel_data = data.create_instance(organisation_id=organisation.id)
+        return JSON(
+            await media_feeds_service.create_channel_feed(
+                organisation_id=channel_data.organisation_id,
+                channel=channel_data.channel,
+                platform=channel_data.platform,
+            )
+        )
+
+    @post(
+        path="/keywords",
+        summary="Create a new keyword feed",
+        guards=[organisation_admin],
+        dto=KeywordFeedDTO,
+        return_dto=None,
+        raises=[ConflictError],
+    )
+    async def create_keyword_feed(
+        self,
+        media_feeds_service: MediaFeedService,
+        organisation: Organisation,
         data: DTOData[KeywordFeed],
     ) -> JSON[KeywordFeed]:
-        keyword_data = data.create_instance()
-        try:
-            return JSON(
-                await media_feeds_service.update_keyword_feed(
-                    feed_id=feed_id,
-                    topic=keyword_data.topic,
-                    keywords=keyword_data.keywords,
-                )
+        keyword_data = data.create_instance(organisation_id=organisation.id)
+        return JSON(
+            await media_feeds_service.create_keyword_feed(
+                organisation_id=keyword_data.organisation_id,
+                topic=keyword_data.topic,
+                keywords=keyword_data.keywords,
             )
-        except ValueError:
-            raise NotFoundException()
+        )
 
     @patch(
         path="/channels/{feed_id:uuid}",
         summary="Update a channel feed",
+        guards=[organisation_admin],
         dto=ChannelFeedDTO,
         return_dto=None,
     )
     async def update_channel_feed(
         self,
         media_feeds_service: MediaFeedService,
+        organisation: Organisation,
         feed_id: UUID,
         data: DTOData[ChannelFeed],
     ) -> JSON[ChannelFeed]:
-        channel_data = data.create_instance()
         try:
             return JSON(
                 await media_feeds_service.update_channel_feed(
+                    organisation_id=organisation.id,
                     feed_id=feed_id,
-                    channel=channel_data.channel,
-                    platform=channel_data.platform,
+                    data=data,
+                )
+            )
+        except ValueError:
+            raise NotFoundException()
+
+    @patch(
+        path="/keywords/{feed_id:uuid}",
+        summary="Update a keyword feed",
+        guards=[organisation_admin],
+        dto=KeywordFeedDTO,
+        return_dto=None,
+    )
+    async def update_keyword_feed(
+        self,
+        media_feeds_service: MediaFeedService,
+        organisation: Organisation,
+        feed_id: UUID,
+        data: DTOData[KeywordFeed],
+    ) -> JSON[KeywordFeed]:
+        try:
+            return JSON(
+                await media_feeds_service.update_keyword_feed(
+                    organisation_id=organisation.id,
+                    feed_id=feed_id,
+                    data=data,
                 )
             )
         except ValueError:
             raise NotFoundException()
 
     @delete(
-        path="/keywords/{feed_id:uuid}",
-        summary="Archive a keyword feed",
-    )
-    async def archive_keyword_feed(
-        self,
-        media_feeds_service: MediaFeedService,
-        feed_id: UUID,
-    ) -> None:
-        try:
-            await media_feeds_service.archive_keyword_feed(feed_id)
-        except ValueError:
-            raise NotFoundException()
-
-    @delete(
         path="/channels/{feed_id:uuid}",
         summary="Archive a channel feed",
+        guards=[organisation_admin],
     )
     async def archive_channel_feed(
         self,
         media_feeds_service: MediaFeedService,
+        organisation: Organisation,
         feed_id: UUID,
     ) -> None:
         try:
-            await media_feeds_service.archive_channel_feed(feed_id)
+            await media_feeds_service.archive_channel_feed(organisation.id, feed_id)
+        except ValueError:
+            raise NotFoundException()
+
+    @delete(
+        path="/keywords/{feed_id:uuid}",
+        summary="Archive a keyword feed",
+        guards=[organisation_admin],
+    )
+    async def archive_keyword_feed(
+        self,
+        media_feeds_service: MediaFeedService,
+        organisation: Organisation,
+        feed_id: UUID,
+    ) -> None:
+        try:
+            await media_feeds_service.archive_keyword_feed(organisation.id, feed_id)
+        except ValueError:
+            raise NotFoundException()
+
+    @get(
+        path="/cursors/{target:str}/{platform:str}",
+        summary="Get cursor for a target and platform",
+        guards=[api_only],
+    )
+    async def get_cursor(
+        self,
+        media_feeds_service: MediaFeedService,
+        target: str,
+        platform: str,
+    ) -> JSON[Cursor]:
+        cursor = await media_feeds_service.get_cursor(target, platform)
+        if not cursor:
+            raise NotFoundException()
+        return JSON(cursor)
+
+    @post(
+        path="/cursors/{target:str}/{platform:str}",
+        summary="Set or update the cursor for a target and platform",
+        guards=[api_only],
+    )
+    async def set_cursor(
+        self,
+        media_feeds_service: MediaFeedService,
+        target: str,
+        platform: str,
+        data: Any,
+    ) -> JSON[Cursor]:
+        return JSON(
+            await media_feeds_service.set_cursor(
+                target=target,
+                platform=platform,
+                cursor_data=data,
+            )
+        )
+
+    @delete(
+        path="/cursors/{target:str}/{platform:str}",
+        summary="Delete cursor for a target and platform",
+        guards=[api_only],
+    )
+    async def delete_cursor(
+        self,
+        media_feeds_service: MediaFeedService,
+        target: str,
+        platform: str,
+    ) -> None:
+        try:
+            await media_feeds_service.delete_cursor(target, platform)
         except ValueError:
             raise NotFoundException()
