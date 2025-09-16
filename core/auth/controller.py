@@ -20,6 +20,7 @@ from core.auth.models import (
     OrganisationInvite,
     OrganisationUpdateDTO,
     PasswordChange,
+    SuperAdminStatus,
     User,
     UserUpdateDTO,
 )
@@ -62,6 +63,7 @@ class AuthController(Controller):
         exclude_from_auth=True,
         tags=["auth"],
         raises=[NotAuthorizedError],
+        status_code=200,
     )
     async def login(self, auth_service: AuthService, data: Login) -> JSON[LoginOptions]:
         return JSON(
@@ -84,6 +86,7 @@ class AuthController(Controller):
         summary="Request an email to reset the users password",
         exclude_from_auth=True,
         tags=["auth"],
+        status_code=200,
     )
     async def password_reset(
         self,
@@ -220,6 +223,23 @@ class AuthController(Controller):
             organisation_id=organisation.id,
             user_id=user_id,
             is_admin=data.is_admin,
+        )
+
+    @patch(
+        path="/users/{user_id:uuid}/super-admin",
+        guards=[super_admin],
+        summary="Set the users super admin status",
+        tags=["users"],
+    )
+    async def set_super_admin_status(
+        self,
+        auth_service: AuthService,
+        user_id: UUID,
+        data: SuperAdminStatus,
+    ) -> None:
+        await auth_service.set_super_admin(
+            user_id=user_id,
+            is_super_admin=data.is_super_admin,
         )
 
     @post(

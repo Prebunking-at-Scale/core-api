@@ -293,6 +293,22 @@ class AuthRepository:
         if not self._session.rowcount:
             raise NotFoundError("user not found")
 
+    async def set_super_admin(self, user_id: UUID, is_super_admin: bool):
+        await self._session.execute(
+            """
+            UPDATE users SET
+                is_super_admin = %(is_super_admin)s,
+                updated_at = now()
+            WHERE id = %(user_id)s
+            """,
+            {
+                "user_id": user_id,
+                "is_super_admin": is_super_admin,
+            },
+        )
+        if not self._session.rowcount:
+            raise NotFoundError("user not found")
+
     async def organisation_and_role(
         self, user_id: UUID, organisation_id: UUID
     ) -> tuple[Organisation, bool]:
