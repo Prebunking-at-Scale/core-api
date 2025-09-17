@@ -16,7 +16,7 @@ from litestar.dto import DTOData
 from litestar.exceptions import NotFoundException
 from litestar.params import Parameter
 
-from core.analysis import genai
+from core.analysis import genai, language_id
 from core.config import APP_BASE_URL, NARRATIVES_API_KEY, NARRATIVES_BASE_URL
 from core.errors import ConflictError
 from core.models import Claim, Transcript, TranscriptSentence, Video
@@ -64,6 +64,8 @@ async def extract_transcript_and_claims(
 
     result = await genai.generate_transcript(video.source_url)
     sentences = [TranscriptSentence(**x.model_dump()) for x in result]
+    for sentence in sentences:
+        sentence.metadata["language"] = language_id.predict_language(sentence.text)
 
     if sentences:
         transcript = Transcript(video_id=video.id, sentences=sentences)

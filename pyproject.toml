@@ -18,6 +18,7 @@ dependencies = [
     "torch>=2.7.1",
     "bcrypt>=4.3.0",
     "python-i18n>=0.3.9",
+    "langid>=1.1.6",
 ]
 
 [project.scripts]
