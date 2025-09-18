@@ -56,6 +56,12 @@ class AuthService:
             organisation, is_admin = None, False
             if token.organisation_id:
                 organisation_id = UUID(hex=token.organisation_id)
+
+                if token.is_super_admin_override and not user.is_super_admin:
+                    raise NotAuthorizedError(
+                        "organisation_id override requires super admin privileges"
+                    )
+
                 organisation, is_admin = await repo.organisation_and_role(
                     user.id, organisation_id
                 )
@@ -247,6 +253,10 @@ class AuthService:
     ) -> None:
         async with self.repo() as repo:
             await repo.set_admin(user_id, organisation_id, is_admin)
+
+    async def set_super_admin(self, user_id: UUID, is_super_admin: bool) -> None:
+        async with self.repo() as repo:
+            await repo.set_super_admin(user_id, is_super_admin)
 
     async def password_reset_token(self, email: str) -> str | None:
         async with self.repo() as repo:

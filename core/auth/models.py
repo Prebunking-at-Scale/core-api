@@ -50,6 +50,7 @@ class AuthToken(Token):
     is_api_user: bool = False
     is_password_reset: bool = False
     organisation_id: str | None = None
+    is_super_admin_override: bool = False
 
 
 class OrganisationInvite(BaseModel):
@@ -71,6 +72,10 @@ class PasswordChange(BaseModel):
 
 class AdminStatus(BaseModel):
     is_admin: bool
+
+
+class SuperAdminStatus(BaseModel):
+    is_super_admin: bool
 
 
 class OrganisationToken(BaseModel):
