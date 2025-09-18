@@ -19,6 +19,7 @@ from core.auth.models import (
     OrganisationCreateDTO,
     OrganisationInvite,
     OrganisationUpdateDTO,
+    OrganisationUser,
     PasswordChange,
     SuperAdminStatus,
     User,
@@ -330,5 +331,5 @@ class AuthController(Controller):
         self,
         auth_service: AuthService,
         organisation: Organisation,
-    ) -> JSON[list[User]]:
+    ) -> JSON[list[OrganisationUser]]:
         return JSON(await auth_service.organisation_users(organisation.id))

@@ -15,6 +15,7 @@ from core.auth.models import (
     LoginOptions,
     Organisation,
     OrganisationToken,
+    OrganisationUser,
     User,
 )
 from core.auth.repo import AuthRepository
@@ -129,7 +130,7 @@ class AuthService:
         async with self.repo() as repo:
             await repo.deactivate_organisation(organisation_id)
 
-    async def organisation_users(self, organisation_id: UUID) -> list[User]:
+    async def organisation_users(self, organisation_id: UUID) -> list[OrganisationUser]:
         async with self.repo() as repo:
             return await repo.organisation_users(organisation_id)
 

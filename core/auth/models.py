@@ -34,6 +34,14 @@ class User(BaseModel):
     is_super_admin: bool = False
 
 
+class OrganisationUser(User):
+    """User with their organisation membership status"""
+
+    invited: datetime | None = None
+    accepted: datetime | None = None
+    is_admin: bool = False
+
+
 class Identity(BaseModel):
     """An identity and roles associated with a specific request. This should
     be used to perform authorization checks for requests that require one"""
