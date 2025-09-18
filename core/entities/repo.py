@@ -47,7 +47,10 @@ class EntityRepository:
             {"wikidata_id": wikidata_id, "name": name, "metadata": Jsonb(metadata)},
         )
         new_entity = await self._session.fetchone()
-        
+
+        if not new_entity:
+            raise RuntimeError("Failed to create entity")
+
         return Entity(
             id=new_entity["id"],
             wikidata_id=new_entity["wikidata_id"],
