@@ -108,7 +108,7 @@ class ClaimController(Controller):
             updated_claim = await claims_service.update_claim_associations(
                 claim_id=claim_id,
                 topic_ids=data.topics,
-                entity_ids=data.entities if data.entities else None,
+                entities=data.entities,
             )
             return JSON(updated_claim)
         except ValueError:
