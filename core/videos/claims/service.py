@@ -3,6 +3,8 @@ from uuid import UUID
 
 from litestar.dto import DTOData
 
+from core.entities.models import EntityInput
+from core.entities.service import EntityService
 from core.uow import ConnectionFactory, uow
 from core.videos.claims.models import EnrichedClaim, VideoClaims
 from core.videos.claims.repo import ClaimRepository
@@ -79,8 +81,8 @@ class ClaimsService:
     async def update_claim_associations(
         self,
         claim_id: UUID,
-        topic_ids: list[UUID],
-        entity_ids: list[UUID] | None = None,
+        topic_ids: list[UUID] | None = None,
+        entities: list[EntityInput] | None = None,
     ) -> EnrichedClaim:
         async with self.repo() as repo:
             # Check if claim exists
@@ -88,12 +90,12 @@ class ClaimsService:
             if not claim:
                 raise ValueError(f"Claim with ID {claim_id} not found")
 
-            # Update topic associations
-            await repo.associate_topics_with_claim(claim_id, topic_ids)
+            if topic_ids is not None:
+                await repo.associate_topics_with_claim(claim_id, topic_ids)
 
-            # TODO: When entities are implemented, update entity associations here
-            # if entity_ids is not None:
-            #     await repo.associate_entities_with_claim(claim_id, entity_ids)
+            if entities is not None:
+                entity_service = EntityService(self._connection_factory)
+                await entity_service.associate_entities_with_claim(claim_id, entities)
 
             # Return updated claim with new associations
             claim = await repo.get_claim_by_id(claim_id)

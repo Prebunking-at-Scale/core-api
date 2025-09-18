@@ -6,7 +6,7 @@ from psycopg.rows import DictRow
 from psycopg.types.json import Jsonb
 
 from core.errors import ConflictError
-from core.models import Claim, Narrative, Topic, Video
+from core.models import Claim, Entity, Narrative, Topic, Video
 
 
 class NarrativeRepository:
@@ -20,6 +20,7 @@ class NarrativeRepository:
         claim_ids: list[UUID],
         topic_ids: list[UUID],
         metadata: dict[str, Any],
+        entity_ids: list[UUID] | None = None,
     ) -> Narrative:
         try:
             await self._session.execute(
@@ -51,6 +52,7 @@ class NarrativeRepository:
                 """
                 INSERT INTO claim_narratives (claim_id, narrative_id)
                 VALUES (%(claim_id)s, %(narrative_id)s)
+                ON CONFLICT (claim_id, narrative_id) DO NOTHING
                 """,
                 [
                     {"claim_id": claim_id, "narrative_id": narrative_id}
@@ -63,6 +65,7 @@ class NarrativeRepository:
                 """
                 INSERT INTO narrative_topics (narrative_id, topic_id)
                 VALUES (%(narrative_id)s, %(topic_id)s)
+                ON CONFLICT (narrative_id, topic_id) DO NOTHING
                 """,
                 [
                     {"narrative_id": narrative_id, "topic_id": topic_id}
@@ -70,11 +73,25 @@ class NarrativeRepository:
                 ],
             )
 
+        if entity_ids:
+            await self._session.executemany(
+                """
+                INSERT INTO narrative_entities (narrative_id, entity_id)
+                VALUES (%(narrative_id)s, %(entity_id)s)
+                ON CONFLICT (narrative_id, entity_id) DO NOTHING
+                """,
+                [
+                    {"narrative_id": narrative_id, "entity_id": entity_id}
+                    for entity_id in entity_ids
+                ],
+            )
+
         claims = await self._get_narrative_claims(narrative_id)
         topics = await self._get_narrative_topics(narrative_id)
+        entities = await self._get_narrative_entities(narrative_id)
         videos = await self._get_narrative_videos(narrative_id)
 
-        return Narrative(**row, claims=claims, topics=topics, videos=videos)
+        return Narrative(**row, claims=claims, topics=topics, entities=entities, videos=videos)
 
     async def get_narrative(self, narrative_id: UUID) -> Narrative | None:
         await self._session.execute(
@@ -90,8 +107,9 @@ class NarrativeRepository:
 
         claims = await self._get_narrative_claims(narrative_id)
         topics = await self._get_narrative_topics(narrative_id)
+        entities = await self._get_narrative_entities(narrative_id)
         videos = await self._get_narrative_videos(narrative_id)
-        return Narrative(**row, claims=claims, topics=topics, videos=videos)
+        return Narrative(**row, claims=claims, topics=topics, entities=entities, videos=videos)
 
     async def get_narratives_by_claim(self, claim_id: UUID) -> list[Narrative]:
         await self._session.execute(
@@ -108,9 +126,10 @@ class NarrativeRepository:
         for row in rows:
             claims = await self._get_narrative_claims(row["id"])
             topics = await self._get_narrative_topics(row["id"])
+            entities = await self._get_narrative_entities(row["id"])
             videos = await self._get_narrative_videos(row["id"])
             narratives.append(
-                Narrative(**row, claims=claims, topics=topics, videos=videos)
+                Narrative(**row, claims=claims, topics=topics, entities=entities, videos=videos)
             )
 
         return narratives
@@ -161,9 +180,10 @@ class NarrativeRepository:
         for row in rows:
             claims = await self._get_narrative_claims(row["id"])
             topics = await self._get_narrative_topics(row["id"])
+            entities = await self._get_narrative_entities(row["id"])
             videos = await self._get_narrative_videos(row["id"])
             narratives.append(
-                Narrative(**row, claims=claims, topics=topics, videos=videos)
+                Narrative(**row, claims=claims, topics=topics, entities=entities, videos=videos)
             )
 
         return narratives
@@ -212,6 +232,7 @@ class NarrativeRepository:
         claim_ids: list[UUID] | None = None,
         topic_ids: list[UUID] | None = None,
         metadata: dict[str, Any] | None = None,
+        entity_ids: list[UUID] | None = None,
     ) -> Narrative | None:
         updates = []
         params: dict[str, Any] = {"narrative_id": narrative_id}
@@ -296,10 +317,33 @@ class NarrativeRepository:
                     ],
                 )
 
+        if entity_ids is not None:
+            await self._session.execute(
+                """
+                DELETE FROM narrative_entities
+                WHERE narrative_id = %(narrative_id)s
+                """,
+                {"narrative_id": narrative_id},
+            )
+
+            if entity_ids:
+                await self._session.executemany(
+                    """
+                    INSERT INTO narrative_entities (narrative_id, entity_id)
+                    VALUES (%(narrative_id)s, %(entity_id)s)
+                    ON CONFLICT (narrative_id, entity_id) DO NOTHING
+                    """,
+                    [
+                        {"narrative_id": narrative_id, "entity_id": entity_id}
+                        for entity_id in entity_ids
+                    ],
+                )
+
         claims = await self._get_narrative_claims(narrative_id)
         topics = await self._get_narrative_topics(narrative_id)
+        entities = await self._get_narrative_entities(narrative_id)
         videos = await self._get_narrative_videos(narrative_id)
-        return Narrative(**row, claims=claims, topics=topics, videos=videos)
+        return Narrative(**row, claims=claims, topics=topics, entities=entities, videos=videos)
 
     async def delete_narrative(self, narrative_id: UUID) -> None:
         await self._session.execute(
@@ -338,6 +382,19 @@ class NarrativeRepository:
             {"narrative_id": narrative_id},
         )
         return [Topic(**row) for row in await self._session.fetchall()]
+
+    async def _get_narrative_entities(self, narrative_id: UUID) -> list[Entity]:
+        await self._session.execute(
+            """
+            SELECT e.*
+            FROM entities e
+            JOIN narrative_entities ne ON e.id = ne.entity_id
+            WHERE ne.narrative_id = %(narrative_id)s
+            ORDER BY e.name
+            """,
+            {"narrative_id": narrative_id},
+        )
+        return [Entity(**row) for row in await self._session.fetchall()]
 
     async def _get_narrative_videos(self, narrative_id: UUID) -> list[Video]:
         await self._session.execute(
@@ -478,10 +535,11 @@ class NarrativeRepository:
 
             claims = await self._get_narrative_claims(narrative_data["id"])
             topics = await self._get_narrative_topics(narrative_data["id"])
+            entities = await self._get_narrative_entities(narrative_data["id"])
             videos = await self._get_narrative_videos(narrative_data["id"])
 
             narratives.append(
-                Narrative(**narrative_data, claims=claims, topics=topics, videos=videos)
+                Narrative(**narrative_data, claims=claims, topics=topics, entities=entities, videos=videos)
             )
 
         return narratives
@@ -532,10 +590,11 @@ class NarrativeRepository:
 
             claims = await self._get_narrative_claims(narrative_data["id"])
             topics = await self._get_narrative_topics(narrative_data["id"])
+            entities = await self._get_narrative_entities(narrative_data["id"])
             videos = await self._get_narrative_videos(narrative_data["id"])
 
             narratives.append(
-                Narrative(**narrative_data, claims=claims, topics=topics, videos=videos)
+                Narrative(**narrative_data, claims=claims, topics=topics, entities=entities, videos=videos)
             )
 
         return narratives
