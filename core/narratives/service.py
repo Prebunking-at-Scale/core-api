@@ -84,7 +84,7 @@ class NarrativeService:
             if not existing_narrative:
                 return None
 
-            entity_ids = None
+            merged_entity_ids = None
             if data.entities is not None:
                 entity_service = EntityService(self._connection_factory)
                 entity_ids = await entity_service.process_entities(data.entities)
