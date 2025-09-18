@@ -255,6 +255,37 @@ class AuthController(Controller):
             ),
         )
 
+    @post(
+        path="/organisation/invite/resend",
+        guards=[organisation_admin],
+        summary="Resend an invite to a user",
+        tags=["organisations"],
+    )
+    async def resend_invite(
+        self,
+        emailer: Emailer,
+        auth_service: AuthService,
+        organisation: Organisation,
+        data: OrganisationInvite,
+    ) -> Response[None]:
+        token = await auth_service.resend_invite_token(
+            organisation_id=organisation.id,
+            email=data.user_email,
+        )
+        if not token:
+            raise Exception("expected token but got None")
+
+        return Response(
+            None,
+            background=BackgroundTask(
+                send_invite_email,
+                emailer,
+                data.user_email,
+                organisation,
+                token,
+            ),
+        )
+
     @get(
         path="/organisation/invite/accept",
         summary="Accept an invitation to join an organisation",

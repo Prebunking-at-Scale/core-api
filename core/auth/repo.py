@@ -386,3 +386,41 @@ class AuthRepository:
         )
 
         return [User(**row) for row in await self._session.fetchall()]
+
+    async def is_user_organisation_member(
+        self, user_id: UUID, organisation_id: UUID
+    ) -> bool:
+        await self._session.execute(
+            """
+            SELECT 1 FROM organisation_users
+            WHERE
+                user_id = %(user_id)s
+                AND organisation_id = %(organisation_id)s
+                AND accepted IS NOT NULL
+                AND deactivated IS NULL
+            """,
+            {
+                "user_id": user_id,
+                "organisation_id": organisation_id,
+            },
+        )
+        return await self._session.fetchone() is not None
+
+    async def resend_invite(self, user_id: UUID, organisation_id: UUID) -> None:
+        await self._session.execute(
+            """
+            UPDATE organisation_users SET
+                invited = now()
+            WHERE
+                user_id = %(user_id)s
+                AND organisation_id = %(organisation_id)s
+                AND accepted IS NULL
+                AND deactivated IS NULL
+            """,
+            {
+                "user_id": user_id,
+                "organisation_id": organisation_id,
+            },
+        )
+        if not self._session.rowcount:
+            raise ConflictError("no pending invite found for this user")
