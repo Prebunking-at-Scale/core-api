@@ -22,8 +22,43 @@ class ClaimsService:
     ) -> VideoClaims:
         if isinstance(claims, DTOData):
             claims = claims.create_instance(video_id=video_id)
+
+        claim_entities = []
+        claims_to_add = []
+
+        for claim in claims.claims:
+            entities_for_claim = claim.entities if claim.entities else []
+            claim_entities.append(entities_for_claim)
+
+            claim_copy = claim.model_copy()
+            claim_copy.entities = []
+            claims_to_add.append(claim_copy)
+
         async with self.repo() as repo:
-            added_claims = await repo.add_claims(video_id, claims.claims)
+            added_claims = await repo.add_claims(video_id, claims_to_add)
+
+        if any(claim_entities):
+            from core.entities.models import EntityInput
+            from core.entities.service import EntityService
+
+            entity_service = EntityService(self._connection_factory)
+
+            for added_claim, entities in zip(added_claims, claim_entities):
+                if entities:
+                    entity_inputs = [
+                        EntityInput(
+                            wikidata_id=e.wikidata_id,
+                            entity_name=e.name,
+                            entity_type=e.metadata.get("entity_type", "") if e.metadata else "",
+                            wikidata_info=e.metadata.get("wikidata_info", {}) if e.metadata else {}
+                        )
+                        for e in entities
+                    ]
+
+                    associated_entities = await entity_service.associate_entities_with_claim(added_claim.id, entity_inputs)
+
+                    added_claim.entities = associated_entities
+
         return VideoClaims(video_id=video_id, claims=added_claims)
 
     async def get_claims_for_video(self, video_id: UUID) -> VideoClaims | None:
@@ -31,6 +66,14 @@ class ClaimsService:
             if not await repo.video_exists(video_id):
                 return None
             claims = await repo.get_claims_for_video(video_id)
+
+        from core.entities.service import EntityService
+        entity_service = EntityService(self._connection_factory)
+
+        for claim in claims:
+            async with entity_service.repo() as entity_repo:
+                claim.entities = await entity_repo.get_entities_for_claim(claim.id)
+
         return VideoClaims(video_id=video_id, claims=claims)
 
     async def delete_video_claims(self, video_id: UUID) -> None:
@@ -91,7 +134,7 @@ class ClaimsService:
         entities: list[EntityInput] | None = None,
     ) -> EnrichedClaim:
         async with self.repo() as repo:
-            # Check if claim exists
+
             claim = await repo.get_claim_by_id(claim_id)
             if not claim:
                 raise ValueError(f"Claim with ID {claim_id} not found")
@@ -103,7 +146,6 @@ class ClaimsService:
                 entity_service = EntityService(self._connection_factory)
                 await entity_service.associate_entities_with_claim(claim_id, entities)
 
-            # Return updated claim with new associations
             claim = await repo.get_claim_by_id(claim_id)
             if not claim:
                 raise ValueError(f"Claim with ID {claim_id} not found")
