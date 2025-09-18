@@ -10,3 +10,11 @@ class NarrativeInput(BaseModel):
     claim_ids: list[UUID] = []
     topic_ids: list[UUID] = []
     metadata: dict[str, Any] = {}
+
+
+class NarrativeUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    claim_ids: list[UUID] | None = None
+    topic_ids: list[UUID] | None = None
+    metadata: dict[str, Any] | None = None
