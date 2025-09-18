@@ -156,6 +156,51 @@ class ClaimRepository:
 
         return claims, total
 
+    async def get_claims_by_entity(
+        self, entity_id: UUID, limit: int = 100, offset: int = 0
+    ) -> tuple[list[EnrichedClaim], int]:
+        # Get total count
+        await self._session.execute(
+            """
+            SELECT COUNT(DISTINCT c.id)
+            FROM video_claims c
+            JOIN claim_entities ce ON c.id = ce.claim_id
+            WHERE ce.entity_id = %(entity_id)s
+            """,
+            {"entity_id": entity_id},
+        )
+        total_row = await self._session.fetchone()
+        total = total_row["count"] if total_row else 0
+
+        # Get claims
+        await self._session.execute(
+            """
+            SELECT DISTINCT c.*
+            FROM video_claims c
+            JOIN claim_entities ce ON c.id = ce.claim_id
+            WHERE ce.entity_id = %(entity_id)s
+            ORDER BY c.created_at DESC
+            LIMIT %(limit)s OFFSET %(offset)s
+            """,
+            {"entity_id": entity_id, "limit": limit, "offset": offset},
+        )
+
+        claims = []
+        for row in await self._session.fetchall():
+            topics = await self._get_claim_topics(row["id"])
+            entities = await self._get_claim_entities(row["id"])
+            video = (
+                await self._get_video_info(row["video_id"])
+                if row.get("video_id")
+                else None
+            )
+            narratives = await self._get_claim_narratives(row["id"])
+            claims.append(
+                EnrichedClaim(topics=topics, entities=entities, video=video, narratives=narratives, **row)
+            )
+
+        return claims, total
+
     async def _get_claim_topics(self, claim_id: UUID) -> list[Topic]:
         await self._session.execute(
             """
