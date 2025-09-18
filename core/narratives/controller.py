@@ -62,10 +62,11 @@ class NarrativeController(Controller):
         limit: int = 100,
         offset: int = 0,
         topic_id: UUID | None = None,
+        entity_id: UUID | None = None,
         text: str | None = None,
     ) -> PaginatedJSON[list[Narrative]]:
         narratives, total = await narrative_service.get_all_narratives(
-            limit=limit, offset=offset, topic_id=topic_id, text=text
+            limit=limit, offset=offset, topic_id=topic_id, entity_id=entity_id, text=text
         )
         page = (offset // limit) + 1 if limit > 0 else 1
         return PaginatedJSON(

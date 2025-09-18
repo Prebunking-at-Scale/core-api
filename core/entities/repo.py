@@ -161,7 +161,7 @@ class EntityRepository:
             {"narrative_id": narrative_id},
         )
         rows = await self._session.fetchall()
-        
+
         return [
             Entity(
                 id=row["id"],
@@ -173,3 +173,74 @@ class EntityRepository:
             )
             for row in rows
         ]
+
+    async def get_entity(self, entity_id: UUID) -> Entity | None:
+        """Get a single entity by ID"""
+        await self._session.execute(
+            """
+            SELECT id, wikidata_id, name, metadata, created_at, updated_at
+            FROM entities
+            WHERE id = %(entity_id)s
+            """,
+            {"entity_id": entity_id},
+        )
+        row = await self._session.fetchone()
+
+        if not row:
+            return None
+
+        return Entity(
+            id=row["id"],
+            wikidata_id=row["wikidata_id"],
+            name=row["name"],
+            metadata=row["metadata"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    async def get_all_entities(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        text: str | None = None
+    ) -> list[Entity]:
+        """Get all entities with pagination and optional text search"""
+        query = """
+            SELECT id, wikidata_id, name, metadata, created_at, updated_at
+            FROM entities
+        """
+        params: dict = {"limit": limit, "offset": offset}
+
+        if text:
+            query += " WHERE name ILIKE %(text)s"
+            params["text"] = f"%{text}%"
+
+        query += " ORDER BY created_at DESC LIMIT %(limit)s OFFSET %(offset)s"
+
+        await self._session.execute(query, params)
+        rows = await self._session.fetchall()
+
+        return [
+            Entity(
+                id=row["id"],
+                wikidata_id=row["wikidata_id"],
+                name=row["name"],
+                metadata=row["metadata"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
+
+    async def count_all_entities(self, text: str | None = None) -> int:
+        """Count total entities with optional text filter"""
+        query = "SELECT COUNT(*) FROM entities"
+        params: dict = {}
+
+        if text:
+            query += " WHERE name ILIKE %(text)s"
+            params["text"] = f"%{text}%"
+
+        await self._session.execute(query, params)
+        row = await self._session.fetchone()
+        return row["count"] if row else 0

@@ -135,30 +135,37 @@ class NarrativeRepository:
         return narratives
 
     async def get_all_narratives(
-        self, 
-        limit: int = 100, 
+        self,
+        limit: int = 100,
         offset: int = 0,
         topic_id: UUID | None = None,
+        entity_id: UUID | None = None,
         text: str | None = None
     ) -> list[Narrative]:
         query = """
             SELECT DISTINCT n.* FROM narratives n
         """
-        
-        # Add join for topic filtering if needed
+
         if topic_id:
             query += """
                 INNER JOIN narrative_topics nt ON n.id = nt.narrative_id
             """
-        
-        # Build WHERE clause
+        if entity_id:
+            query += """
+                INNER JOIN narrative_entities ne ON n.id = ne.narrative_id
+            """
+
         where_conditions = []
         params: dict[str, int | UUID | str] = {"limit": limit, "offset": offset}
-        
+
         if topic_id:
             where_conditions.append("nt.topic_id = %(topic_id)s")
             params["topic_id"] = topic_id
-            
+
+        if entity_id:
+            where_conditions.append("ne.entity_id = %(entity_id)s")
+            params["entity_id"] = entity_id
+
         if text:
             where_conditions.append(
                 "(LOWER(n.title) LIKE LOWER(%(text)s) OR LOWER(n.description) LIKE LOWER(%(text)s))"
@@ -191,26 +198,33 @@ class NarrativeRepository:
     async def count_all_narratives(
         self,
         topic_id: UUID | None = None,
+        entity_id: UUID | None = None,
         text: str | None = None
     ) -> int:
         query = """
             SELECT COUNT(DISTINCT n.id) FROM narratives n
         """
-        
-        # Add join for topic filtering if needed
+
         if topic_id:
             query += """
                 INNER JOIN narrative_topics nt ON n.id = nt.narrative_id
             """
-        
-        # Build WHERE clause
+        if entity_id:
+            query += """
+                INNER JOIN narrative_entities ne ON n.id = ne.narrative_id
+            """
+
         where_conditions = []
         params: dict[str, UUID | str] = {}
-        
+
         if topic_id:
             where_conditions.append("nt.topic_id = %(topic_id)s")
             params["topic_id"] = topic_id
-            
+
+        if entity_id:
+            where_conditions.append("ne.entity_id = %(entity_id)s")
+            params["entity_id"] = entity_id
+
         if text:
             where_conditions.append(
                 "(LOWER(n.title) LIKE LOWER(%(text)s) OR LOWER(n.description) LIKE LOWER(%(text)s))"

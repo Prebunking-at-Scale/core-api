@@ -94,3 +94,24 @@ class EntityService:
         """Get all entities associated with a narrative"""
         async with self.repo() as repo:
             return await repo.get_entities_for_narrative(narrative_id)
+
+    async def get_entity(self, entity_id: UUID) -> Entity | None:
+        """Get a single entity by ID"""
+        async with self.repo() as repo:
+            return await repo.get_entity(entity_id)
+
+    async def get_all_entities(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        text: str | None = None
+    ) -> tuple[list[Entity], int]:
+        """Get all entities with pagination and optional text search"""
+        async with self.repo() as repo:
+            entities = await repo.get_all_entities(
+                limit=limit,
+                offset=offset,
+                text=text
+            )
+            total = await repo.count_all_entities(text=text)
+            return entities, total
