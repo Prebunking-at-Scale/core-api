@@ -4,7 +4,7 @@ from uuid import UUID
 import psycopg
 from psycopg.rows import DictRow
 
-from core.auth.models import Organisation, User
+from core.auth.models import Organisation, OrganisationUser, User
 from core.errors import (
     ConflictError,
     InvalidInviteError,
@@ -385,7 +385,7 @@ class AuthRepository:
     async def organisation_users(
         self,
         organisation_id: UUID,
-    ) -> list[User]:
+    ) -> list[OrganisationUser]:
         await self._session.execute(
             """
                 SELECT *
@@ -394,14 +394,13 @@ class AuthRepository:
                 WHERE
                     ou.organisation_id = %(organisation_id)s
                     AND ou.deactivated IS NULL
-                    AND ou.accepted IS NOT NULL
             """,
             {
                 "organisation_id": organisation_id,
             },
         )
 
-        return [User(**row) for row in await self._session.fetchall()]
+        return [OrganisationUser(**row) for row in await self._session.fetchall()]
 
     async def is_user_organisation_member(
         self, user_id: UUID, organisation_id: UUID

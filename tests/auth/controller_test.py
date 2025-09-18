@@ -503,6 +503,16 @@ async def test_organisation_users(
 ) -> None:
     user, password = await create_user_with_password(auth_service, organisation)
     admin = await create_user(auth_service, organisation, True)
+
+    # Create an invited user who hasn't accepted yet
+    invite_token = await auth_service.invite_token(
+        organisation_id=organisation.id,
+        email="invited@example.com",
+        as_admin=False,
+        auto_accept=False,
+    )
+    assert invite_token is not None
+
     login_options = await auth_service.login(user.email, password)
 
     response = await auth_client.get(
@@ -511,10 +521,22 @@ async def test_organisation_users(
     )
     assert response.status_code == 200
     data = response.json()["data"]
-    assert len(data) == 2
-    user_emails = {user_data["email"] for user_data in data}
-    assert user.email in user_emails
-    assert admin.email in user_emails
+    assert len(data) == 3
+
+    # Check that we have both accepted and invited users
+    user_data_by_email = {user_data["email"]: user_data for user_data in data}
+
+    # Accepted users should have accepted timestamp
+    assert user.email in user_data_by_email
+    assert user_data_by_email[user.email]["accepted"] is not None
+    assert admin.email in user_data_by_email
+    assert user_data_by_email[admin.email]["accepted"] is not None
+
+    # Invited user should have invited timestamp but no accepted timestamp
+    assert "invited@example.com" in user_data_by_email
+    invited_user_data = user_data_by_email["invited@example.com"]
+    assert invited_user_data["invited"] is not None
+    assert invited_user_data["accepted"] is None
 
 
 # Tests for super admin organisation override functionality
