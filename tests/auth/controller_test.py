@@ -539,6 +539,48 @@ async def test_organisation_users(
     assert invited_user_data["accepted"] is None
 
 
+async def test_organisation_users_admin_status(
+    auth_client: AsyncTestClient[Litestar],
+    auth_service: AuthService,
+    organisation: Organisation,
+) -> None:
+    # Create regular user
+    regular_user, password = await create_user_with_password(auth_service, organisation)
+
+    # Create admin user
+    admin_user = await create_user(auth_service, organisation, True)
+
+    # Create invited admin user who hasn't accepted yet
+    invite_token = await auth_service.invite_token(
+        organisation_id=organisation.id,
+        email="invitedadmin@example.com",
+        as_admin=True,
+        auto_accept=False,
+    )
+    assert invite_token is not None
+
+    login_options = await auth_service.login(regular_user.email, password)
+
+    response = await auth_client.get(
+        "/api/auth/organisation/users",
+        headers={"Authorization": f"Bearer {get_access_token(login_options)}"},
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert len(data) == 3
+
+    user_data_by_email = {user_data["email"]: user_data for user_data in data}
+
+    # Regular user should not be admin
+    assert user_data_by_email[regular_user.email]["is_admin"] is False
+
+    # Admin user should be admin
+    assert user_data_by_email[admin_user.email]["is_admin"] is True
+
+    # Invited admin user should be admin even though not accepted yet
+    assert user_data_by_email["invitedadmin@example.com"]["is_admin"] is True
+
+
 # Tests for super admin organisation override functionality
 
 
