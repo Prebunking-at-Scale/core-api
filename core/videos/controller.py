@@ -4,7 +4,7 @@ from urllib.parse import urljoin
 from uuid import UUID
 
 import httpx
-from harmful_claim_finder.transcript_inference import get_claims
+from harmful_claim_finder.video_inference import get_claims
 from harmful_claim_finder.utils.models import (
     TranscriptSentence as HarmfulClaimFinderSentence,
 )
@@ -83,13 +83,7 @@ async def extract_transcript_and_claims(
                 continue
 
             claims = await get_claims(
-                keywords=keywords,
-                sentences=[
-                    HarmfulClaimFinderSentence(
-                        **(s.model_dump() | {"video_id": video.id})
-                    )
-                    for s in sentences
-                ],
+                video_id=video.id, video_uri=video.source_url, keywords=keywords
             )
 
             for claim in claims:
