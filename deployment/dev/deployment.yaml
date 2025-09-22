@@ -18,7 +18,7 @@ spec:
       serviceAccountName: workload-identity-sa
       containers:
         - name: core-api
-          image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api:v2.1.0-dev.0
+          image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api:v2.2.0-dev.0
           imagePullPolicy: Always
           ports:
             - containerPort: 8000
