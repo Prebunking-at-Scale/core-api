@@ -28,12 +28,17 @@ class VideoService:
         async with self.repo() as repo:
             return await repo.add_video(video)
 
-    async def patch_video(self, video_id: UUID, video_data: DTOData[Video]) -> Video:
+    async def patch_video(
+        self, video_id: UUID, video_data: DTOData[Video] | Video
+    ) -> Video:
         async with self.repo() as repo:
             video = await repo.get_video_by_id(video_id)
             if not video:
                 raise ValueError(f"Video with ID {video_id} not found")
-            updated_video = video_data.update_instance(video)
+            if isinstance(video_data, DTOData):
+                updated_video = video_data.update_instance(video)
+            else:
+                updated_video = video_data
             return await repo.update_video(updated_video)
 
     async def delete_video(self, video_id) -> None:
@@ -42,14 +47,16 @@ class VideoService:
 
     async def get_videos_paginated(
         self,
-        limit: int = 100, 
+        limit: int = 100,
         offset: int = 0,
         platform: str | None = None,
         channel: str | None = None,
         text: str | None = None,
     ) -> tuple[list[Video], int]:
         async with self.repo() as repo:
-            return await repo.get_videos_paginated(limit, offset, platform, channel, text)
+            return await repo.get_videos_paginated(
+                limit, offset, platform, channel, text
+            )
 
     async def get_narratives_for_video(self, video_id: UUID) -> list[Narrative]:
         async with self.repo() as repo:
