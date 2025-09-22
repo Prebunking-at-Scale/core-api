@@ -30,8 +30,16 @@ class User(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     email: Annotated[str, Field(examples=["auto@fullfact.org"])]
     display_name: Annotated[str, Field(min_length=2, examples=["Will Moy"])]
-    password_last_updated: Annotated[datetime | None, Field(exclude=True)] = None
-    is_super_admin: Annotated[bool, Field(exclude=True)] = False
+    password_last_updated: datetime | None = None
+    is_super_admin: bool = False
+
+
+class OrganisationUser(User):
+    """User with their organisation membership status"""
+
+    invited: datetime | None = None
+    accepted: datetime | None = None
+    is_admin: bool = False
 
 
 class Identity(BaseModel):
@@ -50,6 +58,7 @@ class AuthToken(Token):
     is_api_user: bool = False
     is_password_reset: bool = False
     organisation_id: str | None = None
+    is_super_admin_override: bool = False
 
 
 class OrganisationInvite(BaseModel):
@@ -71,6 +80,10 @@ class PasswordChange(BaseModel):
 
 class AdminStatus(BaseModel):
     is_admin: bool
+
+
+class SuperAdminStatus(BaseModel):
+    is_super_admin: bool
 
 
 class OrganisationToken(BaseModel):

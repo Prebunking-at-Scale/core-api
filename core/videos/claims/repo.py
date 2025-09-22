@@ -195,15 +195,35 @@ class ClaimRepository:
         return Video(**row) if row else None
 
     async def get_all_claims(
-        self, limit: int = 100, offset: int = 0, topic_id: UUID | None = None
+        self, 
+        limit: int = 100, 
+        offset: int = 0, 
+        topic_id: UUID | None = None,
+        text: str | None = None,
+        min_score: float | None = None,
+        max_score: float | None = None
     ) -> tuple[list[EnrichedClaim], int]:
         # Build the query conditionally
-        where_clause = ""
-        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        where_conditions = []
+        params: dict[str, int | UUID | str | float] = {"limit": limit, "offset": offset}
 
         if topic_id:
-            where_clause = "WHERE ct.topic_id = %(topic_id)s"
+            where_conditions.append("ct.topic_id = %(topic_id)s")
             params["topic_id"] = topic_id
+            
+        if text:
+            where_conditions.append("LOWER(c.claim) LIKE LOWER(%(text)s)")
+            params["text"] = f"%{text}%"
+            
+        if min_score is not None:
+            where_conditions.append("(c.metadata->>'score')::float >= %(min_score)s")
+            params["min_score"] = min_score
+            
+        if max_score is not None:
+            where_conditions.append("(c.metadata->>'score')::float <= %(max_score)s")
+            params["max_score"] = max_score
+            
+        where_clause = "WHERE " + " AND ".join(where_conditions) if where_conditions else ""
 
         # Get total count
         count_query = f"""

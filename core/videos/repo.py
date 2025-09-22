@@ -175,19 +175,24 @@ class VideoRepository:
         self,
         limit: int,
         offset: int,
-        platform: list[str] | None = None,
-        channel: list[str] | None = None,
+        platform: str | None = None,
+        channel: str | None = None,
+        text: str | None = None,
     ) -> tuple[list[Video], int]:
         wheres = [sql.SQL("1=1")]
         params: dict[str, Any] = {"limit": limit, "offset": offset}
 
         if platform:
-            wheres.append(sql.SQL("platform = ANY(%(platform)s)"))
-            params["platform"] = platform
+            wheres.append(sql.SQL("LOWER(platform) LIKE LOWER(%(platform)s)"))
+            params["platform"] = f"%{platform}%"
 
         if channel:
-            wheres.append(sql.SQL("channel = ANY(%(channel)s)"))
-            params["channel"] = channel
+            wheres.append(sql.SQL("LOWER(channel) LIKE LOWER(%(channel)s)"))
+            params["channel"] = f"%{channel}%"
+            
+        if text:
+            wheres.append(sql.SQL("(LOWER(title) LIKE LOWER(%(text)s) OR LOWER(description) LIKE LOWER(%(text)s))"))
+            params["text"] = f"%{text}%"
 
         where_clause = sql.Composed(wheres).join(" AND ")
 

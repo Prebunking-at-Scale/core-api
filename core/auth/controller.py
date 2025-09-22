@@ -19,7 +19,9 @@ from core.auth.models import (
     OrganisationCreateDTO,
     OrganisationInvite,
     OrganisationUpdateDTO,
+    OrganisationUser,
     PasswordChange,
+    SuperAdminStatus,
     User,
     UserUpdateDTO,
 )
@@ -62,6 +64,7 @@ class AuthController(Controller):
         exclude_from_auth=True,
         tags=["auth"],
         raises=[NotAuthorizedError],
+        status_code=200,
     )
     async def login(self, auth_service: AuthService, data: Login) -> JSON[LoginOptions]:
         return JSON(
@@ -84,6 +87,7 @@ class AuthController(Controller):
         summary="Request an email to reset the users password",
         exclude_from_auth=True,
         tags=["auth"],
+        status_code=200,
     )
     async def password_reset(
         self,
@@ -222,6 +226,23 @@ class AuthController(Controller):
             is_admin=data.is_admin,
         )
 
+    @patch(
+        path="/users/{user_id:uuid}/super-admin",
+        guards=[super_admin],
+        summary="Set the users super admin status",
+        tags=["users"],
+    )
+    async def set_super_admin_status(
+        self,
+        auth_service: AuthService,
+        user_id: UUID,
+        data: SuperAdminStatus,
+    ) -> None:
+        await auth_service.set_super_admin(
+            user_id=user_id,
+            is_super_admin=data.is_super_admin,
+        )
+
     @post(
         path="/organisation/invite",
         guards=[organisation_admin],
@@ -240,6 +261,37 @@ class AuthController(Controller):
             email=data.user_email,
             as_admin=data.as_admin,
             auto_accept=False,
+        )
+        if not token:
+            raise Exception("expected token but got None")
+
+        return Response(
+            None,
+            background=BackgroundTask(
+                send_invite_email,
+                emailer,
+                data.user_email,
+                organisation,
+                token,
+            ),
+        )
+
+    @post(
+        path="/organisation/invite/resend",
+        guards=[organisation_admin],
+        summary="Resend an invite to a user",
+        tags=["organisations"],
+    )
+    async def resend_invite(
+        self,
+        emailer: Emailer,
+        auth_service: AuthService,
+        organisation: Organisation,
+        data: OrganisationInvite,
+    ) -> Response[None]:
+        token = await auth_service.resend_invite_token(
+            organisation_id=organisation.id,
+            email=data.user_email,
         )
         if not token:
             raise Exception("expected token but got None")
@@ -279,5 +331,5 @@ class AuthController(Controller):
         self,
         auth_service: AuthService,
         organisation: Organisation,
-    ) -> JSON[list[User]]:
+    ) -> JSON[list[OrganisationUser]]:
         return JSON(await auth_service.organisation_users(organisation.id))

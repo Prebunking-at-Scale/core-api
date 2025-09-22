@@ -1,4 +1,6 @@
+import asyncio
 import os
+import random
 from typing import Literal
 
 from google import genai
@@ -48,7 +50,11 @@ class Sentence(BaseModel):
     start_time_s: float
 
 
-async def generate_transcript(video_url: str) -> list[Sentence]:
+class RetriesExceededError(Exception):
+    pass
+
+
+async def generate_transcript(video_url: str, retries: int = 3) -> list[Sentence]:
     prompt = """
 Transcribe the audio into sentences, splitting into complete sentences naturally.
 If text is displayed in the video that is in the audio transcript, ignore the text.
@@ -59,34 +65,38 @@ Return the transcript in the language it is spoken in the video.
 Do not translate the transcript.
 For each sentence, provide a timestamp formatted as SS (seconds only) using the `start_time_s` field.
 """
-
-    response = await client.aio.models.generate_content(
-        model=os.environ["GEMINI_MODEL"],
-        config=GenerateContentConfig(
-            safety_settings=DEFAULT_SAFETY_SETTINGS,
-            audio_timestamp=True,
-            response_mime_type="application/json",
-            response_schema=list[Sentence],
-        ),
-        contents=Content(
-            role="user",
-            parts=[
-                Part(
-                    file_data=FileData(
-                        file_uri=video_url,
-                        mime_type="video/mp4",
-                    )
+    for _ in range(retries):
+        try:
+            response = await client.aio.models.generate_content(
+                model=os.environ["GEMINI_MODEL"],
+                config=GenerateContentConfig(
+                    safety_settings=DEFAULT_SAFETY_SETTINGS,
+                    audio_timestamp=True,
+                    response_mime_type="application/json",
+                    response_schema=list[Sentence],
                 ),
-                Part(text=prompt),
-            ],
-        ),
-    )
+                contents=Content(
+                    role="user",
+                    parts=[
+                        Part(
+                            file_data=FileData(
+                                file_uri=video_url,
+                                mime_type="video/mp4",
+                            )
+                        ),
+                        Part(text=prompt),
+                    ],
+                ),
+            )
 
-    if not response.parsed or not isinstance(response.parsed, list):
-        raise ValueError(
-            f"Did not get expected response from Gemini: {response.parsed}"
-        )
+            if not response.parsed or not isinstance(response.parsed, list):
+                raise ValueError(
+                    f"Did not get expected response from Gemini: {response.parsed}"
+                )
+            return response.parsed
 
-    print(response)
+        except Exception:
+            await asyncio.sleep(random.randint(5, 30))
+            continue
 
-    return response.parsed
+    raise RetriesExceededError(f"failed to get transcript after {retries} attempts")

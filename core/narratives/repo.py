@@ -116,16 +116,45 @@ class NarrativeRepository:
         return narratives
 
     async def get_all_narratives(
-        self, limit: int = 100, offset: int = 0
+        self, 
+        limit: int = 100, 
+        offset: int = 0,
+        topic_id: UUID | None = None,
+        text: str | None = None
     ) -> list[Narrative]:
-        await self._session.execute(
+        query = """
+            SELECT DISTINCT n.* FROM narratives n
+        """
+        
+        # Add join for topic filtering if needed
+        if topic_id:
+            query += """
+                INNER JOIN narrative_topics nt ON n.id = nt.narrative_id
             """
-            SELECT * FROM narratives
-            ORDER BY created_at DESC
+        
+        # Build WHERE clause
+        where_conditions = []
+        params: dict[str, int | UUID | str] = {"limit": limit, "offset": offset}
+        
+        if topic_id:
+            where_conditions.append("nt.topic_id = %(topic_id)s")
+            params["topic_id"] = topic_id
+            
+        if text:
+            where_conditions.append(
+                "(LOWER(n.title) LIKE LOWER(%(text)s) OR LOWER(n.description) LIKE LOWER(%(text)s))"
+            )
+            params["text"] = f"%{text}%"
+        
+        if where_conditions:
+            query += " WHERE " + " AND ".join(where_conditions)
+            
+        query += """
+            ORDER BY n.created_at DESC
             LIMIT %(limit)s OFFSET %(offset)s
-            """,
-            {"limit": limit, "offset": offset},
-        )
+        """
+        
+        await self._session.execute(query, params)
         rows = await self._session.fetchall()
 
         narratives = []
@@ -139,12 +168,39 @@ class NarrativeRepository:
 
         return narratives
 
-    async def count_all_narratives(self) -> int:
-        await self._session.execute(
+    async def count_all_narratives(
+        self,
+        topic_id: UUID | None = None,
+        text: str | None = None
+    ) -> int:
+        query = """
+            SELECT COUNT(DISTINCT n.id) FROM narratives n
+        """
+        
+        # Add join for topic filtering if needed
+        if topic_id:
+            query += """
+                INNER JOIN narrative_topics nt ON n.id = nt.narrative_id
             """
-            SELECT COUNT(*) FROM narratives
-            """
-        )
+        
+        # Build WHERE clause
+        where_conditions = []
+        params: dict[str, UUID | str] = {}
+        
+        if topic_id:
+            where_conditions.append("nt.topic_id = %(topic_id)s")
+            params["topic_id"] = topic_id
+            
+        if text:
+            where_conditions.append(
+                "(LOWER(n.title) LIKE LOWER(%(text)s) OR LOWER(n.description) LIKE LOWER(%(text)s))"
+            )
+            params["text"] = f"%{text}%"
+        
+        if where_conditions:
+            query += " WHERE " + " AND ".join(where_conditions)
+            
+        await self._session.execute(query, params)
         row = await self._session.fetchone()
         return row["count"] if row else 0
 
@@ -319,6 +375,23 @@ class NarrativeRepository:
         if not row:
             return False
         return row["count"] == len(claim_ids)
+
+    async def find_by_narrative_id_in_metadata(self, narrative_id: str) -> Narrative | None:
+        await self._session.execute(
+            """
+            SELECT * FROM narratives
+            WHERE metadata->>'narrative_id' = %(narrative_id)s
+            """,
+            {"narrative_id": narrative_id},
+        )
+        row = await self._session.fetchone()
+        if not row:
+            return None
+
+        claims = await self._get_narrative_claims(row["id"])
+        topics = await self._get_narrative_topics(row["id"])
+        videos = await self._get_narrative_videos(row["id"])
+        return Narrative(**row, claims=claims, topics=topics, videos=videos)
 
     async def get_narratives_by_topic(
         self, topic_id: UUID, limit: int = 100, offset: int = 0

@@ -15,6 +15,7 @@ from core.auth.models import (
     LoginOptions,
     Organisation,
     OrganisationToken,
+    OrganisationUser,
     User,
 )
 from core.auth.repo import AuthRepository
@@ -56,6 +57,12 @@ class AuthService:
             organisation, is_admin = None, False
             if token.organisation_id:
                 organisation_id = UUID(hex=token.organisation_id)
+
+                if token.is_super_admin_override and not user.is_super_admin:
+                    raise NotAuthorizedError(
+                        "organisation_id override requires super admin privileges"
+                    )
+
                 organisation, is_admin = await repo.organisation_and_role(
                     user.id, organisation_id
                 )
@@ -123,7 +130,7 @@ class AuthService:
         async with self.repo() as repo:
             await repo.deactivate_organisation(organisation_id)
 
-    async def organisation_users(self, organisation_id: UUID) -> list[User]:
+    async def organisation_users(self, organisation_id: UUID) -> list[OrganisationUser]:
         async with self.repo() as repo:
             return await repo.organisation_users(organisation_id)
 
@@ -154,6 +161,40 @@ class AuthService:
 
             if auto_accept:
                 return None
+
+            return self.jwt_auth.create_token(
+                identifier=str(user.id),
+                token_expiration=INVITE_TTL,
+                organisation_id=str(organisation_id),
+            )
+
+    async def resend_invite_token(
+        self,
+        organisation_id: UUID,
+        email: str,
+    ) -> str | None:
+        async with self.repo() as repo:
+            organisation = await repo.get_organisation(organisation_id)
+            if organisation.deactivated is not None:
+                raise ConflictError("cannot resend invite to deactivated organisation")
+
+            email = email.strip()
+            user = await repo.get_user_by_email(email)
+            if not user:
+                raise ConflictError("cannot resend invite to non-existent user")
+
+            # Check if user has already accepted the invite
+            is_already_member = await repo.is_user_organisation_member(
+                user_id=user.id,
+                organisation_id=organisation_id,
+            )
+            if is_already_member:
+                raise ConflictError("user has already accepted the invite")
+
+            await repo.resend_invite(
+                user_id=user.id,
+                organisation_id=organisation_id,
+            )
 
             return self.jwt_auth.create_token(
                 identifier=str(user.id),
@@ -213,6 +254,10 @@ class AuthService:
     ) -> None:
         async with self.repo() as repo:
             await repo.set_admin(user_id, organisation_id, is_admin)
+
+    async def set_super_admin(self, user_id: UUID, is_super_admin: bool) -> None:
+        async with self.repo() as repo:
+            await repo.set_super_admin(user_id, is_super_admin)
 
     async def password_reset_token(self, email: str) -> str | None:
         async with self.repo() as repo:

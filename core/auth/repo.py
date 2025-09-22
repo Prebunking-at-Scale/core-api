@@ -4,7 +4,7 @@ from uuid import UUID
 import psycopg
 from psycopg.rows import DictRow
 
-from core.auth.models import Organisation, User
+from core.auth.models import Organisation, OrganisationUser, User
 from core.errors import (
     ConflictError,
     InvalidInviteError,
@@ -293,6 +293,22 @@ class AuthRepository:
         if not self._session.rowcount:
             raise NotFoundError("user not found")
 
+    async def set_super_admin(self, user_id: UUID, is_super_admin: bool):
+        await self._session.execute(
+            """
+            UPDATE users SET
+                is_super_admin = %(is_super_admin)s,
+                updated_at = now()
+            WHERE id = %(user_id)s
+            """,
+            {
+                "user_id": user_id,
+                "is_super_admin": is_super_admin,
+            },
+        )
+        if not self._session.rowcount:
+            raise NotFoundError("user not found")
+
     async def organisation_and_role(
         self, user_id: UUID, organisation_id: UUID
     ) -> tuple[Organisation, bool]:
@@ -369,7 +385,7 @@ class AuthRepository:
     async def organisation_users(
         self,
         organisation_id: UUID,
-    ) -> list[User]:
+    ) -> list[OrganisationUser]:
         await self._session.execute(
             """
                 SELECT *
@@ -378,11 +394,48 @@ class AuthRepository:
                 WHERE
                     ou.organisation_id = %(organisation_id)s
                     AND ou.deactivated IS NULL
-                    AND ou.accepted IS NOT NULL
             """,
             {
                 "organisation_id": organisation_id,
             },
         )
 
-        return [User(**row) for row in await self._session.fetchall()]
+        return [OrganisationUser(**row) for row in await self._session.fetchall()]
+
+    async def is_user_organisation_member(
+        self, user_id: UUID, organisation_id: UUID
+    ) -> bool:
+        await self._session.execute(
+            """
+            SELECT 1 FROM organisation_users
+            WHERE
+                user_id = %(user_id)s
+                AND organisation_id = %(organisation_id)s
+                AND accepted IS NOT NULL
+                AND deactivated IS NULL
+            """,
+            {
+                "user_id": user_id,
+                "organisation_id": organisation_id,
+            },
+        )
+        return await self._session.fetchone() is not None
+
+    async def resend_invite(self, user_id: UUID, organisation_id: UUID) -> None:
+        await self._session.execute(
+            """
+            UPDATE organisation_users SET
+                invited = now()
+            WHERE
+                user_id = %(user_id)s
+                AND organisation_id = %(organisation_id)s
+                AND accepted IS NULL
+                AND deactivated IS NULL
+            """,
+            {
+                "user_id": user_id,
+                "organisation_id": organisation_id,
+            },
+        )
+        if not self._session.rowcount:
+            raise ConflictError("no pending invite found for this user")
