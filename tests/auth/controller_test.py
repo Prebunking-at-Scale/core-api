@@ -725,3 +725,94 @@ async def test_super_admin_override_preserves_functionality(
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 200
+
+
+async def test_list_organisations_as_super_admin(
+    auth_client: AsyncTestClient[Litestar],
+    auth_service: AuthService,
+    organisation: Organisation,
+) -> None:
+    """Test that super admin can list all organisations"""
+    # Create additional organisations to test listing
+    org2 = await auth_service.create_organisation(OrganisationFactory.build())
+    org3 = await auth_service.create_organisation(OrganisationFactory.build())
+
+    super_admin, password = await create_user_with_password(
+        auth_service, organisation, is_super_admin=True
+    )
+    login_options = await auth_service.login(super_admin.email, password)
+
+    response = await auth_client.get(
+        "/api/auth/organisations",
+        headers={"Authorization": f"Bearer {get_access_token(login_options)}"},
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert len(data) == 3
+
+    # Check that all organisations are present
+    org_ids = {org["id"] for org in data}
+    assert str(organisation.id) in org_ids
+    assert str(org2.id) in org_ids
+    assert str(org3.id) in org_ids
+
+
+async def test_list_organisations_as_org_admin_fails(
+    auth_client: AsyncTestClient[Litestar],
+    auth_service: AuthService,
+    organisation: Organisation,
+) -> None:
+    """Test that organisation admin cannot list all organisations"""
+    org_admin, password = await create_user_with_password(
+        auth_service, organisation, as_admin=True
+    )
+    login_options = await auth_service.login(org_admin.email, password)
+
+    response = await auth_client.get(
+        "/api/auth/organisations",
+        headers={"Authorization": f"Bearer {get_access_token(login_options)}"},
+    )
+    assert response.status_code == 401
+
+
+async def test_list_organisations_as_regular_user_fails(
+    auth_client: AsyncTestClient[Litestar],
+    auth_service: AuthService,
+    organisation: Organisation,
+) -> None:
+    """Test that regular user cannot list all organisations"""
+    user, password = await create_user_with_password(auth_service, organisation)
+    login_options = await auth_service.login(user.email, password)
+
+    response = await auth_client.get(
+        "/api/auth/organisations",
+        headers={"Authorization": f"Bearer {get_access_token(login_options)}"},
+    )
+    assert response.status_code == 401
+
+
+async def test_list_organisations_excludes_deactivated(
+    auth_client: AsyncTestClient[Litestar],
+    auth_service: AuthService,
+    organisation: Organisation,
+) -> None:
+    """Test that deactivated organisations are not returned"""
+    # Create additional organisation and deactivate it
+    org2 = await auth_service.create_organisation(OrganisationFactory.build())
+    await auth_service.deactivate_organisation(org2.id)
+
+    super_admin, password = await create_user_with_password(
+        auth_service, organisation, is_super_admin=True
+    )
+    login_options = await auth_service.login(super_admin.email, password)
+
+    response = await auth_client.get(
+        "/api/auth/organisations",
+        headers={"Authorization": f"Bearer {get_access_token(login_options)}"},
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+
+    # Should only contain the active organisation
+    assert len(data) == 1
+    assert data[0]["id"] == str(organisation.id)

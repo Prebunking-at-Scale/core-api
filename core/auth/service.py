@@ -280,3 +280,7 @@ class AuthService:
         async with self.repo() as repo:
             hash = self._password_hash(new_password)
             await repo.update_password_hash(user.id, hash, last_update_before)
+
+    async def get_all_organisations(self) -> list[Organisation]:
+        async with self.repo() as repo:
+            return await repo.get_all_organisations()
