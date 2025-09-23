@@ -333,3 +333,15 @@ class AuthController(Controller):
         organisation: Organisation,
     ) -> JSON[list[OrganisationUser]]:
         return JSON(await auth_service.organisation_users(organisation.id))
+
+    @get(
+        path="/organisations",
+        guards=[super_admin],
+        summary="List all organisations",
+        tags=["organisations"],
+    )
+    async def list_organisations(
+        self,
+        auth_service: AuthService,
+    ) -> JSON[list[Organisation]]:
+        return JSON(await auth_service.get_all_organisations())

@@ -439,3 +439,14 @@ class AuthRepository:
         )
         if not self._session.rowcount:
             raise ConflictError("no pending invite found for this user")
+
+    async def get_all_organisations(self) -> list[Organisation]:
+        """Get all active organisations"""
+        await self._session.execute(
+            """
+            SELECT * FROM organisations
+            WHERE deactivated IS NULL
+            ORDER BY created_at DESC
+            """
+        )
+        return [Organisation(**row) for row in await self._session.fetchall()]
