@@ -55,15 +55,6 @@ async def create_user_with_password(
     return user, password
 
 
-@fixture(scope="function")
-async def auth_client(
-    temp_db: Postgresql,
-) -> AsyncIterator[AsyncTestClient[Litestar]]:
-    app.postgres_url = temp_db.url()
-    async with AsyncTestClient(app=app.app) as client:
-        yield client
-
-
 async def test_login_success(
     auth_client: AsyncTestClient[Litestar],
     auth_service: AuthService,
