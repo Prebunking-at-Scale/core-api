@@ -32,6 +32,10 @@ class OrganisationFactory(ModelFactory[Organisation]):
 class UserFactory(ModelFactory[User]):
     __check_model__ = True
 
+    @classmethod
+    def email(cls) -> str:
+        return cls.__faker__.email()
+
 
 @fixture
 async def auth_service(conn_factory) -> AuthService:
