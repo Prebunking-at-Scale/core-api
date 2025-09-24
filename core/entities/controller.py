@@ -5,10 +5,11 @@ from litestar.di import Provide
 from litestar.exceptions import NotFoundException
 
 from core.entities.service import EntityService
-from core.models import Claim, Entity, Narrative
+from core.models import Entity, Narrative
 from core.narratives.service import NarrativeService
 from core.response import JSON, PaginatedJSON
 from core.uow import ConnectionFactory
+from core.videos.claims.models import EnrichedClaim
 from core.videos.claims.service import ClaimsService
 
 
@@ -87,7 +88,7 @@ class EntityController(Controller):
         entity_id: UUID,
         limit: int = 100,
         offset: int = 0,
-    ) -> PaginatedJSON[list[Claim]]:
+    ) -> PaginatedJSON[list[EnrichedClaim]]:
         claims_service = ClaimsService(entity_service._connection_factory)
         claims, total = await claims_service.get_claims_by_entity(
             entity_id, limit=limit, offset=offset

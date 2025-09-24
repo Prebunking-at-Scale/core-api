@@ -44,7 +44,7 @@ class EntityRepository:
         if not new_entity:
             raise RuntimeError("Failed to create entity")
 
-        return Entity(**existing)
+        return Entity(**new_entity)
 
     async def get_entities_by_ids(self, entity_ids: list[UUID]) -> list[Entity]:
         """Get entities by their IDs"""
