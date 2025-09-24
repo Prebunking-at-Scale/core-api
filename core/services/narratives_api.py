@@ -14,8 +14,8 @@ class NarrativesAPIClient:
             base_url: The base URL of the Narratives API. Defaults to environment variable.
             api_key: The API key for authentication. Defaults to environment variable.
         """
-        self.base_url = base_url or NARRATIVES_BASE_URL
-        self.api_key = api_key or NARRATIVES_API_KEY
+        self.base_url: str = base_url or NARRATIVES_BASE_URL or ""
+        self.api_key: str = api_key or NARRATIVES_API_KEY or ""
 
         if not self.base_url:
             raise ValueError("NARRATIVES_BASE_URL environment variable must be set")
@@ -40,7 +40,7 @@ class NarrativesAPIClient:
             httpx.HTTPStatusError: If the request fails with a non-2xx status code.
             httpx.RequestError: If there's a network error.
         """
-        headers = {
+        headers: Dict[str, str] = {
             "X-API-TOKEN": self.api_key
         }
 
@@ -64,9 +64,10 @@ class NarrativesAPIClient:
         try:
             async with httpx.AsyncClient() as client:
                 # Attempt a HEAD request to the base URL
+                headers: Dict[str, str] = {"X-API-Key": self.api_key}
                 response = await client.head(
                     self.base_url,
-                    headers={"X-API-Key": self.api_key},
+                    headers=headers,
                     timeout=5.0
                 )
                 return response.status_code < 500

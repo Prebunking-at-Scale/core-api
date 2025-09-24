@@ -1,9 +1,9 @@
 from typing import Any
 from uuid import UUID
 
-from litestar import Controller, delete, get, patch, post
+from litestar import Controller, Response, delete, get, patch, post
 from litestar.di import Provide
-from litestar.exceptions import NotFoundException
+from litestar.exceptions import NotFoundException, InternalServerException
 
 from core.errors import ConflictError
 from core.models import Narrative
@@ -157,7 +157,7 @@ class NarrativeController(Controller):
         self,
         narrative_service: NarrativeService,
         narrative_id: UUID,
-    ) -> None:
+    ) -> Response[None]:
         # First, get the narrative to validate it exists and retrieve metadata
         narrative = await narrative_service.get_narrative(narrative_id)
         if not narrative:
@@ -175,7 +175,8 @@ class NarrativeController(Controller):
                 pass
             except (AuthenticationError, NarrativesAPIError) as e:
                 print(f"Warning: Failed to delete from external API: {e}")
-                return JSON({"error": str(e)}, status_code=500)
+                raise InternalServerException(detail=str(e))
 
         # Delete from local database
         await narrative_service.delete_narrative(narrative_id)
+        return Response(content=None, status_code=204)
