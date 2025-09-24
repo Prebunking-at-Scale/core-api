@@ -19,12 +19,26 @@ async def entity_service(
     return EntityService(connection_factory=connection_factory)
 
 
+async def narrative_service(
+    connection_factory: ConnectionFactory,
+) -> NarrativeService:
+    return NarrativeService(connection_factory=connection_factory)
+
+
+async def claims_service(
+    connection_factory: ConnectionFactory,
+) -> ClaimsService:
+    return ClaimsService(connection_factory=connection_factory)
+
+
 class EntityController(Controller):
     path = "/entities"
     tags = ["entities"]
 
     dependencies = {
         "entity_service": Provide(entity_service),
+        "narrative_service": Provide(narrative_service),
+        "claims_service": Provide(claims_service),
     }
 
     @get(
@@ -64,12 +78,11 @@ class EntityController(Controller):
     )
     async def get_narratives_by_entity(
         self,
-        entity_service: EntityService,
+        narrative_service: NarrativeService,
         entity_id: UUID,
         limit: int = 100,
         offset: int = 0,
     ) -> PaginatedJSON[list[Narrative]]:
-        narrative_service = NarrativeService(entity_service._connection_factory)
         narratives, total = await narrative_service.get_narratives_by_entity(
             entity_id, limit=limit, offset=offset
         )
@@ -84,12 +97,11 @@ class EntityController(Controller):
     )
     async def get_claims_by_entity(
         self,
-        entity_service: EntityService,
+        claims_service: ClaimsService,
         entity_id: UUID,
         limit: int = 100,
         offset: int = 0,
     ) -> PaginatedJSON[list[EnrichedClaim]]:
-        claims_service = ClaimsService(entity_service._connection_factory)
         claims, total = await claims_service.get_claims_by_entity(
             entity_id, limit=limit, offset=offset
         )
