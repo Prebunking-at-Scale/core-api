@@ -16,7 +16,7 @@ from litestar.dto import DTOData
 from litestar.exceptions import NotFoundException
 from litestar.params import Parameter
 
-from core.analysis import genai
+from core.analysis import genai, language_id
 from core.config import APP_BASE_URL, NARRATIVES_API_KEY, NARRATIVES_BASE_URL
 from core.errors import ConflictError
 from core.models import Claim, Transcript, TranscriptSentence, Video
@@ -53,7 +53,10 @@ async def narrative_service(state: State) -> NarrativeService:
 
 
 async def extract_transcript_and_claims(
-    video: Video, transcript_service: TranscriptService, claims_service: ClaimsService
+    video: Video,
+    video_service: VideoService,
+    transcript_service: TranscriptService,
+    claims_service: ClaimsService,
 ) -> None:
     if "PYTEST_CURRENT_TEST" in os.environ:
         # We don't want to run this during tests
@@ -64,10 +67,20 @@ async def extract_transcript_and_claims(
 
     result = await genai.generate_transcript(video.source_url)
     sentences = [TranscriptSentence(**x.model_dump()) for x in result]
+    all_text = " ".join([s.text for s in sentences])
+    overall_language: str | None = (
+        language_id.predict_language(all_text) if all_text.strip() else None
+    )
+    for sentence in sentences:
+        sentence.metadata["language"] = language_id.predict_language(sentence.text)
 
     if sentences:
         transcript = Transcript(video_id=video.id, sentences=sentences)
         await transcript_service.add_transcript(video.id, transcript)
+
+    if overall_language:
+        video.metadata["language"] = overall_language
+        await video_service.patch_video(video.id, video)
 
     orgs: list[str] = video.metadata.get("for_organisation", [])
     if not orgs:
@@ -195,7 +208,11 @@ class VideoController(Controller):
         return Response(
             JSON(video),
             background=BackgroundTask(
-                extract_transcript_and_claims, video, transcript_service, claims_service
+                extract_transcript_and_claims,
+                video,
+                video_service,
+                transcript_service,
+                claims_service,
             ),
         )
 
