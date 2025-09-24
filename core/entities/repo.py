@@ -28,14 +28,7 @@ class EntityRepository:
         existing = await self._session.fetchone()
         
         if existing:
-            return Entity(
-                id=existing["id"],
-                wikidata_id=existing["wikidata_id"],
-                name=existing["name"],
-                metadata=existing["metadata"],
-                created_at=existing["created_at"],
-                updated_at=existing["updated_at"],
-            )
+            return Entity(**existing)
         
         # Create new entity if not found
         await self._session.execute(
@@ -51,14 +44,7 @@ class EntityRepository:
         if not new_entity:
             raise RuntimeError("Failed to create entity")
 
-        return Entity(
-            id=new_entity["id"],
-            wikidata_id=new_entity["wikidata_id"],
-            name=new_entity["name"],
-            metadata=new_entity["metadata"],
-            created_at=new_entity["created_at"],
-            updated_at=new_entity["updated_at"],
-        )
+        return Entity(**existing)
 
     async def get_entities_by_ids(self, entity_ids: list[UUID]) -> list[Entity]:
         """Get entities by their IDs"""

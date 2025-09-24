@@ -38,8 +38,6 @@ class ClaimsService:
             added_claims = await repo.add_claims(video_id, claims_to_add)
 
         if any(claim_entities):
-            from core.entities.models import EntityInput
-            from core.entities.service import EntityService
 
             entity_service = EntityService(self._connection_factory)
 
@@ -67,7 +65,6 @@ class ClaimsService:
                 return None
             claims = await repo.get_claims_for_video(video_id)
 
-        from core.entities.service import EntityService
         entity_service = EntityService(self._connection_factory)
 
         for claim in claims:
