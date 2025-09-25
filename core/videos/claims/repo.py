@@ -195,41 +195,44 @@ class ClaimRepository:
         return Video(**row) if row else None
 
     async def get_all_claims(
-        self, 
-        limit: int = 100, 
-        offset: int = 0, 
+        self,
+        limit: int = 100,
+        offset: int = 0,
         topic_id: UUID | None = None,
         text: str | None = None,
         min_score: float | None = None,
-        max_score: float | None = None
+        max_score: float | None = None,
     ) -> tuple[list[EnrichedClaim], int]:
         # Build the query conditionally
         where_conditions = []
+        join_clause = " "
         params: dict[str, int | UUID | str | float] = {"limit": limit, "offset": offset}
 
         if topic_id:
-            where_conditions.append("ct.topic_id = %(topic_id)s")
+            join_clause = " JOIN claim_topics ct ON c.id = ct.claim_id AND ct.topic_id = %(topic_id)s "
             params["topic_id"] = topic_id
-            
+
         if text:
             where_conditions.append("LOWER(c.claim) LIKE LOWER(%(text)s)")
             params["text"] = f"%{text}%"
-            
+
         if min_score is not None:
             where_conditions.append("(c.metadata->>'score')::float >= %(min_score)s")
             params["min_score"] = min_score
-            
+
         if max_score is not None:
             where_conditions.append("(c.metadata->>'score')::float <= %(max_score)s")
             params["max_score"] = max_score
-            
-        where_clause = "WHERE " + " AND ".join(where_conditions) if where_conditions else ""
+
+        where_clause = (
+            "WHERE " + " AND ".join(where_conditions) if where_conditions else ""
+        )
 
         # Get total count
         count_query = f"""
-            SELECT COUNT(DISTINCT c.id)
+            SELECT COUNT(*)
             FROM video_claims c
-            {"JOIN claim_topics ct ON c.id = ct.claim_id" if topic_id else ""}
+            {join_clause}
             {where_clause}
         """
         await self._session.execute(count_query, params)
@@ -238,9 +241,9 @@ class ClaimRepository:
 
         # Get claims
         claims_query = f"""
-            SELECT DISTINCT c.*
+            SELECT c.*
             FROM video_claims c
-            {"JOIN claim_topics ct ON c.id = ct.claim_id" if topic_id else ""}
+            {join_clause}
             {where_clause}
             ORDER BY c.created_at DESC
             LIMIT %(limit)s OFFSET %(offset)s
