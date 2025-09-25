@@ -17,10 +17,12 @@ async def test_add_claims(
         f"/api/videos/{video.id}/claims",
         json=claims_json,
     )
+
     claims_json["claims"][0] = claims_json["claims"][0] | {
         "created_at": ANY,
         "updated_at": ANY,
         "video_id": str(video.id),
+        "entities": [],
     }
     assert response.status_code == 201
     assert response.json() == {"data": claims_json}
@@ -44,6 +46,7 @@ async def test_get_claims(
         "created_at": ANY,
         "updated_at": ANY,
         "video_id": str(video.id),
+        "entities": ANY
     }
     assert response.json() == {"data": claims_json}
 
