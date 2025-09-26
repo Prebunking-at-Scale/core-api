@@ -1,11 +1,7 @@
-from collections.abc import AsyncIterator
 
 from litestar import Litestar
 from litestar.testing import AsyncTestClient
-from pytest import fixture
-from testing.postgresql import Postgresql
 
-import core.app as app
 from core.auth.models import (
     AdminStatus,
     Organisation,
@@ -807,3 +803,81 @@ async def test_list_organisations_excludes_deactivated(
     # Should only contain the active organisation
     assert len(data) == 1
     assert data[0]["id"] == str(organisation.id)
+
+
+async def test_request_magic_link_existing_user(
+    auth_client: AsyncTestClient[Litestar],
+    auth_service: AuthService,
+    organisation: Organisation,
+) -> None:
+    user, _ = await create_user_with_password(auth_service, organisation)
+
+    response = await auth_client.post(
+        "/api/auth/request-magic-link",
+        json={"email": user.email},
+    )
+
+    assert response.status_code == 200
+
+
+async def test_request_magic_link_nonexistent_user(
+    auth_client: AsyncTestClient[Litestar],
+) -> None:
+    response = await auth_client.post(
+        "/api/auth/request-magic-link",
+        json={"email": "nonexistent@example.com"},
+    )
+
+    assert response.status_code == 200
+
+
+async def test_magic_login_success(
+    auth_client: AsyncTestClient[Litestar],
+    auth_service: AuthService,
+    organisation: Organisation,
+) -> None:
+    user, _ = await create_user_with_password(auth_service, organisation)
+
+    magic_token = await auth_service.magic_link_token(user.email)
+    assert magic_token is not None
+
+    response = await auth_client.get(
+        "/api/auth/magic-login",
+        params={"token": magic_token},
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert "organisations" in data
+    assert data["user"]["email"] == user.email
+
+
+async def test_magic_login_invalid_token(
+    auth_client: AsyncTestClient[Litestar],
+) -> None:
+    response = await auth_client.get(
+        "/api/auth/magic-login",
+        params={"token": "invalid_token"},
+    )
+    assert response.status_code == 500
+
+
+async def test_magic_login_nonexistent_user(
+    auth_client: AsyncTestClient[Litestar],
+    auth_service: AuthService,
+    organisation: Organisation,
+) -> None:
+    user, _ = await create_user_with_password(auth_service, organisation)
+
+    # Create a magic token for the user
+    magic_token = await auth_service.magic_link_token(user.email)
+    assert magic_token is not None
+
+    # Remove the user from the organisation to simulate a deleted user
+    await auth_service.remove_user(user.id, organisation.id)
+
+    response = await auth_client.get(
+        "/api/auth/magic-login",
+        params={"token": magic_token},
+    )
+    assert response.status_code == 401
+

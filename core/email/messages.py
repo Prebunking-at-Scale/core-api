@@ -58,6 +58,25 @@ def password_reset_message(token: str, locale: str) -> tuple[str, str]:
     return subject, body
 
 
+def magic_link_message(token: str, locale: str) -> tuple[str, str]:
+    subject = i18n.t("email.magic_link.subject", locale=locale)
+
+    body = f"""
+    <div style="{container_style}">
+        <h1 style="color: #333;">{subject}</h1>
+        <p style="margin: 2em">{i18n.t("email.magic_link.message", locale=locale)}</p>
+        <p style="margin: 2em">{i18n.t("email.magic_link.not_you", locale=locale)}</p>
+        <p>
+            <a href="{config.APP_BASE_URL}/magic-login?token={token}" style="{button_style}">
+                {i18n.t("email.magic_link.login_link", locale=locale)}
+            </a>
+        </p>
+    <div>
+    """
+
+    return subject, body
+
+
 def alerts_message(
     organisation_name: str, alerts: list[dict], locale: str
 ) -> tuple[str, str]:

@@ -32,6 +32,8 @@ AUTH_TOKEN_TTL = timedelta(days=30)
 INVITE_TTL = timedelta(days=7)
 # how long a password reset token should last before expiring
 PASSWORD_RESET_TTL = timedelta(minutes=30)
+# how long a magic link token should last before expiring
+MAGIC_LINK_TTL = timedelta(minutes=15)
 
 """email settings"""
 EMAIL_FROM = os.environ.get("EMAIL_FROM", "auto@fullfact.org")

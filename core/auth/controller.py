@@ -15,6 +15,7 @@ from core.auth.models import (
     Identity,
     Login,
     LoginOptions,
+    MagicLinkRequest,
     Organisation,
     OrganisationCreateDTO,
     OrganisationInvite,
@@ -22,6 +23,7 @@ from core.auth.models import (
     OrganisationUser,
     PasswordChange,
     SuperAdminStatus,
+    TokenType,
     User,
     UserUpdateDTO,
 )
@@ -44,6 +46,13 @@ async def send_password_reset_email(
     emailer: Emailer, to: str, locale: str, token: str
 ) -> None:
     subject, body = messages.password_reset_message(token, locale)
+    emailer.send(to, subject, body)
+
+
+async def send_magic_link_email(
+    emailer: Emailer, to: str, locale: str, token: str
+) -> None:
+    subject, body = messages.magic_link_message(token, locale)
     emailer.send(to, subject, body)
 
 
@@ -124,7 +133,7 @@ class AuthController(Controller):
         data: PasswordChange,
     ) -> None:
         last_update_before = None
-        if request.auth.is_password_reset:
+        if request.auth.token_type == TokenType.PASSWORD_RESET:
             last_update_before = request.auth.iat
 
         await auth_service.update_password(
@@ -345,3 +354,45 @@ class AuthController(Controller):
         auth_service: AuthService,
     ) -> JSON[list[Organisation]]:
         return JSON(await auth_service.get_all_organisations())
+
+    @post(
+        path="/request-magic-link",
+        summary="Request a magic link for login",
+        exclude_from_auth=True,
+        tags=["auth"],
+        status_code=200,
+    )
+    async def request_magic_link(
+        self,
+        emailer: Emailer,
+        auth_service: AuthService,
+        data: MagicLinkRequest,
+        locale: str = "en",
+    ) -> Response[None]:
+        token = await auth_service.magic_link_token(data.email)
+        if not token:
+            return Response(None)
+
+        return Response(
+            None,
+            background=BackgroundTask(
+                send_magic_link_email,
+                emailer,
+                data.email,
+                locale,
+                token,
+            ),
+        )
+
+    @get(
+        path="/magic-login",
+        summary="Login using a magic link",
+        exclude_from_auth=True,
+        tags=["auth"],
+        raises=[NotAuthorizedError],
+        status_code=200,
+    )
+    async def magic_login(
+        self, auth_service: AuthService, token: Annotated[str, Field(description="A JWT magic link token")]
+    ) -> JSON[LoginOptions]:
+        return JSON(await auth_service.magic_link_login(token))

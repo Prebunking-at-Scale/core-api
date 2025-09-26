@@ -2,7 +2,7 @@ import uuid
 
 from pytest import raises
 
-from core.auth.models import AuthToken, Organisation, User
+from core.auth.models import AuthToken, Organisation, TokenType, User
 from core.auth.service import AuthService
 from core.errors import (
     ConflictError,
@@ -126,7 +126,7 @@ async def test_password_reset_token(auth_service: AuthService, user: User) -> No
         secret=auth_service.jwt_auth.token_secret,
         algorithm=auth_service.jwt_auth.algorithm,
     )
-    assert auth_token.is_password_reset
+    assert auth_token.token_type == TokenType.PASSWORD_RESET
 
 
 async def test_login_correct_details(auth_service: AuthService, user: User) -> None:
@@ -274,3 +274,47 @@ async def test_resend_invite_already_accepted_fails(
             organisation_id=organisation.id,
             email=email,
         )
+
+
+async def test_magic_link_token_existing_user(
+    auth_service: AuthService, user: User
+) -> None:
+    """Test magic link token generation for existing user"""
+    token = await auth_service.magic_link_token(user.email)
+    assert token is not None
+
+
+async def test_magic_link_token_nonexistent_user(auth_service: AuthService) -> None:
+    """Test magic link token generation for non-existent user returns None"""
+    token = await auth_service.magic_link_token("nonexistent@example.com")
+    assert token is None
+
+
+async def test_magic_link_login_success(
+    auth_service: AuthService, user: User
+) -> None:
+    """Test successful magic link login"""
+    token = await auth_service.magic_link_token(user.email)
+    assert token is not None
+
+    login_options = await auth_service.magic_link_login(token)
+    assert login_options.user.email == user.email
+    assert len(login_options.organisations) == 1
+
+
+async def test_magic_link_login_invalid_token(auth_service: AuthService) -> None:
+    """Test magic link login with invalid token"""
+    with raises(Exception):  # jwt.decode will raise an exception
+        await auth_service.magic_link_login("invalid_token")
+
+
+async def test_magic_link_login_non_magic_token(
+    auth_service: AuthService, user: User
+) -> None:
+    """Test magic link login with a non-magic token"""
+    # Create a regular password reset token
+    reset_token = await auth_service.password_reset_token(user.email)
+    assert reset_token is not None
+
+    with raises(NotAuthorizedError, match="invalid magic link token"):
+        await auth_service.magic_link_login(reset_token)
