@@ -1,8 +1,9 @@
 from typing import Any, AsyncContextManager
 from uuid import UUID
 
+from core.entities.service import EntityService
 from core.models import Narrative
-from core.narratives.models import NarrativeInput
+from core.narratives.models import NarrativeInput, NarrativePatchInput
 from core.narratives.repo import NarrativeRepository
 from core.uow import ConnectionFactory, uow
 
@@ -19,37 +20,17 @@ class NarrativeService:
             if not await repo.claims_exist(narrative.claim_ids):
                 raise ValueError("one or more claims not found")
 
-            narrative_id_in_metadata = narrative.metadata.get("narrative_id")
-            if narrative_id_in_metadata:
-                existing_narrative = await repo.find_by_narrative_id_in_metadata(
-                    narrative_id_in_metadata
-                )
-                
-                if existing_narrative:
-                    # Merge claim_ids and topic_ids with existing ones
-                    existing_claim_ids = [claim.id for claim in existing_narrative.claims]
-                    merged_claim_ids = list(set(existing_claim_ids + narrative.claim_ids))
-                    
-                    existing_topic_ids = [topic.id for topic in existing_narrative.topics]
-                    merged_topic_ids = list(set(existing_topic_ids + narrative.topic_ids))
-                    
-                    updated_narrative = await repo.update_narrative(
-                        narrative_id=existing_narrative.id,
-                        title=narrative.title,
-                        description=narrative.description,
-                        claim_ids=merged_claim_ids,
-                        topic_ids=merged_topic_ids,
-                        metadata=narrative.metadata,
-                    )
-                    if updated_narrative is None:
-                        raise ValueError(f"Failed to update narrative with ID {existing_narrative.id}")
-                    return updated_narrative
+            entity_ids = []
+            if narrative.entities:
+                entity_service = EntityService(self._connection_factory)
+                entity_ids = await entity_service.process_entities(narrative.entities)
 
             return await repo.create_narrative(
                 title=narrative.title,
                 description=narrative.description,
                 claim_ids=narrative.claim_ids,
                 topic_ids=narrative.topic_ids,
+                entity_ids=entity_ids,
                 metadata=narrative.metadata,
             )
 
@@ -62,34 +43,72 @@ class NarrativeService:
             return await repo.get_narratives_by_claim(claim_id)
 
     async def get_all_narratives(
-        self, 
-        limit: int = 100, 
+        self,
+        limit: int = 100,
         offset: int = 0,
         topic_id: UUID | None = None,
+        entity_id: UUID | None = None,
         text: str | None = None
     ) -> tuple[list[Narrative], int]:
         async with self.repo() as repo:
             narratives = await repo.get_all_narratives(
-                limit=limit, 
-                offset=offset, 
-                topic_id=topic_id, 
+                limit=limit,
+                offset=offset,
+                topic_id=topic_id,
+                entity_id=entity_id,
                 text=text
             )
-            total = await repo.count_all_narratives(topic_id=topic_id, text=text)
+            total = await repo.count_all_narratives(
+                topic_id=topic_id, entity_id=entity_id, text=text
+            )
+            return narratives, total
+
+    async def get_narratives_by_entity(
+        self, entity_id: UUID, limit: int = 100, offset: int = 0
+    ) -> tuple[list[Narrative], int]:
+        async with self.repo() as repo:
+            narratives = await repo.get_all_narratives(
+                limit=limit, offset=offset, entity_id=entity_id
+            )
+            total = await repo.count_all_narratives(entity_id=entity_id)
             return narratives, total
 
     async def update_narrative(
         self,
         narrative_id: UUID,
-        data: NarrativeInput,
+        data: NarrativePatchInput,
     ) -> Narrative | None:
         async with self.repo() as repo:
+
+            existing_narrative = await repo.get_narrative(narrative_id)
+            if not existing_narrative:
+                return None
+
+            merged_entity_ids = None
+            if data.entities is not None:
+                entity_service = EntityService(self._connection_factory)
+                entity_ids = await entity_service.process_entities(data.entities)
+
+                existing_entity_ids = [entity.id for entity in existing_narrative.entities]
+                merged_entity_ids = list(set(existing_entity_ids + entity_ids))
+
+            merged_claim_ids = data.claim_ids
+            if data.claim_ids is not None:
+                existing_claim_ids = [claim.id for claim in existing_narrative.claims]
+                merged_claim_ids = list(set(existing_claim_ids + data.claim_ids))
+
+            merged_topic_ids = data.topic_ids
+            if data.topic_ids is not None:
+                existing_topic_ids = [topic.id for topic in existing_narrative.topics]
+                merged_topic_ids = list(set(existing_topic_ids + data.topic_ids))
+
             return await repo.update_narrative(
                 narrative_id=narrative_id,
                 title=data.title,
                 description=data.description,
-                claim_ids=data.claim_ids,
-                topic_ids=data.topic_ids,
+                claim_ids=merged_claim_ids,
+                topic_ids=merged_topic_ids,
+                entity_ids=merged_entity_ids,
                 metadata=data.metadata,
             )
 

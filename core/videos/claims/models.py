@@ -4,13 +4,15 @@ from litestar.dto import DTOConfig
 from litestar.plugins.pydantic import PydanticDTO
 from pydantic import BaseModel
 
-from core.models import Claim, Narrative, Topic, Video
+from core.entities.models import EntityInput
+from core.models import Claim, Entity, Narrative, Topic, Video
 
 
 class EnrichedClaim(Claim):
-    topics: list[Topic] = []  # Associated topics
-    video: Video | None = None  # Video information
-    narratives: list[Narrative] = []  # Associated narratives
+    topics: list[Topic] = []  
+    entities: list[Entity] = [] 
+    video: Video | None = None  
+    narratives: list[Narrative] = [] 
 
 
 class VideoClaims(BaseModel):
@@ -29,5 +31,5 @@ class VideoClaimsDTO(PydanticDTO[VideoClaims]):
 
 
 class ClaimUpdate(BaseModel):
-    entities: list[UUID] = []  # Future entity IDs
-    topics: list[UUID] = []  # Topic IDs to associate
+    entities: list[EntityInput] | None = None 
+    topics: list[UUID] | None = None 
