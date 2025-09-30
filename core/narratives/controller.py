@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -64,14 +65,21 @@ class NarrativeController(Controller):
         topic_id: UUID | None = None,
         entity_id: UUID | None = None,
         text: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+        first_content_start: datetime | None = None,
+        first_content_end: datetime | None = None,
     ) -> PaginatedJSON[list[Narrative]]:
-        narratives, total = await narrative_service.get_all_narratives(
-            limit=limit, offset=offset, topic_id=topic_id, entity_id=entity_id, text=text
-        )
-        page = (offset // limit) + 1 if limit > 0 else 1
-        return PaginatedJSON(
-            data=narratives, total=total, page=page, size=len(narratives)
-        )
+        try:
+            narratives, total = await narrative_service.get_all_narratives(
+                limit=limit, offset=offset, topic_id=topic_id, entity_id=entity_id, text=text, start_date=start_date, end_date=end_date, first_content_start=first_content_start, first_content_end=first_content_end
+            )
+            page = (offset // limit) + 1 if limit > 0 else 1
+            return PaginatedJSON(
+                data=narratives, total=total, page=page, size=len(narratives)
+            )
+        except Exception as e:
+            raise NotFoundException(str(e)) from e
 
     @get(
         path="/claims/{claim_id:uuid}",
@@ -91,7 +99,7 @@ class NarrativeController(Controller):
         narrative_service: NarrativeService,
         limit: int = 100,
         offset: int = 0,
-        hours: int = 24,
+        hours: int|None = None,
     ) -> JSON[list[Narrative]]:
         return JSON(
             await narrative_service.get_viral_narratives(
@@ -108,7 +116,7 @@ class NarrativeController(Controller):
         narrative_service: NarrativeService,
         limit: int = 100,
         offset: int = 0,
-        hours: int = 24,
+        hours: int|None = None,
     ) -> JSON[list[Narrative]]:
         return JSON(
             await narrative_service.get_prevalent_narratives(

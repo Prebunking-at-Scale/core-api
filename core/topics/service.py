@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any, AsyncContextManager
 from uuid import UUID
 
@@ -78,7 +79,12 @@ class TopicService:
             return await repo.get_topics_by_narrative(narrative_id)
 
     async def get_all_topics_with_stats(
-        self, limit: int = 100, offset: int = 0
+        self, limit: int = 100, offset: int = 0, start_date: datetime | None = None, end_date: datetime | None = None
     ) -> tuple[list[TopicWithStats], int]:
         async with self.repo() as repo:
-            return await repo.get_all_topics_with_stats(limit=limit, offset=offset)
+            return await repo.get_all_topics_with_stats(
+                limit=limit,
+                offset=offset,
+                start_date=start_date.isoformat() if start_date else None,
+                end_date=end_date.isoformat() if end_date else None
+            )

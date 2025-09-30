@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -115,9 +116,11 @@ class TopicController(Controller):
         topic_service: TopicService,
         limit: int = 20,
         offset: int = 0,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> PaginatedJSON[list[TopicWithStats]]:
         topics, total = await topic_service.get_all_topics_with_stats(
-            limit=limit, offset=offset
+            limit=limit, offset=offset, start_date=start_date, end_date=end_date
         )
         page = (offset // limit) + 1 if limit > 0 else 1
         return PaginatedJSON(
