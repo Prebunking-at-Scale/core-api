@@ -7,6 +7,7 @@ from litestar.dto import DTOData
 from litestar.exceptions import NotFoundException
 from litestar.params import Parameter
 
+from core.auth.guards import super_admin
 from core.errors import ConflictError
 from core.models import Claim
 from core.response import JSON, PaginatedJSON
@@ -40,6 +41,7 @@ class ClaimController(Controller):
         dto=VideoClaimsDTO,
         return_dto=None,
         raises=[ConflictError],
+        guards=[super_admin],
     )
     async def add_claims(
         self,
@@ -64,6 +66,7 @@ class ClaimController(Controller):
     @delete(
         path="/",
         summary="Delete all claims for the given video",
+        guards=[super_admin],
     )
     async def delete_claims(
         self, claims_service: ClaimsService, video_id: UUID
@@ -73,6 +76,7 @@ class ClaimController(Controller):
     @patch(
         path="/{claim_id:uuid}/metadata",
         summary="Update the metadata for a claim",
+        guards=[super_admin],
     )
     async def patch_claim_metadata(
         self,
@@ -85,6 +89,7 @@ class ClaimController(Controller):
     @delete(
         path="/{claim_id:uuid}",
         summary="Delete a specific claim",
+        guards=[super_admin],
     )
     async def delete_claim(
         self,
@@ -96,6 +101,7 @@ class ClaimController(Controller):
     @patch(
         path="/{claim_id:uuid}",
         summary="Update claim associations (topics and entities)",
+        guards=[super_admin],
     )
     async def update_claim_associations(
         self,
@@ -138,12 +144,12 @@ class RootClaimController(Controller):
         offset: int = Parameter(0, query="offset", ge=0),
     ) -> PaginatedJSON[list[EnrichedClaim]]:
         claims, total = await claims_service.get_all_claims(
-            limit=limit, 
-            offset=offset, 
-            topic_id=topic_id, 
+            limit=limit,
+            offset=offset,
+            topic_id=topic_id,
             text=text,
             min_score=min_score,
-            max_score=max_score
+            max_score=max_score,
         )
         page = (offset // limit) + 1 if limit > 0 else 1
         return PaginatedJSON(

@@ -5,7 +5,13 @@ from litestar import Controller, Request, delete, get, patch, post
 from litestar.di import Provide
 from litestar.status_codes import HTTP_204_NO_CONTENT
 
-from core.alerts.models import Alert, AlertScope, AlertType, CreateAlertRequest, UpdateAlertRequest
+from core.alerts.models import (
+    Alert,
+    AlertScope,
+    AlertType,
+    CreateAlertRequest,
+    UpdateAlertRequest,
+)
 from core.alerts.service import AlertService
 from core.auth.models import AuthToken, Identity
 from core.response import PaginatedJSON
@@ -134,7 +140,7 @@ class AlertController(Controller):
     #         execution,
     #         background=BackgroundTask(send_alert_emails, ...)
     #     )
-    
+
     @get(
         path="/types",
         summary="Get available alert types",
