@@ -12,6 +12,12 @@
             "not_you": "If this was not you, you can safely ignore this email.",
             "reset_message": "To reset your password, click the button bellow:",
             "reset_link": "RESET PASSWORD"
+        },
+        "magic_link": {
+            "subject": "Sign in to Prebunking at Scale",
+            "message": "Click the button below to sign in to your account.",
+            "not_you": "If this was not you, you can safely ignore this email.",
+            "login_link": "SIGN IN"
         }
     }
 }
