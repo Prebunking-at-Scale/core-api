@@ -15,6 +15,7 @@ from core.alerts.controller import AlertController
 from core.auth import dependencies, middleware
 from core.auth.controller import AuthController
 from core.auth.service import AuthService
+from core.entities.controller import EntityController
 from core.media_feeds.controller import MediaFeedController
 from core.migrate import migrate
 from core.narratives.controller import NarrativeController
@@ -29,7 +30,7 @@ MIGRATION_TARGET_VERSION = 12
 postgres_url = f"postgresql://{config.DB_USER}:{config.DB_PASSWORD}@{config.DB_HOST}:{config.DB_PORT}/{config.DB_NAME}"
 
 auth_service = AuthService()
-api_auth = middleware.APITokenAuthMiddleware(auth_service.jwt_auth)
+auth_middleware = middleware.AuthenticationMiddleware(auth_service.jwt_auth)
 
 
 def pool_factory(url: str) -> AsyncConnectionPool[AsyncConnection[DictRow]]:
@@ -98,6 +99,7 @@ api_router = Router(
         NarrativeController,
         TopicController,
         MediaFeedController,
+        EntityController,
     ],
 )
 
@@ -106,8 +108,8 @@ app: Litestar = Litestar(
     debug=config.DEV_MODE,
     on_app_init=[
         auth_service.jwt_auth.on_app_init,
-        # Order is important so that api_auth can override jwt_auth's settings
-        api_auth.on_app_init,
+        # Order is important so that auth_middleware can override jwt_auth's settings
+        auth_middleware.on_app_init,
     ],
     route_handlers=[
         hello_world,

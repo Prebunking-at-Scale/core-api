@@ -15,11 +15,15 @@ from core.auth.models import (
     Identity,
     Login,
     LoginOptions,
+    MagicLinkRequest,
     Organisation,
     OrganisationCreateDTO,
     OrganisationInvite,
     OrganisationUpdateDTO,
+    OrganisationUser,
     PasswordChange,
+    SuperAdminStatus,
+    TokenType,
     User,
     UserUpdateDTO,
 )
@@ -45,6 +49,13 @@ async def send_password_reset_email(
     emailer.send(to, subject, body)
 
 
+async def send_magic_link_email(
+    emailer: Emailer, to: str, locale: str, token: str
+) -> None:
+    subject, body = messages.magic_link_message(token, locale)
+    emailer.send(to, subject, body)
+
+
 async def auth_service(state: State) -> AuthService:
     return AuthService(connection_factory=state.connection_factory)
 
@@ -62,6 +73,7 @@ class AuthController(Controller):
         exclude_from_auth=True,
         tags=["auth"],
         raises=[NotAuthorizedError],
+        status_code=200,
     )
     async def login(self, auth_service: AuthService, data: Login) -> JSON[LoginOptions]:
         return JSON(
@@ -84,6 +96,7 @@ class AuthController(Controller):
         summary="Request an email to reset the users password",
         exclude_from_auth=True,
         tags=["auth"],
+        status_code=200,
     )
     async def password_reset(
         self,
@@ -120,7 +133,7 @@ class AuthController(Controller):
         data: PasswordChange,
     ) -> None:
         last_update_before = None
-        if request.auth.is_password_reset:
+        if request.auth.token_type == TokenType.PASSWORD_RESET:
             last_update_before = request.auth.iat
 
         await auth_service.update_password(
@@ -222,6 +235,23 @@ class AuthController(Controller):
             is_admin=data.is_admin,
         )
 
+    @patch(
+        path="/users/{user_id:uuid}/super-admin",
+        guards=[super_admin],
+        summary="Set the users super admin status",
+        tags=["users"],
+    )
+    async def set_super_admin_status(
+        self,
+        auth_service: AuthService,
+        user_id: UUID,
+        data: SuperAdminStatus,
+    ) -> None:
+        await auth_service.set_super_admin(
+            user_id=user_id,
+            is_super_admin=data.is_super_admin,
+        )
+
     @post(
         path="/organisation/invite",
         guards=[organisation_admin],
@@ -240,6 +270,37 @@ class AuthController(Controller):
             email=data.user_email,
             as_admin=data.as_admin,
             auto_accept=False,
+        )
+        if not token:
+            raise Exception("expected token but got None")
+
+        return Response(
+            None,
+            background=BackgroundTask(
+                send_invite_email,
+                emailer,
+                data.user_email,
+                organisation,
+                token,
+            ),
+        )
+
+    @post(
+        path="/organisation/invite/resend",
+        guards=[organisation_admin],
+        summary="Resend an invite to a user",
+        tags=["organisations"],
+    )
+    async def resend_invite(
+        self,
+        emailer: Emailer,
+        auth_service: AuthService,
+        organisation: Organisation,
+        data: OrganisationInvite,
+    ) -> Response[None]:
+        token = await auth_service.resend_invite_token(
+            organisation_id=organisation.id,
+            email=data.user_email,
         )
         if not token:
             raise Exception("expected token but got None")
@@ -279,5 +340,59 @@ class AuthController(Controller):
         self,
         auth_service: AuthService,
         organisation: Organisation,
-    ) -> JSON[list[User]]:
+    ) -> JSON[list[OrganisationUser]]:
         return JSON(await auth_service.organisation_users(organisation.id))
+
+    @get(
+        path="/organisations",
+        guards=[super_admin],
+        summary="List all organisations",
+        tags=["organisations"],
+    )
+    async def list_organisations(
+        self,
+        auth_service: AuthService,
+    ) -> JSON[list[Organisation]]:
+        return JSON(await auth_service.get_all_organisations())
+
+    @post(
+        path="/request-magic-link",
+        summary="Request a magic link for login",
+        exclude_from_auth=True,
+        tags=["auth"],
+        status_code=200,
+    )
+    async def request_magic_link(
+        self,
+        emailer: Emailer,
+        auth_service: AuthService,
+        data: MagicLinkRequest,
+        locale: str = "en",
+    ) -> Response[None]:
+        token = await auth_service.magic_link_token(data.email)
+        if not token:
+            return Response(None)
+
+        return Response(
+            None,
+            background=BackgroundTask(
+                send_magic_link_email,
+                emailer,
+                data.email,
+                locale,
+                token,
+            ),
+        )
+
+    @get(
+        path="/magic-login",
+        summary="Login using a magic link",
+        exclude_from_auth=True,
+        tags=["auth"],
+        raises=[NotAuthorizedError],
+        status_code=200,
+    )
+    async def magic_login(
+        self, auth_service: AuthService, token: Annotated[str, Field(description="A JWT magic link token")]
+    ) -> JSON[LoginOptions]:
+        return JSON(await auth_service.magic_link_login(token))

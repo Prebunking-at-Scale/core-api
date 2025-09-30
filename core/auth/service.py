@@ -15,10 +15,18 @@ from core.auth.models import (
     LoginOptions,
     Organisation,
     OrganisationToken,
+    OrganisationUser,
+    TokenType,
     User,
 )
 from core.auth.repo import AuthRepository
-from core.config import AUTH_TOKEN_TTL, INVITE_TTL, JWT_SECRET, PASSWORD_RESET_TTL
+from core.config import (
+    AUTH_TOKEN_TTL,
+    INVITE_TTL,
+    JWT_SECRET,
+    MAGIC_LINK_TTL,
+    PASSWORD_RESET_TTL,
+)
 from core.errors import ConflictError, NotAuthorizedError
 from core.uow import ConnectionFactory, uow
 
@@ -46,6 +54,9 @@ class AuthService:
         self, token: AuthToken, connection: ASGIConnection
     ) -> Identity:
         async with self.repo() as repo:
+            if token.token_type != TokenType.AUTH:
+                raise NotAuthorizedError("invalid token type")
+
             if token.is_api_user:
                 user = await repo.get_user_by_email("api@pas")
             else:
@@ -56,6 +67,12 @@ class AuthService:
             organisation, is_admin = None, False
             if token.organisation_id:
                 organisation_id = UUID(hex=token.organisation_id)
+
+                if token.is_super_admin_override and not user.is_super_admin:
+                    raise NotAuthorizedError(
+                        "organisation_id override requires super admin privileges"
+                    )
+
                 organisation, is_admin = await repo.organisation_and_role(
                     user.id, organisation_id
                 )
@@ -93,6 +110,7 @@ class AuthService:
                 token=self.jwt_auth.create_token(
                     identifier=str(user.id),
                     token_expiration=AUTH_TOKEN_TTL,
+                    token_type=TokenType.AUTH,
                     organisation_id=str(org.id),
                 ),
                 is_organisation_admin=is_admin,
@@ -123,7 +141,7 @@ class AuthService:
         async with self.repo() as repo:
             await repo.deactivate_organisation(organisation_id)
 
-    async def organisation_users(self, organisation_id: UUID) -> list[User]:
+    async def organisation_users(self, organisation_id: UUID) -> list[OrganisationUser]:
         async with self.repo() as repo:
             return await repo.organisation_users(organisation_id)
 
@@ -158,6 +176,42 @@ class AuthService:
             return self.jwt_auth.create_token(
                 identifier=str(user.id),
                 token_expiration=INVITE_TTL,
+                token_type=TokenType.INVITE,
+                organisation_id=str(organisation_id),
+            )
+
+    async def resend_invite_token(
+        self,
+        organisation_id: UUID,
+        email: str,
+    ) -> str | None:
+        async with self.repo() as repo:
+            organisation = await repo.get_organisation(organisation_id)
+            if organisation.deactivated is not None:
+                raise ConflictError("cannot resend invite to deactivated organisation")
+
+            email = email.strip()
+            user = await repo.get_user_by_email(email)
+            if not user:
+                raise ConflictError("cannot resend invite to non-existent user")
+
+            # Check if user has already accepted the invite
+            is_already_member = await repo.is_user_organisation_member(
+                user_id=user.id,
+                organisation_id=organisation_id,
+            )
+            if is_already_member:
+                raise ConflictError("user has already accepted the invite")
+
+            await repo.resend_invite(
+                user_id=user.id,
+                organisation_id=organisation_id,
+            )
+
+            return self.jwt_auth.create_token(
+                identifier=str(user.id),
+                token_expiration=INVITE_TTL,
+                token_type=TokenType.INVITE,
                 organisation_id=str(organisation_id),
             )
 
@@ -214,6 +268,10 @@ class AuthService:
         async with self.repo() as repo:
             await repo.set_admin(user_id, organisation_id, is_admin)
 
+    async def set_super_admin(self, user_id: UUID, is_super_admin: bool) -> None:
+        async with self.repo() as repo:
+            await repo.set_super_admin(user_id, is_super_admin)
+
     async def password_reset_token(self, email: str) -> str | None:
         async with self.repo() as repo:
             user = await repo.get_user_by_email(email)
@@ -226,7 +284,7 @@ class AuthService:
             return self.jwt_auth.create_token(
                 identifier=str(user.id),
                 token_expiration=PASSWORD_RESET_TTL,
-                is_password_reset=True,
+                token_type=TokenType.PASSWORD_RESET,
             )
 
     async def update_password(
@@ -235,3 +293,59 @@ class AuthService:
         async with self.repo() as repo:
             hash = self._password_hash(new_password)
             await repo.update_password_hash(user.id, hash, last_update_before)
+
+    async def get_all_organisations(self) -> list[Organisation]:
+        async with self.repo() as repo:
+            return await repo.get_all_organisations()
+
+    async def magic_link_token(self, email: str) -> str | None:
+        """Generate a magic link token for a user. Only generates token if user exists."""
+        async with self.repo() as repo:
+            user = await repo.get_user_by_email(email)
+            if not user:
+                log.warning(
+                    f"attempt to create magic link for {email} but user does not exist"
+                )
+                return None
+
+            return self.jwt_auth.create_token(
+                identifier=str(user.id),
+                token_expiration=MAGIC_LINK_TTL,
+                token_type=TokenType.MAGIC_LINK,
+            )
+
+    async def magic_link_login(self, token: str) -> LoginOptions:
+        """Login using a magic link token"""
+        decoded = jwt.decode(
+            token,
+            algorithms=[self.jwt_auth.algorithm],
+            key=self.jwt_auth.token_secret,
+        )
+
+        if decoded.get("token_type") != TokenType.MAGIC_LINK:
+            raise NotAuthorizedError("invalid magic link token")
+
+        async with self.repo() as repo:
+            user = await repo.get_user_by_id(UUID(hex=decoded.get("sub")))
+            if not user:
+                raise NotAuthorizedError("user does not exist")
+
+            organisations, admin_status = await repo.organisation_memberships(user.id)
+
+        if not organisations:
+            raise NotAuthorizedError("user does not belong to any organisations")
+
+        options = LoginOptions(user=user, organisations={})
+        for org, is_admin in zip(organisations, admin_status):
+            options.organisations[org.id] = OrganisationToken(
+                organisation=org,
+                token=self.jwt_auth.create_token(
+                    identifier=str(user.id),
+                    token_expiration=AUTH_TOKEN_TTL,
+                    token_type=TokenType.AUTH,
+                    organisation_id=str(org.id),
+                ),
+                is_organisation_admin=is_admin,
+            )
+
+        return options

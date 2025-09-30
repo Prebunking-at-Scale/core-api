@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from typing import Annotated
 from uuid import UUID, uuid4
 
@@ -7,6 +8,15 @@ from litestar.dto import DTOConfig
 from litestar.plugins.pydantic import PydanticDTO
 from litestar.security.jwt import Token
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, SecretStr
+
+
+class TokenType(str, Enum):
+    """Token type enumeration for different token purposes"""
+
+    AUTH = "auth"  # Regular authenticated user token
+    PASSWORD_RESET = "password_reset"  # Password reset token
+    MAGIC_LINK = "magic_link"  # Magic link login token
+    INVITE = "invite"  # Organisation invite token
 
 
 class Organisation(BaseModel):
@@ -34,6 +44,14 @@ class User(BaseModel):
     is_super_admin: bool = False
 
 
+class OrganisationUser(User):
+    """User with their organisation membership status"""
+
+    invited: datetime | None = None
+    accepted: datetime | None = None
+    is_admin: bool = False
+
+
 class Identity(BaseModel):
     """An identity and roles associated with a specific request. This should
     be used to perform authorization checks for requests that require one"""
@@ -47,9 +65,10 @@ class Identity(BaseModel):
 class AuthToken(Token):
     """AuthToken extends a standard jwt token to include PAS specific details"""
 
+    token_type: TokenType = TokenType.AUTH
     is_api_user: bool = False
-    is_password_reset: bool = False
     organisation_id: str | None = None
+    is_super_admin_override: bool = False
 
 
 class OrganisationInvite(BaseModel):
@@ -65,12 +84,20 @@ class Login(BaseModel):
     password: Annotated[SecretStr, Field(min_length=12)]
 
 
+class MagicLinkRequest(BaseModel):
+    email: EmailStr
+
+
 class PasswordChange(BaseModel):
     new_password: Annotated[SecretStr, Field(min_length=12)]
 
 
 class AdminStatus(BaseModel):
     is_admin: bool
+
+
+class SuperAdminStatus(BaseModel):
+    is_super_admin: bool
 
 
 class OrganisationToken(BaseModel):

@@ -159,12 +159,9 @@ class TopicRepository:
             """
             SELECT
                 t.*,
-                COUNT(DISTINCT nt.narrative_id) as narrative_count,
-                COUNT(DISTINCT ct.claim_id) as claim_count
+                (SELECT COUNT(*) FROM narrative_topics nt WHERE nt.topic_id = t.id) AS narrative_count,
+                (SELECT COUNT(*) from claim_topics nt WHERE nt.topic_id = t.id) AS claim_count
             FROM topics t
-            LEFT JOIN narrative_topics nt ON t.id = nt.topic_id
-            LEFT JOIN claim_topics ct ON t.id = ct.topic_id
-            GROUP BY t.id
             ORDER BY t.topic
             LIMIT %(limit)s OFFSET %(offset)s
             """,
