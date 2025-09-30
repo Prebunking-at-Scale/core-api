@@ -16,6 +16,7 @@ from core.auth import dependencies, middleware
 from core.auth.controller import AuthController
 from core.auth.service import AuthService
 from core.entities.controller import EntityController
+from core.media_feeds.controller import MediaFeedController
 from core.migrate import migrate
 from core.narratives.controller import NarrativeController
 from core.topics.controller import TopicController
@@ -97,6 +98,7 @@ api_router = Router(
         RootClaimController,
         NarrativeController,
         TopicController,
+        MediaFeedController,
         EntityController,
     ],
 )
