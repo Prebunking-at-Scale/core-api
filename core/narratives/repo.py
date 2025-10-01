@@ -190,30 +190,31 @@ class NarrativeRepository:
             params["end_date"] = end_date
 
         if first_content_start or first_content_end:
-            # Filter narratives by their oldest video's creation date using ROW_NUMBER()
+            # Filter narratives by their oldest video's uploaded date using ROW_NUMBER()
             oldest_video_filter = """
                 n.id IN (
                     SELECT DISTINCT narrative_id
                     FROM (
                         SELECT
                             cn.narrative_id,
-                            vc.created_at,
-                            ROW_NUMBER() OVER (PARTITION BY cn.narrative_id ORDER BY vc.created_at ASC) as rn
+                            v.uploaded_at,
+                            ROW_NUMBER() OVER (PARTITION BY cn.narrative_id ORDER BY v.uploaded_at ASC) as rn
                         FROM claim_narratives cn
                         JOIN video_claims vc ON cn.claim_id = vc.id
+                        JOIN videos v ON vc.video_id = v.id
                     ) oldest_videos
                     WHERE rn = 1
             """
 
             if first_content_start and first_content_end:
-                oldest_video_filter += " AND created_at BETWEEN %(first_content_start)s AND %(first_content_end)s"
+                oldest_video_filter += " AND uploaded_at BETWEEN %(first_content_start)s AND %(first_content_end)s"
                 params["first_content_start"] = first_content_start
                 params["first_content_end"] = first_content_end
             elif first_content_start:
-                oldest_video_filter += " AND created_at >= %(first_content_start)s"
+                oldest_video_filter += " AND uploaded_at >= %(first_content_start)s"
                 params["first_content_start"] = first_content_start
             elif first_content_end:
-                oldest_video_filter += " AND created_at <= %(first_content_end)s"
+                oldest_video_filter += " AND uploaded_at <= %(first_content_end)s"
                 params["first_content_end"] = first_content_end
 
             oldest_video_filter += ")"
