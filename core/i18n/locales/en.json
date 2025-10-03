@@ -17,6 +17,7 @@
             "subject": "Sign in to Prebunking at Scale",
             "message": "Click the button below to sign in to your account.",
             "not_you": "If this was not you, you can safely ignore this email.",
+            "expires": "This link will expire in %{minutes} minutes.",
             "login_link": "SIGN IN"
         }
     }

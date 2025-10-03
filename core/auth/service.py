@@ -216,11 +216,16 @@ class AuthService:
             )
 
     async def accept_invite(self, token: str) -> LoginOptions:
-        decoded = jwt.decode(
-            token,
-            algorithms=[self.jwt_auth.algorithm],
-            key=self.jwt_auth.token_secret,
-        )
+        try:
+            decoded = jwt.decode(
+                token,
+                algorithms=[self.jwt_auth.algorithm],
+                key=self.jwt_auth.token_secret,
+            )
+        except jwt.ExpiredSignatureError:
+            raise NotAuthorizedError("invite token has expired")
+        except jwt.DecodeError:
+            raise NotAuthorizedError("invalid invite token")
 
         async with self.repo() as repo:
             user = await repo.get_user_by_id(decoded.get("sub"))
@@ -316,11 +321,16 @@ class AuthService:
 
     async def magic_link_login(self, token: str) -> LoginOptions:
         """Login using a magic link token"""
-        decoded = jwt.decode(
-            token,
-            algorithms=[self.jwt_auth.algorithm],
-            key=self.jwt_auth.token_secret,
-        )
+        try:
+            decoded = jwt.decode(
+                token,
+                algorithms=[self.jwt_auth.algorithm],
+                key=self.jwt_auth.token_secret,
+            )
+        except jwt.ExpiredSignatureError:
+            raise NotAuthorizedError("magic link has expired")
+        except jwt.DecodeError:
+            raise NotAuthorizedError("invalid magic link token")
 
         if decoded.get("token_type") != TokenType.MAGIC_LINK:
             raise NotAuthorizedError("invalid magic link token")
