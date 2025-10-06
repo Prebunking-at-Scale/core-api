@@ -140,46 +140,29 @@ class NarrativeRepository:
         offset: int = 0,
         topic_id: UUID | None = None,
         entity_id: UUID | None = None,
+        video_language: str | None = None,
         text: str | None = None
     ) -> list[Narrative]:
         query = """
             SELECT DISTINCT n.* FROM narratives n
         """
 
-        if topic_id:
-            query += """
-                INNER JOIN narrative_topics nt ON n.id = nt.narrative_id
-            """
-        if entity_id:
-            query += """
-                INNER JOIN narrative_entities ne ON n.id = ne.narrative_id
-            """
+        where_statement, params = self._build_get_all_narratives_where_statement(
+            topic_id=topic_id,
+            entity_id=entity_id,
+            video_language=video_language,
+            text=text
+        )
 
-        where_conditions = []
-        params: dict[str, int | UUID | str] = {"limit": limit, "offset": offset}
+        query += where_statement
 
-        if topic_id:
-            where_conditions.append("nt.topic_id = %(topic_id)s")
-            params["topic_id"] = topic_id
-
-        if entity_id:
-            where_conditions.append("ne.entity_id = %(entity_id)s")
-            params["entity_id"] = entity_id
-
-        if text:
-            where_conditions.append(
-                "(LOWER(n.title) LIKE LOWER(%(text)s) OR LOWER(n.description) LIKE LOWER(%(text)s))"
-            )
-            params["text"] = f"%{text}%"
-        
-        if where_conditions:
-            query += " WHERE " + " AND ".join(where_conditions)
-            
         query += """
             ORDER BY n.created_at DESC
             LIMIT %(limit)s OFFSET %(offset)s
         """
-        
+        params["limit"] = limit
+        params["offset"] = offset
+
         await self._session.execute(query, params)
         rows = await self._session.fetchall()
 
@@ -199,31 +182,57 @@ class NarrativeRepository:
         self,
         topic_id: UUID | None = None,
         entity_id: UUID | None = None,
+        video_language: str | None = None,
         text: str | None = None
     ) -> int:
         query = """
             SELECT COUNT(DISTINCT n.id) FROM narratives n
         """
+        where_statement, params = self._build_get_all_narratives_where_statement(
+            topic_id=topic_id,
+            entity_id=entity_id,
+            video_language=video_language,
+            text=text
+        )
+        query += where_statement
+
+        await self._session.execute(query, params)
+        row = await self._session.fetchone()
+        return row["count"] if row else 0
+
+    def _build_get_all_narratives_where_statement(
+        self,
+        topic_id: UUID | None = None,
+        entity_id: UUID | None = None,
+        video_language: str | None = None,
+        text: str | None = None
+    ) -> tuple[str, dict[str, int | UUID | str]]:
+
+        query = ""
+        where_conditions = []
+        params: dict[str, int | UUID | str] = {}
 
         if topic_id:
             query += """
                 INNER JOIN narrative_topics nt ON n.id = nt.narrative_id
             """
+            where_conditions.append("nt.topic_id = %(topic_id)s")
+            params["topic_id"] = topic_id
         if entity_id:
             query += """
                 INNER JOIN narrative_entities ne ON n.id = ne.narrative_id
             """
-
-        where_conditions = []
-        params: dict[str, UUID | str] = {}
-
-        if topic_id:
-            where_conditions.append("nt.topic_id = %(topic_id)s")
-            params["topic_id"] = topic_id
-
-        if entity_id:
             where_conditions.append("ne.entity_id = %(entity_id)s")
             params["entity_id"] = entity_id
+
+        if video_language:
+            query += """
+                INNER JOIN claim_narratives cn ON n.id = cn.narrative_id
+                INNER JOIN video_claims vc ON cn.claim_id = vc.id
+                INNER JOIN videos v ON vc.video_id = v.id
+            """
+            where_conditions.append("v.metadata->>'language' = %(video_language)s")
+            params["video_language"] = video_language
 
         if text:
             where_conditions.append(
@@ -233,10 +242,8 @@ class NarrativeRepository:
         
         if where_conditions:
             query += " WHERE " + " AND ".join(where_conditions)
-            
-        await self._session.execute(query, params)
-        row = await self._session.fetchone()
-        return row["count"] if row else 0
+
+        return query, params
 
     async def update_narrative(
         self,

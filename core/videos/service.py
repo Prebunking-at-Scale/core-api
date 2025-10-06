@@ -1,4 +1,4 @@
-from typing import AsyncContextManager
+from typing import Any, AsyncContextManager
 from uuid import UUID
 
 from litestar.dto import DTOData
@@ -52,12 +52,17 @@ class VideoService:
         platform: str | None = None,
         channel: str | None = None,
         text: str | None = None,
+        video_language: str | None = None,
     ) -> tuple[list[Video], int]:
         async with self.repo() as repo:
             return await repo.get_videos_paginated(
-                limit, offset, platform, channel, text
+                limit, offset, platform, channel, text, video_language
             )
 
     async def get_narratives_for_video(self, video_id: UUID) -> list[Narrative]:
         async with self.repo() as repo:
             return await repo.get_narratives_for_video(video_id)
+
+    async def get_languages_associated_with_videos(self) -> list[dict[str, Any]]:
+        async with self.repo() as repo:
+            return await repo.get_languages_associated_with_videos()

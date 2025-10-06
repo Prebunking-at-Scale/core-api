@@ -105,6 +105,7 @@ class ClaimsService:
         offset: int = 0, 
         topic_id: UUID | None = None,
         text: str | None = None,
+        video_language: str | None = None,
         min_score: float | None = None,
         max_score: float | None = None
     ) -> tuple[list[EnrichedClaim], int]:
@@ -114,6 +115,7 @@ class ClaimsService:
                 offset=offset, 
                 topic_id=topic_id, 
                 text=text,
+                video_language=video_language,
                 min_score=min_score,
                 max_score=max_score
             )

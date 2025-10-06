@@ -132,6 +132,7 @@ class RootClaimController(Controller):
         claims_service: ClaimsService,
         topic_id: UUID | None = Parameter(None, query="topic_id"),
         text: str | None = Parameter(None, query="text"),
+        video_language: str | None = Parameter(None, query="video_language"),
         min_score: float | None = Parameter(None, query="min_score"),
         max_score: float | None = Parameter(None, query="max_score"),
         limit: int = Parameter(100, query="limit", gt=0, le=1000),
@@ -142,6 +143,7 @@ class RootClaimController(Controller):
             offset=offset, 
             topic_id=topic_id, 
             text=text,
+            video_language=video_language,
             min_score=min_score,
             max_score=max_score
         )

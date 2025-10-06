@@ -4,6 +4,7 @@ from uuid import UUID
 from litestar import Controller, delete, get, patch, post
 from litestar.di import Provide
 from litestar.exceptions import NotFoundException
+from litestar.params import Parameter
 
 from core.errors import ConflictError
 from core.models import Narrative
@@ -63,15 +64,19 @@ class NarrativeController(Controller):
         offset: int = 0,
         topic_id: UUID | None = None,
         entity_id: UUID | None = None,
+        video_language: str | None = Parameter(None, query="video_language", description="Filter narratives by language of associated videos"),
         text: str | None = None,
     ) -> PaginatedJSON[list[Narrative]]:
-        narratives, total = await narrative_service.get_all_narratives(
-            limit=limit, offset=offset, topic_id=topic_id, entity_id=entity_id, text=text
-        )
-        page = (offset // limit) + 1 if limit > 0 else 1
-        return PaginatedJSON(
-            data=narratives, total=total, page=page, size=len(narratives)
-        )
+        try:
+            narratives, total = await narrative_service.get_all_narratives(
+                limit=limit, offset=offset, topic_id=topic_id, entity_id=entity_id, text=text, video_language=video_language
+            )
+            page = (offset // limit) + 1 if limit > 0 else 1
+            return PaginatedJSON(
+                data=narratives, total=total, page=page, size=len(narratives)
+            )
+        except Exception as e:
+            raise NotFoundException(detail=str(e))
 
     @get(
         path="/claims/{claim_id:uuid}",
