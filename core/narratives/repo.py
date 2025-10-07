@@ -514,15 +514,11 @@ class NarrativeRepository:
         return narratives, total
 
     async def get_viral_narratives(
-        self, limit: int = 100, offset: int = 0, hours: int|None = None
+        self, limit: int = 100, offset: int = 0, hours: int | None = None
     ) -> list[Narrative]:
         # Get narratives with claims from the specified time period, ordered by total video views
-        where_statement = """WHERE v.updated_at >= NOW() - (%(hours)s || ' hours')::INTERVAL""" if hours else ""
-        query_params = {"limit": limit, "offset": offset}
-        if hours:
-            query_params["hours"] = hours
         await self._session.execute(
-            f"""
+            """
             WITH recent_narrative_views AS (
                 SELECT
                     n.id as narrative_id,
@@ -536,7 +532,7 @@ class NarrativeRepository:
                 JOIN claim_narratives cn ON n.id = cn.narrative_id
                 JOIN video_claims c ON cn.claim_id = c.id
                 JOIN videos v ON c.video_id = v.id
-                {where_statement}
+                WHERE %(hours)s IS NULL OR v.updated_at >= NOW() - (%(hours)s || ' hours')::INTERVAL
                 GROUP BY n.id, n.title, n.description, n.metadata, n.created_at, n.updated_at
             )
             SELECT
@@ -551,7 +547,7 @@ class NarrativeRepository:
             ORDER BY total_views DESC
             LIMIT %(limit)s OFFSET %(offset)s
             """,
-            query_params,
+            {"limit": limit, "offset": offset, "hours": hours},
         )
         rows = await self._session.fetchall()
 
@@ -573,15 +569,11 @@ class NarrativeRepository:
         return narratives
 
     async def get_prevalent_narratives(
-        self, limit: int = 100, offset: int = 0, hours: int|None = None
+        self, limit: int = 100, offset: int = 0, hours: int | None = None
     ) -> list[Narrative]:
         # Get narratives ordered by the count of associated videos within the specified time period
-        where_statement = """WHERE v.updated_at >= NOW() - (%(hours)s || ' hours')::INTERVAL""" if hours else ""
-        query_params = {"limit": limit, "offset": offset}
-        if hours:
-            query_params["hours"] = hours
         await self._session.execute(
-            f"""
+            """
             WITH narrative_video_counts AS (
                 SELECT
                     n.id as narrative_id,
@@ -595,7 +587,7 @@ class NarrativeRepository:
                 JOIN claim_narratives cn ON n.id = cn.narrative_id
                 JOIN video_claims c ON cn.claim_id = c.id
                 JOIN videos v ON c.video_id = v.id
-                {where_statement}
+                WHERE %(hours)s IS NULL OR v.updated_at >= NOW() - (%(hours)s || ' hours')::INTERVAL
                 GROUP BY n.id, n.title, n.description, n.metadata, n.created_at, n.updated_at
             )
             SELECT
@@ -610,7 +602,7 @@ class NarrativeRepository:
             ORDER BY video_count DESC
             LIMIT %(limit)s OFFSET %(offset)s
             """,
-            query_params,
+            {"limit": limit, "offset": offset, "hours": hours},
         )
         rows = await self._session.fetchall()
 
