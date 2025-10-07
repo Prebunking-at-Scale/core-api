@@ -227,7 +227,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.1.0" },
     { name = "email-validator", specifier = ">=2.2.0" },
     { name = "google-genai", specifier = ">=1.25.0" },
-    { name = "harmful-claim-finder", git = "https://github.com/Prebunking-at-Scale/harmful-claim-finder.git?tag=v0.0.1" },
+    { name = "harmful-claim-finder", git = "https://github.com/Prebunking-at-Scale/harmful-claim-finder.git?tag=v0.1.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "langid", specifier = ">=1.1.6" },
     { name = "litestar", extras = ["jwt", "opentelemetry", "pydantic", "standard", "structlog"], specifier = ">=2.16.0" },
@@ -561,7 +561,7 @@ wheels = [
 [[package]]
 name = "harmful-claim-finder"
 version = "0.0.1"
-source = { git = "https://github.com/Prebunking-at-Scale/harmful-claim-finder.git?tag=v0.0.1#d4097d372405296297b65878212be142391d6530" }
+source = { git = "https://github.com/Prebunking-at-Scale/harmful-claim-finder.git?tag=v0.1.0#30a3d6fa4b2c275b1026e6e8d533525fedab66ad" }
 dependencies = [
     { name = "google-cloud-storage" },
     { name = "google-genai" },
