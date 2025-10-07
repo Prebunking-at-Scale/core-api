@@ -85,6 +85,7 @@ class NarrativeService:
         offset: int = 0,
         topic_id: UUID | None = None,
         entity_id: UUID | None = None,
+        video_language: str | None = None,
         text: str | None = None
     ) -> tuple[list[Narrative], int]:
         async with self.repo() as repo:
@@ -93,10 +94,11 @@ class NarrativeService:
                 offset=offset,
                 topic_id=topic_id,
                 entity_id=entity_id,
+                video_language=video_language,
                 text=text
             )
             total = await repo.count_all_narratives(
-                topic_id=topic_id, entity_id=entity_id, text=text
+                topic_id=topic_id, entity_id=entity_id, text=text, video_language=video_language
             )
             return narratives, total
 
