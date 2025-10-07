@@ -140,7 +140,7 @@ class NarrativeService:
             )
 
     async def get_viral_narratives(
-        self, limit: int = 100, offset: int = 0, hours: int|None = None
+        self, limit: int = 100, offset: int = 0, hours: int | None = None
     ) -> list[Narrative]:
         async with self.repo() as repo:
             return await repo.get_viral_narratives(
@@ -148,7 +148,7 @@ class NarrativeService:
             )
 
     async def get_prevalent_narratives(
-        self, limit: int = 100, offset: int = 0, hours: int|None = None
+        self, limit: int = 100, offset: int = 0, hours: int | None = None
     ) -> list[Narrative]:
         async with self.repo() as repo:
             return await repo.get_prevalent_narratives(
