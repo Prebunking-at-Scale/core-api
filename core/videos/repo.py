@@ -250,4 +250,5 @@ class VideoRepository:
             ORDER BY count(*) DESC
             """,
         )
-        return await self._session.fetchall()
+        rows = await self._session.fetchall()
+        return [LanguageWithVideoCount(**row) for row in rows]
