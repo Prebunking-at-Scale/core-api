@@ -2,6 +2,7 @@ from typing import Any
 from litestar import Controller, Response, get
 from litestar.datastructures import State
 from litestar.di import Provide
+from core.languages.models import LanguageWithVideoCount
 from core.response import JSON
 from core.videos.service import VideoService
 
@@ -22,9 +23,6 @@ class LanguageController(Controller):
     )
     async def get_languages(self,
         video_service: VideoService,
-    ) -> Response[JSON|dict[str, Any]]:
-        try:
-            languages = await video_service.get_languages_associated_with_videos()
-            return Response(JSON(languages))
-        except Exception as e:
-            return Response(status_code=500, content={"error": str(e)})
+    ) -> Response[JSON[list[LanguageWithVideoCount]]]:
+        languages = await video_service.get_languages_associated_with_videos()
+        return Response(JSON(languages))

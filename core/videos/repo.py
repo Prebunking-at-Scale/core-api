@@ -8,6 +8,7 @@ from psycopg.types.json import Jsonb
 
 from core.analysis import embedding
 from core.errors import ConflictError
+from core.languages.models import LanguageWithVideoCount
 from core.models import Narrative, Video
 from core.videos.models import VideoFilters
 
@@ -239,13 +240,13 @@ class VideoRepository:
         )
         return [Narrative(**row) for row in await self._session.fetchall()]
 
-    async def get_languages_associated_with_videos(self) -> list[dict[str, Any]]:
+    async def get_languages_associated_with_videos(self) -> list[LanguageWithVideoCount]:
         await self._session.execute(
             """
-            SELECT metadata['language'] as language, count(*)
+            SELECT metadata->>'language' as language, count(*)
             FROM videos
             WHERE metadata ? 'language'
-            GROUP BY metadata['language']
+            GROUP BY metadata->>'language'
             ORDER BY count(*) DESC
             """,
         )

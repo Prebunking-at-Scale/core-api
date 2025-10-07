@@ -67,16 +67,13 @@ class NarrativeController(Controller):
         video_language: str | None = Parameter(None, query="video_language", description="Filter narratives by language of associated videos"),
         text: str | None = None,
     ) -> PaginatedJSON[list[Narrative]]:
-        try:
-            narratives, total = await narrative_service.get_all_narratives(
-                limit=limit, offset=offset, topic_id=topic_id, entity_id=entity_id, text=text, video_language=video_language
-            )
-            page = (offset // limit) + 1 if limit > 0 else 1
-            return PaginatedJSON(
-                data=narratives, total=total, page=page, size=len(narratives)
-            )
-        except Exception as e:
-            raise NotFoundException(detail=str(e))
+        narratives, total = await narrative_service.get_all_narratives(
+            limit=limit, offset=offset, topic_id=topic_id, entity_id=entity_id, text=text, video_language=video_language
+        )
+        page = (offset // limit) + 1 if limit > 0 else 1
+        return PaginatedJSON(
+            data=narratives, total=total, page=page, size=len(narratives)
+        )
 
     @get(
         path="/claims/{claim_id:uuid}",
