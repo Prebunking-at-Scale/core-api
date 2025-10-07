@@ -7,7 +7,7 @@ from litestar.exceptions import NotFoundException
 
 from core.errors import ConflictError
 from core.models import Narrative
-from core.narratives.models import NarrativeInput
+from core.narratives.models import NarrativeInput, NarrativePatchInput
 from core.narratives.service import NarrativeService
 from core.response import JSON, PaginatedJSON
 from core.uow import ConnectionFactory
@@ -62,10 +62,11 @@ class NarrativeController(Controller):
         limit: int = 100,
         offset: int = 0,
         topic_id: UUID | None = None,
+        entity_id: UUID | None = None,
         text: str | None = None,
     ) -> PaginatedJSON[list[Narrative]]:
         narratives, total = await narrative_service.get_all_narratives(
-            limit=limit, offset=offset, topic_id=topic_id, text=text
+            limit=limit, offset=offset, topic_id=topic_id, entity_id=entity_id, text=text
         )
         page = (offset // limit) + 1 if limit > 0 else 1
         return PaginatedJSON(
@@ -124,7 +125,7 @@ class NarrativeController(Controller):
         self,
         narrative_service: NarrativeService,
         narrative_id: UUID,
-        data: NarrativeInput,
+        data: NarrativePatchInput,
     ) -> JSON[Narrative]:
         narrative = await narrative_service.update_narrative(narrative_id, data)
         if not narrative:

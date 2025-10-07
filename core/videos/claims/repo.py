@@ -7,7 +7,7 @@ from psycopg.types.json import Jsonb
 
 from core.analysis import embedding
 from core.errors import ConflictError
-from core.models import Claim, Narrative, Topic, Video
+from core.models import Claim, Entity, Narrative, Topic, Video
 from core.videos.claims.models import EnrichedClaim
 
 
@@ -143,6 +143,7 @@ class ClaimRepository:
         claims = []
         for row in await self._session.fetchall():
             topics = await self._get_claim_topics(row["id"])
+            entities = await self._get_claim_entities(row["id"])
             video = (
                 await self._get_video_info(row["video_id"])
                 if row.get("video_id")
@@ -150,7 +151,52 @@ class ClaimRepository:
             )
             narratives = await self._get_claim_narratives(row["id"])
             claims.append(
-                EnrichedClaim(topics=topics, video=video, narratives=narratives, **row)
+                EnrichedClaim(topics=topics, entities=entities, video=video, narratives=narratives, **row)
+            )
+
+        return claims, total
+
+    async def get_claims_by_entity(
+        self, entity_id: UUID, limit: int = 100, offset: int = 0
+    ) -> tuple[list[EnrichedClaim], int]:
+        # Get total count
+        await self._session.execute(
+            """
+            SELECT COUNT(DISTINCT c.id)
+            FROM video_claims c
+            JOIN claim_entities ce ON c.id = ce.claim_id
+            WHERE ce.entity_id = %(entity_id)s
+            """,
+            {"entity_id": entity_id},
+        )
+        total_row = await self._session.fetchone()
+        total = total_row["count"] if total_row else 0
+
+        # Get claims
+        await self._session.execute(
+            """
+            SELECT DISTINCT c.*
+            FROM video_claims c
+            JOIN claim_entities ce ON c.id = ce.claim_id
+            WHERE ce.entity_id = %(entity_id)s
+            ORDER BY c.created_at DESC
+            LIMIT %(limit)s OFFSET %(offset)s
+            """,
+            {"entity_id": entity_id, "limit": limit, "offset": offset},
+        )
+
+        claims = []
+        for row in await self._session.fetchall():
+            topics = await self._get_claim_topics(row["id"])
+            entities = await self._get_claim_entities(row["id"])
+            video = (
+                await self._get_video_info(row["video_id"])
+                if row.get("video_id")
+                else None
+            )
+            narratives = await self._get_claim_narratives(row["id"])
+            claims.append(
+                EnrichedClaim(topics=topics, entities=entities, video=video, narratives=narratives, **row)
             )
 
         return claims, total
@@ -167,6 +213,19 @@ class ClaimRepository:
             {"claim_id": claim_id},
         )
         return [Topic(**row) for row in await self._session.fetchall()]
+
+    async def _get_claim_entities(self, claim_id: UUID) -> list[Entity]:
+        await self._session.execute(
+            """
+            SELECT e.*
+            FROM entities e
+            JOIN claim_entities ce ON e.id = ce.entity_id
+            WHERE ce.claim_id = %(claim_id)s
+            ORDER BY e.name
+            """,
+            {"claim_id": claim_id},
+        )
+        return [Entity(**row) for row in await self._session.fetchall()]
 
     async def _get_claim_narratives(self, claim_id: UUID) -> list[Narrative]:
         await self._session.execute(
@@ -195,41 +254,44 @@ class ClaimRepository:
         return Video(**row) if row else None
 
     async def get_all_claims(
-        self, 
-        limit: int = 100, 
-        offset: int = 0, 
+        self,
+        limit: int = 100,
+        offset: int = 0,
         topic_id: UUID | None = None,
         text: str | None = None,
         min_score: float | None = None,
-        max_score: float | None = None
+        max_score: float | None = None,
     ) -> tuple[list[EnrichedClaim], int]:
         # Build the query conditionally
         where_conditions = []
+        join_clause = " "
         params: dict[str, int | UUID | str | float] = {"limit": limit, "offset": offset}
 
         if topic_id:
-            where_conditions.append("ct.topic_id = %(topic_id)s")
+            join_clause = " JOIN claim_topics ct ON c.id = ct.claim_id AND ct.topic_id = %(topic_id)s "
             params["topic_id"] = topic_id
-            
+
         if text:
             where_conditions.append("LOWER(c.claim) LIKE LOWER(%(text)s)")
             params["text"] = f"%{text}%"
-            
+
         if min_score is not None:
             where_conditions.append("(c.metadata->>'score')::float >= %(min_score)s")
             params["min_score"] = min_score
-            
+
         if max_score is not None:
             where_conditions.append("(c.metadata->>'score')::float <= %(max_score)s")
             params["max_score"] = max_score
-            
-        where_clause = "WHERE " + " AND ".join(where_conditions) if where_conditions else ""
+
+        where_clause = (
+            "WHERE " + " AND ".join(where_conditions) if where_conditions else ""
+        )
 
         # Get total count
         count_query = f"""
-            SELECT COUNT(DISTINCT c.id)
+            SELECT COUNT(*)
             FROM video_claims c
-            {"JOIN claim_topics ct ON c.id = ct.claim_id" if topic_id else ""}
+            {join_clause}
             {where_clause}
         """
         await self._session.execute(count_query, params)
@@ -238,9 +300,9 @@ class ClaimRepository:
 
         # Get claims
         claims_query = f"""
-            SELECT DISTINCT c.*
+            SELECT c.*
             FROM video_claims c
-            {"JOIN claim_topics ct ON c.id = ct.claim_id" if topic_id else ""}
+            {join_clause}
             {where_clause}
             ORDER BY c.created_at DESC
             LIMIT %(limit)s OFFSET %(offset)s
@@ -250,6 +312,7 @@ class ClaimRepository:
         claims = []
         for row in await self._session.fetchall():
             topics = await self._get_claim_topics(row["id"])
+            entities = await self._get_claim_entities(row["id"])
             video = (
                 await self._get_video_info(row["video_id"])
                 if row.get("video_id")
@@ -257,7 +320,7 @@ class ClaimRepository:
             )
             narratives = await self._get_claim_narratives(row["id"])
             claims.append(
-                EnrichedClaim(topics=topics, video=video, narratives=narratives, **row)
+                EnrichedClaim(topics=topics, entities=entities, video=video, narratives=narratives, **row)
             )
 
         return claims, total
@@ -300,8 +363,9 @@ class ClaimRepository:
             return None
 
         topics = await self._get_claim_topics(claim_id)
+        entities = await self._get_claim_entities(claim_id)
         video = (
             await self._get_video_info(row["video_id"]) if row.get("video_id") else None
         )
         narratives = await self._get_claim_narratives(claim_id)
-        return EnrichedClaim(topics=topics, video=video, narratives=narratives, **row)
+        return EnrichedClaim(topics=topics, entities=entities, video=video, narratives=narratives, **row)

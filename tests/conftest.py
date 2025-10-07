@@ -18,7 +18,7 @@ app.app.debug = True
 config.VALID_API_KEYS = [TEST_API_KEY]
 
 
-@fixture()
+@fixture
 def tables_to_truncate() -> list[str]:
     """Truncate a set of tables after each test.
     To be overridden by each module when needed."""
@@ -48,6 +48,20 @@ async def api_key_client(
     app.postgres_url = temp_db.url()
     async with AsyncTestClient(app=app.app) as client:
         client.headers.setdefault(middleware.API_KEY_HEADER, TEST_API_KEY)
+        yield client
+
+        if tables_to_truncate:
+            async with app.app.state.connection_factory() as conn:
+                for table in tables_to_truncate:
+                    await conn.execute(f"TRUNCATE TABLE {table} CASCADE")
+
+
+@fixture(scope="function")
+async def auth_client(
+    temp_db: Postgresql, tables_to_truncate: list[str]
+) -> AsyncIterator[AsyncTestClient[Litestar]]:
+    app.postgres_url = temp_db.url()
+    async with AsyncTestClient(app=app.app) as client:
         yield client
 
         if tables_to_truncate:

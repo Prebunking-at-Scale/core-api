@@ -36,20 +36,30 @@ class Transcript(BaseModel):
     sentences: list[TranscriptSentence]
 
 
+class Topic(BaseModel):
+    id: UUID = Field(default_factory=uuid4)
+    topic: str
+    metadata: dict[str, Any] = {}
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class Entity(BaseModel):
+    id: UUID = Field(default_factory=uuid4)
+    wikidata_id: str
+    name: str
+    metadata: dict[str, Any] = {}
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 class Claim(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     video_id: UUID | None = None  # Reference to the video
     claim: str  # The claim made in the video
     start_time_s: float  # When in the video the claim starts
     metadata: dict[str, Any] = {}  # Additional metadata about the claim
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
-
-
-class Topic(BaseModel):
-    id: UUID = Field(default_factory=uuid4)
-    topic: str
-    metadata: dict[str, Any] = {}
+    entities: list[Entity] = []
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -60,6 +70,7 @@ class Narrative(BaseModel):
     description: str
     claims: list[Claim] = []
     topics: list[Topic] = []
+    entities: list[Entity] = []
     videos: list[Video] = []
     metadata: dict[str, Any] = {}
     created_at: datetime | None = None

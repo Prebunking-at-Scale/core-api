@@ -1,11 +1,6 @@
-from collections.abc import AsyncIterator
-
 from litestar import Litestar
 from litestar.testing import AsyncTestClient
-from pytest import fixture
-from testing.postgresql import Postgresql
 
-import core.app as app
 from core.auth.models import (
     AdminStatus,
     Organisation,
@@ -53,15 +48,6 @@ async def create_user_with_password(
 
     await auth_service.update_password(user, password, None)
     return user, password
-
-
-@fixture(scope="function")
-async def auth_client(
-    temp_db: Postgresql,
-) -> AsyncIterator[AsyncTestClient[Litestar]]:
-    app.postgres_url = temp_db.url()
-    async with AsyncTestClient(app=app.app) as client:
-        yield client
 
 
 async def test_login_success(
@@ -493,7 +479,7 @@ async def test_join_organisation_with_invalid_token(
         "/api/auth/organisation/invite/accept",
         params={"invite_token": "invalid_token"},
     )
-    assert response.status_code == 500
+    assert response.status_code == 401
 
 
 async def test_organisation_users(
@@ -725,3 +711,171 @@ async def test_super_admin_override_preserves_functionality(
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 200
+
+
+async def test_list_organisations_as_super_admin(
+    auth_client: AsyncTestClient[Litestar],
+    auth_service: AuthService,
+    organisation: Organisation,
+) -> None:
+    """Test that super admin can list all organisations"""
+    # Create additional organisations to test listing
+    org2 = await auth_service.create_organisation(OrganisationFactory.build())
+    org3 = await auth_service.create_organisation(OrganisationFactory.build())
+
+    super_admin, password = await create_user_with_password(
+        auth_service, organisation, is_super_admin=True
+    )
+    login_options = await auth_service.login(super_admin.email, password)
+
+    response = await auth_client.get(
+        "/api/auth/organisations",
+        headers={"Authorization": f"Bearer {get_access_token(login_options)}"},
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert len(data) == 3
+
+    # Check that all organisations are present
+    org_ids = {org["id"] for org in data}
+    assert str(organisation.id) in org_ids
+    assert str(org2.id) in org_ids
+    assert str(org3.id) in org_ids
+
+
+async def test_list_organisations_as_org_admin_fails(
+    auth_client: AsyncTestClient[Litestar],
+    auth_service: AuthService,
+    organisation: Organisation,
+) -> None:
+    """Test that organisation admin cannot list all organisations"""
+    org_admin, password = await create_user_with_password(
+        auth_service, organisation, as_admin=True
+    )
+    login_options = await auth_service.login(org_admin.email, password)
+
+    response = await auth_client.get(
+        "/api/auth/organisations",
+        headers={"Authorization": f"Bearer {get_access_token(login_options)}"},
+    )
+    assert response.status_code == 401
+
+
+async def test_list_organisations_as_regular_user_fails(
+    auth_client: AsyncTestClient[Litestar],
+    auth_service: AuthService,
+    organisation: Organisation,
+) -> None:
+    """Test that regular user cannot list all organisations"""
+    user, password = await create_user_with_password(auth_service, organisation)
+    login_options = await auth_service.login(user.email, password)
+
+    response = await auth_client.get(
+        "/api/auth/organisations",
+        headers={"Authorization": f"Bearer {get_access_token(login_options)}"},
+    )
+    assert response.status_code == 401
+
+
+async def test_list_organisations_excludes_deactivated(
+    auth_client: AsyncTestClient[Litestar],
+    auth_service: AuthService,
+    organisation: Organisation,
+) -> None:
+    """Test that deactivated organisations are not returned"""
+    # Create additional organisation and deactivate it
+    org2 = await auth_service.create_organisation(OrganisationFactory.build())
+    await auth_service.deactivate_organisation(org2.id)
+
+    super_admin, password = await create_user_with_password(
+        auth_service, organisation, is_super_admin=True
+    )
+    login_options = await auth_service.login(super_admin.email, password)
+
+    response = await auth_client.get(
+        "/api/auth/organisations",
+        headers={"Authorization": f"Bearer {get_access_token(login_options)}"},
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+
+    # Should only contain the active organisation
+    assert len(data) == 1
+    assert data[0]["id"] == str(organisation.id)
+
+
+async def test_request_magic_link_existing_user(
+    auth_client: AsyncTestClient[Litestar],
+    auth_service: AuthService,
+    organisation: Organisation,
+) -> None:
+    user, _ = await create_user_with_password(auth_service, organisation)
+
+    response = await auth_client.post(
+        "/api/auth/request-magic-link",
+        json={"email": user.email},
+    )
+
+    assert response.status_code == 200
+
+
+async def test_request_magic_link_nonexistent_user(
+    auth_client: AsyncTestClient[Litestar],
+) -> None:
+    response = await auth_client.post(
+        "/api/auth/request-magic-link",
+        json={"email": "nonexistent@example.com"},
+    )
+
+    assert response.status_code == 200
+
+
+async def test_magic_login_success(
+    auth_client: AsyncTestClient[Litestar],
+    auth_service: AuthService,
+    organisation: Organisation,
+) -> None:
+    user, _ = await create_user_with_password(auth_service, organisation)
+
+    magic_token = await auth_service.magic_link_token(user.email)
+    assert magic_token is not None
+
+    response = await auth_client.get(
+        "/api/auth/magic-login",
+        params={"token": magic_token},
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert "organisations" in data
+    assert data["user"]["email"] == user.email
+
+
+async def test_magic_login_invalid_token(
+    auth_client: AsyncTestClient[Litestar],
+) -> None:
+    response = await auth_client.get(
+        "/api/auth/magic-login",
+        params={"token": "invalid_token"},
+    )
+    assert response.status_code == 401
+
+
+async def test_magic_login_nonexistent_user(
+    auth_client: AsyncTestClient[Litestar],
+    auth_service: AuthService,
+    organisation: Organisation,
+) -> None:
+    user, _ = await create_user_with_password(auth_service, organisation)
+
+    # Create a magic token for the user
+    magic_token = await auth_service.magic_link_token(user.email)
+    assert magic_token is not None
+
+    # Remove the user from the organisation to simulate a deleted user
+    await auth_service.remove_user(user.id, organisation.id)
+
+    response = await auth_client.get(
+        "/api/auth/magic-login",
+        params={"token": magic_token},
+    )
+    assert response.status_code == 401
