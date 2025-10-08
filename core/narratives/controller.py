@@ -5,6 +5,7 @@ from litestar import Controller, delete, get, patch, post
 from litestar.di import Provide
 from litestar.exceptions import NotFoundException
 
+from core.auth.guards import super_admin
 from core.errors import ConflictError
 from core.models import Narrative
 from core.narratives.models import NarrativeInput, NarrativePatchInput
@@ -32,6 +33,7 @@ class NarrativeController(Controller):
         summary="Create a new narrative",
         return_dto=None,
         raises=[ConflictError],
+        guards=[super_admin],
     )
     async def create_narrative(
         self,
@@ -66,7 +68,11 @@ class NarrativeController(Controller):
         text: str | None = None,
     ) -> PaginatedJSON[list[Narrative]]:
         narratives, total = await narrative_service.get_all_narratives(
-            limit=limit, offset=offset, topic_id=topic_id, entity_id=entity_id, text=text
+            limit=limit,
+            offset=offset,
+            topic_id=topic_id,
+            entity_id=entity_id,
+            text=text,
         )
         page = (offset // limit) + 1 if limit > 0 else 1
         return PaginatedJSON(
@@ -120,6 +126,7 @@ class NarrativeController(Controller):
         path="/{narrative_id:uuid}",
         summary="Update a narrative",
         return_dto=None,
+        guards=[super_admin],
     )
     async def update_narrative(
         self,
@@ -135,6 +142,7 @@ class NarrativeController(Controller):
     @patch(
         path="/{narrative_id:uuid}/metadata",
         summary="Update the metadata for a narrative",
+        guards=[super_admin],
     )
     async def patch_narrative_metadata(
         self,
@@ -147,6 +155,7 @@ class NarrativeController(Controller):
     @delete(
         path="/{narrative_id:uuid}",
         summary="Delete a specific narrative",
+        guards=[super_admin],
     )
     async def delete_narrative(
         self,
