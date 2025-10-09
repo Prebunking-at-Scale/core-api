@@ -6,6 +6,7 @@ from litestar.di import Provide
 from litestar.dto import DTOData
 from litestar.exceptions import NotFoundException
 
+from core.auth.guards import super_admin
 from core.errors import ConflictError
 from core.models import Transcript
 from core.response import JSON
@@ -34,6 +35,7 @@ class TranscriptController(Controller):
         dto=TranscriptDTO,
         return_dto=None,
         raises=[ConflictError],
+        guards=[super_admin],
     )
     async def add_sentences(
         self,
@@ -58,6 +60,7 @@ class TranscriptController(Controller):
     @delete(
         path="/",
         summary="Delete all transcript sentences for the given video",
+        guards=[super_admin],
     )
     async def delete_transcript(
         self, transcript_service: TranscriptService, video_id: UUID
@@ -67,6 +70,7 @@ class TranscriptController(Controller):
     @patch(
         path="/{sentence_id:uuid}/metadata",
         summary="Update the metadata for a transcript sentence",
+        guards=[super_admin],
     )
     async def patch_sentence_metadata(
         self,
@@ -79,6 +83,7 @@ class TranscriptController(Controller):
     @delete(
         path="/{sentence_id:uuid}",
         summary="Delete a specific transcript sentence",
+        guards=[super_admin],
     )
     async def delete_sentence(
         self,

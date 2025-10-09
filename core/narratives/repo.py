@@ -470,6 +470,23 @@ class NarrativeRepository:
         videos = await self._get_narrative_videos(row["id"])
         return Narrative(**row, claims=claims, topics=topics, videos=videos)
 
+    async def find_by_title(self, title: str) -> Narrative | None:
+        await self._session.execute(
+            """
+            SELECT * FROM narratives
+            WHERE title = %(title)s
+            """,
+            {"title": title},
+        )
+        row = await self._session.fetchone()
+        if not row:
+            return None
+
+        claims = await self._get_narrative_claims(row["id"])
+        topics = await self._get_narrative_topics(row["id"])
+        videos = await self._get_narrative_videos(row["id"])
+        return Narrative(**row, claims=claims, topics=topics, videos=videos)
+
     async def get_narratives_by_topic(
         self, topic_id: UUID, limit: int = 100, offset: int = 0
     ) -> tuple[list[Narrative], int]:

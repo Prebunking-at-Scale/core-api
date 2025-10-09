@@ -17,6 +17,7 @@ from litestar.exceptions import NotFoundException
 from litestar.params import Parameter
 
 from core.analysis import genai, language_id
+from core.auth.guards import super_admin
 from core.config import APP_BASE_URL, NARRATIVES_API_KEY, NARRATIVES_BASE_URL
 from core.errors import ConflictError
 from core.models import Claim, Transcript, TranscriptSentence, Video
@@ -144,18 +145,14 @@ async def analyze_for_narratives(video: Video, video_claims: list[Claim]) -> Non
 
     claims_data = []
     for claim in video_claims:
-        claims_data.append(
-            {
-                "id": str(claim.id),
-                "claim": claim.claim,
-                "score": claim.metadata.get("score", 0),
-                "video_id": str(video.id)
-            }
-        )
+        claims_data.append({
+            "id": str(claim.id),
+            "claim": claim.claim,
+            "score": claim.metadata.get("score", 0),
+            "video_id": str(video.id),
+        })
 
-    payload = {
-        "claims": claims_data
-    }
+    payload = {"claims": claims_data}
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         try:
@@ -192,6 +189,7 @@ class VideoController(Controller):
         path="/",
         summary="Add a new video",
         raises=[ConflictError],
+        guards=[super_admin],
     )
     async def add_video(
         self,
@@ -291,6 +289,7 @@ class VideoController(Controller):
         summary="Update a video by ID",
         dto=VideoPatch,
         return_dto=None,
+        guards=[super_admin],
     )
     async def patch_video(
         self, video_service: VideoService, video_id: UUID, data: DTOData[Video]
@@ -300,6 +299,7 @@ class VideoController(Controller):
     @delete(
         path="/{video_id:uuid}",
         summary="Delete a video by ID",
+        guards=[super_admin],
     )
     async def delete_video(self, video_service: VideoService, video_id: UUID) -> None:
         await video_service.delete_video(video_id)

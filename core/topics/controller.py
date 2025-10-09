@@ -7,6 +7,7 @@ from litestar.di import Provide
 from litestar.dto import DTOData
 from litestar.exceptions import NotFoundException
 
+from core.auth.guards import super_admin
 from core.errors import ConflictError
 from core.models import Narrative, Topic
 from core.narratives.service import NarrativeService
@@ -52,6 +53,7 @@ class TopicController(Controller):
         dto=TopicDTO,
         return_dto=None,
         raises=[ConflictError],
+        guards=[super_admin],
     )
     async def create_topic(
         self,
@@ -145,6 +147,7 @@ class TopicController(Controller):
         dto=TopicDTO,
         return_dto=None,
         raises=[ConflictError],
+        guards=[super_admin],
     )
     async def update_topic(
         self,
@@ -160,6 +163,7 @@ class TopicController(Controller):
     @patch(
         path="/{topic_id:uuid}/metadata",
         summary="Update the metadata for a topic",
+        guards=[super_admin],
     )
     async def patch_topic_metadata(
         self,
@@ -172,6 +176,7 @@ class TopicController(Controller):
     @delete(
         path="/{topic_id:uuid}",
         summary="Delete a specific topic",
+        guards=[super_admin],
     )
     async def delete_topic(
         self,
