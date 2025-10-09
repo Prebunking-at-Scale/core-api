@@ -25,7 +25,17 @@ def organisation(
     return request.user.organisation
 
 
+def optional_organisation(
+    request: Request[Identity, AuthToken, Any],
+    organisation_id: UUID | None = None,
+) -> Organisation | None:
+    """Returns organisation if available, otherwise None.
+    Allows endpoints to work with or without organisation context."""
+    return request.user.organisation
+
+
 auth = {
     "user": Provide(user, sync_to_thread=False),
     "organisation": Provide(organisation, sync_to_thread=False),
+    "optional_organisation": Provide(optional_organisation, sync_to_thread=False),
 }
