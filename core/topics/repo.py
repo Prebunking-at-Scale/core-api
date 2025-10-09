@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -158,8 +157,8 @@ class TopicRepository:
 
         params: dict[str, int | str] = {"limit": limit, "offset": offset}
 
-        narrative_count_query = f"""SELECT COUNT(*) FROM narrative_topics nt join narratives n on nt.narrative_id = n.id WHERE nt.topic_id = t.id"""
-        claim_count_query = f"""SELECT COUNT(*) from claim_topics ct join video_claims vc on ct.claim_id = vc.id WHERE ct.topic_id = t.id"""
+        narrative_count_query = """SELECT COUNT(*) FROM narrative_topics nt join narratives n on nt.narrative_id = n.id WHERE nt.topic_id = t.id"""
+        claim_count_query = """SELECT COUNT(*) from claim_topics ct join video_claims vc on ct.claim_id = vc.id WHERE ct.topic_id = t.id"""
 
         if start_date and end_date:
             # concatenate the two date filters to avoid SQL syntax errors

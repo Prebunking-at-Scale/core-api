@@ -178,14 +178,10 @@ class NarrativeRepository:
             params["text"] = f"%{text}%"
 
         # Added filtering for start_date and end_date
-        if start_date and end_date:
-            where_conditions.append("n.created_at BETWEEN %(start_date)s AND %(end_date)s")
-            params["start_date"] = start_date
-            params["end_date"] = end_date
-        elif start_date:
+        if start_date:
             where_conditions.append("n.created_at >= %(start_date)s")
             params["start_date"] = start_date
-        elif end_date:
+        if end_date:
             where_conditions.append("n.created_at <= %(end_date)s")
             params["end_date"] = end_date
 
@@ -193,7 +189,7 @@ class NarrativeRepository:
             # Filter narratives by their oldest video's uploaded date using ROW_NUMBER()
             oldest_video_filter = """
                 n.id IN (
-                    SELECT DISTINCT narrative_id
+                    SELECT narrative_id
                     FROM (
                         SELECT
                             cn.narrative_id,
