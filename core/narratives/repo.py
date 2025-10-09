@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -140,11 +141,15 @@ class NarrativeRepository:
         offset: int = 0,
         topic_id: UUID | None = None,
         entity_id: UUID | None = None,
-        text: str | None = None
-    ) -> list[Narrative]:
-        query = """
-            SELECT DISTINCT n.* FROM narratives n
-        """
+        text: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+        first_content_start: datetime | None = None,
+        first_content_end: datetime | None = None,
+    ) -> tuple[list[Narrative], int]:
+        select_distinct_statement = """SELECT DISTINCT n.* FROM narratives n"""
+        select_count_statement = """SELECT COUNT(DISTINCT n.id) FROM narratives n"""
+        query = ''
 
         if topic_id:
             query += """
@@ -156,7 +161,7 @@ class NarrativeRepository:
             """
 
         where_conditions = []
-        params: dict[str, int | UUID | str] = {"limit": limit, "offset": offset}
+        params: dict[str, int | UUID | str | datetime] = {"limit": limit, "offset": offset}
 
         if topic_id:
             where_conditions.append("nt.topic_id = %(topic_id)s")
@@ -171,16 +176,60 @@ class NarrativeRepository:
                 "(LOWER(n.title) LIKE LOWER(%(text)s) OR LOWER(n.description) LIKE LOWER(%(text)s))"
             )
             params["text"] = f"%{text}%"
+
+        # Added filtering for start_date and end_date
+        if start_date:
+            where_conditions.append("n.created_at >= %(start_date)s")
+            params["start_date"] = start_date
+        if end_date:
+            where_conditions.append("n.created_at <= %(end_date)s")
+            params["end_date"] = end_date
+
+        if first_content_start or first_content_end:
+            # Filter narratives by their oldest video's uploaded date using ROW_NUMBER()
+            oldest_video_filter = """
+                n.id IN (
+                    SELECT narrative_id
+                    FROM (
+                        SELECT
+                            cn.narrative_id,
+                            v.uploaded_at,
+                            ROW_NUMBER() OVER (PARTITION BY cn.narrative_id ORDER BY v.uploaded_at ASC) as rn
+                        FROM claim_narratives cn
+                        JOIN video_claims vc ON cn.claim_id = vc.id
+                        JOIN videos v ON vc.video_id = v.id
+                    ) oldest_videos
+                    WHERE rn = 1
+            """
+
+            if first_content_start and first_content_end:
+                oldest_video_filter += " AND uploaded_at BETWEEN %(first_content_start)s AND %(first_content_end)s"
+                params["first_content_start"] = first_content_start
+                params["first_content_end"] = first_content_end
+            elif first_content_start:
+                oldest_video_filter += " AND uploaded_at >= %(first_content_start)s"
+                params["first_content_start"] = first_content_start
+            elif first_content_end:
+                oldest_video_filter += " AND uploaded_at <= %(first_content_end)s"
+                params["first_content_end"] = first_content_end
+
+            oldest_video_filter += ")"
+            where_conditions.append(oldest_video_filter)
         
         if where_conditions:
             query += " WHERE " + " AND ".join(where_conditions)
             
+        # Get total count
+        await self._session.execute(select_count_statement + query, params)
+        total_row = await self._session.fetchone()
+        total = total_row["count"] if total_row else 0
+
+        # Get paginated narratives
         query += """
             ORDER BY n.created_at DESC
             LIMIT %(limit)s OFFSET %(offset)s
         """
-        
-        await self._session.execute(query, params)
+        await self._session.execute(select_distinct_statement + query, params)
         rows = await self._session.fetchall()
 
         narratives = []
@@ -193,50 +242,7 @@ class NarrativeRepository:
                 Narrative(**row, claims=claims, topics=topics, entities=entities, videos=videos)
             )
 
-        return narratives
-
-    async def count_all_narratives(
-        self,
-        topic_id: UUID | None = None,
-        entity_id: UUID | None = None,
-        text: str | None = None
-    ) -> int:
-        query = """
-            SELECT COUNT(DISTINCT n.id) FROM narratives n
-        """
-
-        if topic_id:
-            query += """
-                INNER JOIN narrative_topics nt ON n.id = nt.narrative_id
-            """
-        if entity_id:
-            query += """
-                INNER JOIN narrative_entities ne ON n.id = ne.narrative_id
-            """
-
-        where_conditions = []
-        params: dict[str, UUID | str] = {}
-
-        if topic_id:
-            where_conditions.append("nt.topic_id = %(topic_id)s")
-            params["topic_id"] = topic_id
-
-        if entity_id:
-            where_conditions.append("ne.entity_id = %(entity_id)s")
-            params["entity_id"] = entity_id
-
-        if text:
-            where_conditions.append(
-                "(LOWER(n.title) LIKE LOWER(%(text)s) OR LOWER(n.description) LIKE LOWER(%(text)s))"
-            )
-            params["text"] = f"%{text}%"
-        
-        if where_conditions:
-            query += " WHERE " + " AND ".join(where_conditions)
-            
-        await self._session.execute(query, params)
-        row = await self._session.fetchone()
-        return row["count"] if row else 0
+        return narratives, total
 
     async def update_narrative(
         self,
@@ -521,7 +527,7 @@ class NarrativeRepository:
         return narratives, total
 
     async def get_viral_narratives(
-        self, limit: int = 100, offset: int = 0, hours: int = 24
+        self, limit: int = 100, offset: int = 0, hours: int | None = None
     ) -> list[Narrative]:
         # Get narratives with claims from the specified time period, ordered by total video views
         await self._session.execute(
@@ -539,7 +545,7 @@ class NarrativeRepository:
                 JOIN claim_narratives cn ON n.id = cn.narrative_id
                 JOIN video_claims c ON cn.claim_id = c.id
                 JOIN videos v ON c.video_id = v.id
-                WHERE v.updated_at >= NOW() - (%(hours)s || ' hours')::INTERVAL
+                WHERE %(hours)s IS NULL OR v.updated_at >= NOW() - (%(hours)s || ' hours')::INTERVAL
                 GROUP BY n.id, n.title, n.description, n.metadata, n.created_at, n.updated_at
             )
             SELECT
@@ -576,7 +582,7 @@ class NarrativeRepository:
         return narratives
 
     async def get_prevalent_narratives(
-        self, limit: int = 100, offset: int = 0, hours: int = 24
+        self, limit: int = 100, offset: int = 0, hours: int | None = None
     ) -> list[Narrative]:
         # Get narratives ordered by the count of associated videos within the specified time period
         await self._session.execute(
@@ -594,7 +600,7 @@ class NarrativeRepository:
                 JOIN claim_narratives cn ON n.id = cn.narrative_id
                 JOIN video_claims c ON cn.claim_id = c.id
                 JOIN videos v ON c.video_id = v.id
-                WHERE v.updated_at >= NOW() - (%(hours)s || ' hours')::INTERVAL
+                WHERE %(hours)s IS NULL OR v.updated_at >= NOW() - (%(hours)s || ' hours')::INTERVAL
                 GROUP BY n.id, n.title, n.description, n.metadata, n.created_at, n.updated_at
             )
             SELECT
