@@ -146,6 +146,27 @@ async def test_get_channel_feeds(
         assert feed["organisation_id"] == str(org1.id)
 
 
+async def test_get_channel_feeds_without_organisation_filter(
+    api_key_client: AsyncTestClient[Litestar],
+    auth_service: AuthService,
+) -> None:
+    org1 = await create_organisation(auth_service)
+    org2 = await create_organisation(auth_service)
+
+    await create_channel_feed(api_key_client, organisation=org1)
+    await create_channel_feed(api_key_client, organisation=org1)
+    await create_channel_feed(api_key_client, organisation=org2)
+
+    response = await api_key_client.get("/api/media_feeds/channels")
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert len(data) == 3
+
+    org_ids = {feed["organisation_id"] for feed in data}
+    assert str(org1.id) in org_ids
+    assert str(org2.id) in org_ids
+
+
 async def test_update_channel_feed(
     api_key_client: AsyncTestClient[Litestar],
     organisation: Organisation,
@@ -276,6 +297,27 @@ async def test_get_keyword_feeds_by_organisation(
     assert len(data) == 2
     for feed in data:
         assert feed["organisation_id"] == str(org1.id)
+
+
+async def test_get_keyword_feeds_without_organisation_filter(
+    api_key_client: AsyncTestClient[Litestar],
+    auth_service: AuthService,
+) -> None:
+    org1 = await create_organisation(auth_service)
+    org2 = await create_organisation(auth_service)
+
+    await create_keyword_feed(api_key_client, organisation=org1)
+    await create_keyword_feed(api_key_client, organisation=org1)
+    await create_keyword_feed(api_key_client, organisation=org2)
+
+    response = await api_key_client.get("/api/media_feeds/keywords")
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert len(data) == 3
+
+    org_ids = {feed["organisation_id"] for feed in data}
+    assert str(org1.id) in org_ids
+    assert str(org2.id) in org_ids
 
 
 async def test_update_keyword_feed(

@@ -67,9 +67,13 @@ class MediaFeedController(Controller):
     async def get_channel_feeds(
         self,
         media_feeds_service: MediaFeedService,
-        organisation: Organisation,
+        optional_organisation: Organisation | None,
     ) -> JSON[list[ChannelFeed]]:
-        return JSON(await media_feeds_service.get_channel_feeds(organisation.id))
+        return JSON(
+            await media_feeds_service.get_channel_feeds(
+                optional_organisation.id if optional_organisation else None
+            )
+        )
 
     @get(
         path="/channels/{feed_id:uuid}",
@@ -95,9 +99,13 @@ class MediaFeedController(Controller):
     async def get_keyword_feeds(
         self,
         media_feeds_service: MediaFeedService,
-        organisation: Organisation,
+        optional_organisation: Organisation | None,
     ) -> JSON[list[KeywordFeed]]:
-        return JSON(await media_feeds_service.get_keyword_feeds(organisation.id))
+        return JSON(
+            await media_feeds_service.get_keyword_feeds(
+                optional_organisation.id if optional_organisation else None
+            )
+        )
 
     @get(
         path="/keywords/{feed_id:uuid}",
