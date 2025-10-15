@@ -1,5 +1,4 @@
 import uuid
-from uuid import uuid4
 
 from litestar import Litestar
 from litestar.testing import AsyncTestClient
@@ -48,7 +47,7 @@ async def test_create_channel_feed_from_url_youtube(
     assert response.status_code == 201
     response_data = response.json()["data"]
     assert response_data["organisation_id"] == str(organisation.id)
-    assert response_data["channel"] == "testchannel"
+    assert response_data["channel"] == "@testchannel"
     assert response_data["platform"] == "youtube"
     assert response_data["is_archived"] is False
 
@@ -83,7 +82,24 @@ async def test_create_channel_feed_from_url_tiktok(
     assert response.status_code == 201
     response_data = response.json()["data"]
     assert response_data["organisation_id"] == str(organisation.id)
-    assert response_data["channel"] == "testuser"
+    assert response_data["channel"] == "@testuser"
+    assert response_data["platform"] == "tiktok"
+
+
+async def test_create_channel_feed_uppercase(
+    api_key_client: AsyncTestClient[Litestar],
+    organisation: Organisation,
+) -> None:
+    url_data = {"url": "https://www.tiktok.com/@TeStUSer"}
+    response = await api_key_client.post(
+        "/api/media_feeds/channels/from-url",
+        params={"organisation_id": str(organisation.id)},
+        json=url_data,
+    )
+    assert response.status_code == 201
+    response_data = response.json()["data"]
+    assert response_data["organisation_id"] == str(organisation.id)
+    assert response_data["channel"] == "@TeStUSer"
     assert response_data["platform"] == "tiktok"
 
 
