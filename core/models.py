@@ -75,3 +75,23 @@ class Narrative(BaseModel):
     metadata: dict[str, Any] = {}
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+
+class NarrativeFeedback(BaseModel):
+    id: UUID = Field(default_factory=uuid4)
+    user_id: UUID
+    narrative_id: UUID
+    feedback_score: float = Field(ge=0.0, le=1.0)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class ClaimNarrativeFeedback(BaseModel):
+    id: UUID = Field(default_factory=uuid4)
+    user_id: UUID
+    claim_id: UUID
+    narrative_id: UUID
+    feedback_score: float = Field(ge=0.0, le=1.0)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
