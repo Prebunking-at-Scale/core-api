@@ -1,6 +1,5 @@
 import logging
 import os
-from urllib.parse import urljoin
 from uuid import UUID
 
 import httpx
@@ -20,6 +19,7 @@ from core.analysis import genai, language_id
 from core.auth.guards import super_admin
 from core.config import APP_BASE_URL, NARRATIVES_API_KEY, NARRATIVES_BASE_URL
 from core.errors import ConflictError
+from core.media_feeds.service import MediaFeedsService
 from core.models import Claim, Transcript, TranscriptSentence, Video
 from core.narratives.service import NarrativeService
 from core.response import JSON, CursorJSON, PaginatedJSON
@@ -30,7 +30,6 @@ from core.videos.models import (
     VideoFilters,
     VideoPatch,
 )
-from core.videos.pastel import KEYWORDS
 from core.videos.service import VideoService
 from core.videos.transcripts.service import TranscriptService
 
@@ -53,11 +52,16 @@ async def narrative_service(state: State) -> NarrativeService:
     return NarrativeService(state.connection_factory)
 
 
+async def media_feeds_service(state: State) -> MediaFeedsService:
+    return MediaFeedsService(state.connection_factory)
+
+
 async def extract_transcript_and_claims(
     video: Video,
     video_service: VideoService,
     transcript_service: TranscriptService,
     claims_service: ClaimsService,
+    media_feeds_service: MediaFeedsService,
 ) -> None:
     if "PYTEST_CURRENT_TEST" in os.environ:
         # We don't want to run this during tests
@@ -91,7 +95,9 @@ async def extract_transcript_and_claims(
     all_claims: list[Claim] = []
     for org in orgs:
         try:
-            keywords = KEYWORDS.get(org)
+            org_uuid = UUID(org)
+            keyword_feeds = await media_feeds_service.get_keyword_feeds(org_uuid)
+            keywords = {feed.topic: feed.keywords for feed in keyword_feeds}
             if not keywords:
                 log.error(f"org {org} not found")
                 continue
@@ -183,6 +189,7 @@ class VideoController(Controller):
         "transcript_service": Provide(transcript_service),
         "claims_service": Provide(claims_service),
         "narrative_service": Provide(narrative_service),
+        "media_feeds_service": Provide(media_feeds_service),
     }
 
     @post(
@@ -196,6 +203,7 @@ class VideoController(Controller):
         video_service: VideoService,
         transcript_service: TranscriptService,
         claims_service: ClaimsService,
+        media_feeds_service: MediaFeedsService,
         data: Video,
     ) -> Response[JSON[Video]]:
         video = await video_service.add_video(data)
@@ -207,6 +215,7 @@ class VideoController(Controller):
                 video_service,
                 transcript_service,
                 claims_service,
+                media_feeds_service,
             ),
         )
 

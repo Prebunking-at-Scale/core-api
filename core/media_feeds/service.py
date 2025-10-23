@@ -15,7 +15,7 @@ from core.media_feeds.repo import MediaFeedRepository
 from core.uow import ConnectionFactory, uow
 
 
-class MediaFeedService:
+class MediaFeedsService:
     def __init__(self, connection_factory: ConnectionFactory) -> None:
         self._connection_factory = connection_factory
 
