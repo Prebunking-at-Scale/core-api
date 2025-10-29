@@ -19,15 +19,15 @@ from core.media_feeds.models import (
     KeywordFeed,
     KeywordFeedDTO,
 )
-from core.media_feeds.service import MediaFeedService
+from core.media_feeds.service import MediaFeedsService
 from core.response import JSON
 from core.uow import ConnectionFactory
 
 
 async def media_feeds_service(
     connection_factory: ConnectionFactory,
-) -> MediaFeedService:
-    return MediaFeedService(connection_factory=connection_factory)
+) -> MediaFeedsService:
+    return MediaFeedsService(connection_factory=connection_factory)
 
 
 class MediaFeedController(Controller):
@@ -44,7 +44,7 @@ class MediaFeedController(Controller):
     )
     async def get_organisation_feeds(
         self,
-        media_feeds_service: MediaFeedService,
+        media_feeds_service: MediaFeedsService,
         organisation: Organisation,
     ) -> JSON[AllFeeds]:
         return JSON(await media_feeds_service.get_all_feeds(organisation.id))
@@ -56,7 +56,7 @@ class MediaFeedController(Controller):
     )
     async def get_all_feeds(
         self,
-        media_feeds_service: MediaFeedService,
+        media_feeds_service: MediaFeedsService,
     ) -> JSON[AllFeeds]:
         return JSON(await media_feeds_service.get_all_feeds())
 
@@ -66,10 +66,14 @@ class MediaFeedController(Controller):
     )
     async def get_channel_feeds(
         self,
-        media_feeds_service: MediaFeedService,
-        organisation: Organisation,
+        media_feeds_service: MediaFeedsService,
+        optional_organisation: Organisation | None,
     ) -> JSON[list[ChannelFeed]]:
-        return JSON(await media_feeds_service.get_channel_feeds(organisation.id))
+        return JSON(
+            await media_feeds_service.get_channel_feeds(
+                optional_organisation.id if optional_organisation else None
+            )
+        )
 
     @get(
         path="/channels/{feed_id:uuid}",
@@ -77,7 +81,7 @@ class MediaFeedController(Controller):
     )
     async def get_channel_feed_by_id(
         self,
-        media_feeds_service: MediaFeedService,
+        media_feeds_service: MediaFeedsService,
         organisation: Organisation,
         feed_id: UUID,
     ) -> JSON[ChannelFeed]:
@@ -94,10 +98,14 @@ class MediaFeedController(Controller):
     )
     async def get_keyword_feeds(
         self,
-        media_feeds_service: MediaFeedService,
-        organisation: Organisation,
+        media_feeds_service: MediaFeedsService,
+        optional_organisation: Organisation | None,
     ) -> JSON[list[KeywordFeed]]:
-        return JSON(await media_feeds_service.get_keyword_feeds(organisation.id))
+        return JSON(
+            await media_feeds_service.get_keyword_feeds(
+                optional_organisation.id if optional_organisation else None
+            )
+        )
 
     @get(
         path="/keywords/{feed_id:uuid}",
@@ -105,7 +113,7 @@ class MediaFeedController(Controller):
     )
     async def get_keyword_feed_by_id(
         self,
-        media_feeds_service: MediaFeedService,
+        media_feeds_service: MediaFeedsService,
         organisation: Organisation,
         feed_id: UUID,
     ) -> JSON[KeywordFeed]:
@@ -126,7 +134,7 @@ class MediaFeedController(Controller):
     )
     async def create_channel_feed(
         self,
-        media_feeds_service: MediaFeedService,
+        media_feeds_service: MediaFeedsService,
         organisation: Organisation,
         data: DTOData[ChannelFeed],
     ) -> JSON[ChannelFeed]:
@@ -149,7 +157,7 @@ class MediaFeedController(Controller):
     )
     async def create_channel_feed_from_url(
         self,
-        media_feeds_service: MediaFeedService,
+        media_feeds_service: MediaFeedsService,
         organisation: Organisation,
         data: DTOData[ChannelURLRequest],
     ) -> JSON[ChannelFeed]:
@@ -176,7 +184,7 @@ class MediaFeedController(Controller):
     )
     async def create_keyword_feed(
         self,
-        media_feeds_service: MediaFeedService,
+        media_feeds_service: MediaFeedsService,
         organisation: Organisation,
         data: DTOData[KeywordFeed],
     ) -> JSON[KeywordFeed]:
@@ -198,7 +206,7 @@ class MediaFeedController(Controller):
     )
     async def update_channel_feed(
         self,
-        media_feeds_service: MediaFeedService,
+        media_feeds_service: MediaFeedsService,
         organisation: Organisation,
         feed_id: UUID,
         data: DTOData[ChannelFeed],
@@ -223,7 +231,7 @@ class MediaFeedController(Controller):
     )
     async def update_keyword_feed(
         self,
-        media_feeds_service: MediaFeedService,
+        media_feeds_service: MediaFeedsService,
         organisation: Organisation,
         feed_id: UUID,
         data: DTOData[KeywordFeed],
@@ -246,7 +254,7 @@ class MediaFeedController(Controller):
     )
     async def archive_channel_feed(
         self,
-        media_feeds_service: MediaFeedService,
+        media_feeds_service: MediaFeedsService,
         organisation: Organisation,
         feed_id: UUID,
     ) -> None:
@@ -262,7 +270,7 @@ class MediaFeedController(Controller):
     )
     async def archive_keyword_feed(
         self,
-        media_feeds_service: MediaFeedService,
+        media_feeds_service: MediaFeedsService,
         organisation: Organisation,
         feed_id: UUID,
     ) -> None:
@@ -278,7 +286,7 @@ class MediaFeedController(Controller):
     )
     async def get_cursor(
         self,
-        media_feeds_service: MediaFeedService,
+        media_feeds_service: MediaFeedsService,
         target: str,
         platform: str,
     ) -> JSON[Cursor]:
@@ -294,7 +302,7 @@ class MediaFeedController(Controller):
     )
     async def set_cursor(
         self,
-        media_feeds_service: MediaFeedService,
+        media_feeds_service: MediaFeedsService,
         target: str,
         platform: str,
         data: Any,
@@ -314,7 +322,7 @@ class MediaFeedController(Controller):
     )
     async def delete_cursor(
         self,
-        media_feeds_service: MediaFeedService,
+        media_feeds_service: MediaFeedsService,
         target: str,
         platform: str,
     ) -> None:

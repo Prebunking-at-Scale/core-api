@@ -1,5 +1,4 @@
 import uuid
-from uuid import uuid4
 
 from litestar import Litestar
 from litestar.testing import AsyncTestClient
@@ -48,7 +47,7 @@ async def test_create_channel_feed_from_url_youtube(
     assert response.status_code == 201
     response_data = response.json()["data"]
     assert response_data["organisation_id"] == str(organisation.id)
-    assert response_data["channel"] == "testchannel"
+    assert response_data["channel"] == "@testchannel"
     assert response_data["platform"] == "youtube"
     assert response_data["is_archived"] is False
 
@@ -83,7 +82,24 @@ async def test_create_channel_feed_from_url_tiktok(
     assert response.status_code == 201
     response_data = response.json()["data"]
     assert response_data["organisation_id"] == str(organisation.id)
-    assert response_data["channel"] == "testuser"
+    assert response_data["channel"] == "@testuser"
+    assert response_data["platform"] == "tiktok"
+
+
+async def test_create_channel_feed_uppercase(
+    api_key_client: AsyncTestClient[Litestar],
+    organisation: Organisation,
+) -> None:
+    url_data = {"url": "https://www.tiktok.com/@TeStUSer"}
+    response = await api_key_client.post(
+        "/api/media_feeds/channels/from-url",
+        params={"organisation_id": str(organisation.id)},
+        json=url_data,
+    )
+    assert response.status_code == 201
+    response_data = response.json()["data"]
+    assert response_data["organisation_id"] == str(organisation.id)
+    assert response_data["channel"] == "@TeStUSer"
     assert response_data["platform"] == "tiktok"
 
 
@@ -144,6 +160,27 @@ async def test_get_channel_feeds(
     assert len(data) == 2
     for feed in data:
         assert feed["organisation_id"] == str(org1.id)
+
+
+async def test_get_channel_feeds_without_organisation_filter(
+    api_key_client: AsyncTestClient[Litestar],
+    auth_service: AuthService,
+) -> None:
+    org1 = await create_organisation(auth_service)
+    org2 = await create_organisation(auth_service)
+
+    await create_channel_feed(api_key_client, organisation=org1)
+    await create_channel_feed(api_key_client, organisation=org1)
+    await create_channel_feed(api_key_client, organisation=org2)
+
+    response = await api_key_client.get("/api/media_feeds/channels")
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert len(data) == 3
+
+    org_ids = {feed["organisation_id"] for feed in data}
+    assert str(org1.id) in org_ids
+    assert str(org2.id) in org_ids
 
 
 async def test_update_channel_feed(
@@ -276,6 +313,27 @@ async def test_get_keyword_feeds_by_organisation(
     assert len(data) == 2
     for feed in data:
         assert feed["organisation_id"] == str(org1.id)
+
+
+async def test_get_keyword_feeds_without_organisation_filter(
+    api_key_client: AsyncTestClient[Litestar],
+    auth_service: AuthService,
+) -> None:
+    org1 = await create_organisation(auth_service)
+    org2 = await create_organisation(auth_service)
+
+    await create_keyword_feed(api_key_client, organisation=org1)
+    await create_keyword_feed(api_key_client, organisation=org1)
+    await create_keyword_feed(api_key_client, organisation=org2)
+
+    response = await api_key_client.get("/api/media_feeds/keywords")
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert len(data) == 3
+
+    org_ids = {feed["organisation_id"] for feed in data}
+    assert str(org1.id) in org_ids
+    assert str(org2.id) in org_ids
 
 
 async def test_update_keyword_feed(

@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any, AsyncContextManager
 from uuid import UUID
 
@@ -85,8 +86,12 @@ class NarrativeService:
         offset: int = 0,
         topic_id: UUID | None = None,
         entity_id: UUID | None = None,
+        text: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+        first_content_start: datetime | None = None,
+        first_content_end : datetime | None = None,
         video_language: str | None = None,
-        text: str | None = None
     ) -> tuple[list[Narrative], int]:
         async with self.repo() as repo:
             narratives = await repo.get_all_narratives(
@@ -94,11 +99,22 @@ class NarrativeService:
                 offset=offset,
                 topic_id=topic_id,
                 entity_id=entity_id,
-                video_language=video_language,
-                text=text
+                text=text,
+                start_date=start_date,
+                end_date=end_date,
+                first_content_start=first_content_start,
+                first_content_end=first_content_end,
+                video_language=video_language
             )
             total = await repo.count_all_narratives(
-                topic_id=topic_id, entity_id=entity_id, text=text, video_language=video_language
+                topic_id=topic_id,
+                entity_id=entity_id,
+                text=text,
+                start_date=start_date,
+                end_date=end_date,
+                first_content_start=first_content_start,
+                first_content_end=first_content_end,
+                video_language=video_language
             )
             return narratives, total
 
@@ -176,7 +192,7 @@ class NarrativeService:
             )
 
     async def get_viral_narratives(
-        self, limit: int = 100, offset: int = 0, hours: int = 24
+        self, limit: int = 100, offset: int = 0, hours: int | None = None
     ) -> list[Narrative]:
         async with self.repo() as repo:
             return await repo.get_viral_narratives(
@@ -184,7 +200,7 @@ class NarrativeService:
             )
 
     async def get_prevalent_narratives(
-        self, limit: int = 100, offset: int = 0, hours: int = 24
+        self, limit: int = 100, offset: int = 0, hours: int | None = None
     ) -> list[Narrative]:
         async with self.repo() as repo:
             return await repo.get_prevalent_narratives(

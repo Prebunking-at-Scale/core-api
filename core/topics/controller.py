@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -6,6 +7,7 @@ from litestar.di import Provide
 from litestar.dto import DTOData
 from litestar.exceptions import NotFoundException
 
+from core.auth.guards import super_admin
 from core.errors import ConflictError
 from core.models import Narrative, Topic
 from core.narratives.service import NarrativeService
@@ -51,6 +53,7 @@ class TopicController(Controller):
         dto=TopicDTO,
         return_dto=None,
         raises=[ConflictError],
+        guards=[super_admin],
     )
     async def create_topic(
         self,
@@ -115,9 +118,11 @@ class TopicController(Controller):
         topic_service: TopicService,
         limit: int = 20,
         offset: int = 0,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> PaginatedJSON[list[TopicWithStats]]:
         topics, total = await topic_service.get_all_topics_with_stats(
-            limit=limit, offset=offset
+            limit=limit, offset=offset, start_date=start_date, end_date=end_date
         )
         page = (offset // limit) + 1 if limit > 0 else 1
         return PaginatedJSON(
@@ -142,6 +147,7 @@ class TopicController(Controller):
         dto=TopicDTO,
         return_dto=None,
         raises=[ConflictError],
+        guards=[super_admin],
     )
     async def update_topic(
         self,
@@ -157,6 +163,7 @@ class TopicController(Controller):
     @patch(
         path="/{topic_id:uuid}/metadata",
         summary="Update the metadata for a topic",
+        guards=[super_admin],
     )
     async def patch_topic_metadata(
         self,
@@ -169,6 +176,7 @@ class TopicController(Controller):
     @delete(
         path="/{topic_id:uuid}",
         summary="Delete a specific topic",
+        guards=[super_admin],
     )
     async def delete_topic(
         self,

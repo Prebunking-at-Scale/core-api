@@ -60,6 +60,7 @@ def password_reset_message(token: str, locale: str) -> tuple[str, str]:
 
 def magic_link_message(token: str, locale: str) -> tuple[str, str]:
     subject = i18n.t("email.magic_link.subject", locale=locale)
+    expiry_minutes = int(config.MAGIC_LINK_TTL.total_seconds() / 60)
 
     body = f"""
     <div style="{container_style}">
@@ -71,6 +72,9 @@ def magic_link_message(token: str, locale: str) -> tuple[str, str]:
                 {i18n.t("email.magic_link.login_link", locale=locale)}
             </a>
         </p>
+        <p style="margin: 2em; font-size: 0.9em; color: #666;">
+            {i18n.t("email.magic_link.expires", locale=locale, minutes=expiry_minutes)}
+        </p>
     <div>
     """
 
@@ -81,13 +85,13 @@ def alerts_message(
     organisation_name: str, alerts: list[dict], locale: str
 ) -> tuple[str, str]:
     subject = f"Alert Summary for {organisation_name}"
-    
+
     alert_items_html = ""
     for alert in alerts:
         alert_name = alert.get("alert_name", "Unnamed Alert")
         alert_type = alert["alert_type"]
         narrative_title = alert["narrative_title"]
-        
+
         if alert_type == "narrative_views":
             description = f"Narrative '{narrative_title}' reached {alert['trigger_value']:,} views (threshold: {alert['threshold']:,})"
         elif alert_type == "narrative_claims_count":
@@ -95,27 +99,31 @@ def alerts_message(
         elif alert_type == "narrative_videos_count":
             description = f"Narrative '{narrative_title}' reached {alert['trigger_value']} videos (threshold: {alert['threshold']})"
         elif alert_type == "narrative_with_topic":
-            description = f"New narrative '{narrative_title}' created with tracked topic"
+            description = (
+                f"New narrative '{narrative_title}' created with tracked topic"
+            )
         elif alert_type == "keyword":
-            description = f"Narrative '{narrative_title}' contains keyword '{alert['keyword']}'"
+            description = (
+                f"Narrative '{narrative_title}' contains keyword '{alert['keyword']}'"
+            )
         else:
             description = f"Alert triggered for narrative '{narrative_title}'"
-        
+
         alert_items_html += f"""
         <div style="background: white; border-left: 4px solid #00533D; margin: 1em 0; padding: 1em; text-align: left;">
             <h3 style="margin: 0 0 0.5em 0; color: #1F2937; font-size: 1.1em;">{alert_name}</h3>
             <span style="display: inline-block; background: white; color: #333; border: 1px solid #333; padding: 2px 6px; border-radius: 3px; font-size: 0.7em; font-weight: 500; text-transform: uppercase;">
-                {alert_type.replace('_', ' ')}
+                {alert_type.replace("_", " ")}
             </span>
             <p style="margin: 0.75em 0 0 0; color: #666;">{description}</p>
             <p style="margin: 0.5em 0 0 0;">
-                <a href="{config.APP_BASE_URL}/narratives/{alert['narrative_id']}" style="color: #00533D; text-decoration: underline;">
+                <a href="{config.APP_BASE_URL}/narratives/{alert["narrative_id"]}" style="color: #00533D; text-decoration: underline;">
                     View Narrative →
                 </a>
             </p>
         </div>
         """
-    
+
     body = f"""
     <div style="{container_style}">
         <h1 style="color: #333;">Alert Summary</h1>
@@ -128,5 +136,5 @@ def alerts_message(
         </p>
     </div>
     """
-    
+
     return subject, body

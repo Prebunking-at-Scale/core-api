@@ -1,4 +1,3 @@
-
 from litestar import Litestar
 from litestar.testing import AsyncTestClient
 
@@ -480,7 +479,7 @@ async def test_join_organisation_with_invalid_token(
         "/api/auth/organisation/invite/accept",
         params={"invite_token": "invalid_token"},
     )
-    assert response.status_code == 500
+    assert response.status_code == 401
 
 
 async def test_organisation_users(
@@ -858,7 +857,7 @@ async def test_magic_login_invalid_token(
         "/api/auth/magic-login",
         params={"token": "invalid_token"},
     )
-    assert response.status_code == 500
+    assert response.status_code == 401
 
 
 async def test_magic_login_nonexistent_user(
@@ -880,4 +879,3 @@ async def test_magic_login_nonexistent_user(
         params={"token": magic_token},
     )
     assert response.status_code == 401
-

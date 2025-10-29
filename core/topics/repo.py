@@ -147,25 +147,46 @@ class TopicRepository:
         return [Topic(**row) for row in await self._session.fetchall()]
 
     async def get_all_topics_with_stats(
-        self, limit: int = 100, offset: int = 0
+        self, limit: int = 100, offset: int = 0, start_date: str | None = None, end_date: str | None = None
     ) -> tuple[list[TopicWithStats], int]:
+        """Can handle filtering by created_at date range"""
         # Get total count
         await self._session.execute("SELECT COUNT(*) FROM topics")
         total_row = await self._session.fetchone()
         total = total_row["count"] if total_row else 0
 
+        params: dict[str, int | str] = {"limit": limit, "offset": offset}
+
+        narrative_count_query = """SELECT COUNT(*) FROM narrative_topics nt join narratives n on nt.narrative_id = n.id WHERE nt.topic_id = t.id"""
+        claim_count_query = """SELECT COUNT(*) from claim_topics ct join video_claims vc on ct.claim_id = vc.id WHERE ct.topic_id = t.id"""
+
+        if start_date and end_date:
+            # concatenate the two date filters to avoid SQL syntax errors
+            narrative_count_query += " AND n.created_at BETWEEN %(start_date)s AND %(end_date)s"
+            claim_count_query += " AND vc.created_at BETWEEN %(start_date)s AND %(end_date)s"
+            params["start_date"] = start_date
+            params["end_date"] = end_date
+        elif start_date:
+            narrative_count_query += " AND n.created_at >= %(start_date)s"
+            claim_count_query += " AND vc.created_at >= %(start_date)s"
+            params["start_date"] = start_date
+        elif end_date:
+            narrative_count_query += " AND n.created_at <= %(end_date)s"
+            claim_count_query += " AND vc.created_at <= %(end_date)s"
+            params["end_date"] = end_date
+
         # Get topics with stats
         await self._session.execute(
-            """
+            f"""
             SELECT
                 t.*,
-                (SELECT COUNT(*) FROM narrative_topics nt WHERE nt.topic_id = t.id) AS narrative_count,
-                (SELECT COUNT(*) from claim_topics nt WHERE nt.topic_id = t.id) AS claim_count
+                ({narrative_count_query}) AS narrative_count,
+                ({claim_count_query}) AS claim_count
             FROM topics t
             ORDER BY t.topic
             LIMIT %(limit)s OFFSET %(offset)s
             """,
-            {"limit": limit, "offset": offset},
+            params,
         )
         topics = [TopicWithStats(**row) for row in await self._session.fetchall()]
         return topics, total

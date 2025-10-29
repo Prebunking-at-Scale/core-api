@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -6,6 +7,7 @@ from litestar.di import Provide
 from litestar.exceptions import NotFoundException
 from litestar.params import Parameter
 
+from core.auth.guards import super_admin
 from core.errors import ConflictError
 from core.models import Narrative
 from core.narratives.models import NarrativeInput, NarrativePatchInput
@@ -33,6 +35,7 @@ class NarrativeController(Controller):
         summary="Create a new narrative",
         return_dto=None,
         raises=[ConflictError],
+        guards=[super_admin],
     )
     async def create_narrative(
         self,
@@ -64,11 +67,24 @@ class NarrativeController(Controller):
         offset: int = 0,
         topic_id: UUID | None = None,
         entity_id: UUID | None = None,
-        video_language: str | None = Parameter(None, query="video_language", description="Filter narratives by language of associated videos"),
         text: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+        first_content_start: datetime | None = None,
+        first_content_end: datetime | None = None,
+        video_language: str | None = None,
     ) -> PaginatedJSON[list[Narrative]]:
         narratives, total = await narrative_service.get_all_narratives(
-            limit=limit, offset=offset, topic_id=topic_id, entity_id=entity_id, text=text, video_language=video_language
+            limit=limit,
+            offset=offset,
+            topic_id=topic_id,
+            entity_id=entity_id,
+            text=text,
+            start_date=start_date,
+            end_date=end_date,
+            first_content_start=first_content_start,
+            first_content_end=first_content_end,
+            video_language=video_language,
         )
         page = (offset // limit) + 1 if limit > 0 else 1
         return PaginatedJSON(
@@ -93,7 +109,7 @@ class NarrativeController(Controller):
         narrative_service: NarrativeService,
         limit: int = 100,
         offset: int = 0,
-        hours: int = 24,
+        hours: int | None = None,
     ) -> JSON[list[Narrative]]:
         return JSON(
             await narrative_service.get_viral_narratives(
@@ -110,7 +126,7 @@ class NarrativeController(Controller):
         narrative_service: NarrativeService,
         limit: int = 100,
         offset: int = 0,
-        hours: int = 24,
+        hours: int | None = None,
     ) -> JSON[list[Narrative]]:
         return JSON(
             await narrative_service.get_prevalent_narratives(
@@ -122,6 +138,7 @@ class NarrativeController(Controller):
         path="/{narrative_id:uuid}",
         summary="Update a narrative",
         return_dto=None,
+        guards=[super_admin],
     )
     async def update_narrative(
         self,
@@ -137,6 +154,7 @@ class NarrativeController(Controller):
     @patch(
         path="/{narrative_id:uuid}/metadata",
         summary="Update the metadata for a narrative",
+        guards=[super_admin],
     )
     async def patch_narrative_metadata(
         self,
@@ -149,6 +167,7 @@ class NarrativeController(Controller):
     @delete(
         path="/{narrative_id:uuid}",
         summary="Delete a specific narrative",
+        guards=[super_admin],
     )
     async def delete_narrative(
         self,
