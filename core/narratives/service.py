@@ -91,7 +91,7 @@ class NarrativeService:
         end_date: datetime | None = None,
         first_content_start: datetime | None = None,
         first_content_end : datetime | None = None,
-        video_language: str | None = None,
+        language: str | None = None,
     ) -> tuple[list[Narrative], int]:
         async with self.repo() as repo:
             narratives = await repo.get_all_narratives(
@@ -104,7 +104,7 @@ class NarrativeService:
                 end_date=end_date,
                 first_content_start=first_content_start,
                 first_content_end=first_content_end,
-                video_language=video_language
+                language=language
             )
             total = await repo.count_all_narratives(
                 topic_id=topic_id,
@@ -114,7 +114,7 @@ class NarrativeService:
                 end_date=end_date,
                 first_content_start=first_content_start,
                 first_content_end=first_content_end,
-                video_language=video_language
+                language=language
             )
             return narratives, total
 

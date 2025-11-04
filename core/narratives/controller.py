@@ -72,7 +72,7 @@ class NarrativeController(Controller):
         end_date: datetime | None = None,
         first_content_start: datetime | None = None,
         first_content_end: datetime | None = None,
-        video_language: str | None = None,
+        language: str | None = None,
     ) -> PaginatedJSON[list[Narrative]]:
         narratives, total = await narrative_service.get_all_narratives(
             limit=limit,
@@ -84,7 +84,7 @@ class NarrativeController(Controller):
             end_date=end_date,
             first_content_start=first_content_start,
             first_content_end=first_content_end,
-            video_language=video_language,
+            language=language,
         )
         page = (offset // limit) + 1 if limit > 0 else 1
         return PaginatedJSON(

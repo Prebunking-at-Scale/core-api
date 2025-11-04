@@ -179,7 +179,7 @@ class VideoRepository:
         platform: str | None = None,
         channel: str | None = None,
         text: str | None = None,
-        video_language: str | None = None,
+        language: str | None = None,
     ) -> tuple[list[Video], int]:
         wheres = [sql.SQL("1=1")]
         params: dict[str, Any] = {"limit": limit, "offset": offset}
@@ -196,9 +196,9 @@ class VideoRepository:
             wheres.append(sql.SQL("(LOWER(title) LIKE LOWER(%(text)s) OR LOWER(description) LIKE LOWER(%(text)s))"))
             params["text"] = f"%{text}%"
 
-        if video_language:
-            wheres.append(sql.SQL("metadata->>'language' = %(video_language)s"))
-            params["video_language"] = video_language
+        if language:
+            wheres.append(sql.SQL("metadata->>'language' = %(language)s"))
+            params["language"] = language
 
         where_clause = sql.Composed(wheres).join(" AND ")
 

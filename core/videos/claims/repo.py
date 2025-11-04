@@ -259,7 +259,7 @@ class ClaimRepository:
         offset: int = 0,
         topic_id: UUID | None = None,
         text: str | None = None,
-        video_language: str | None = None,
+        language: str | None = None,
         min_score: float | None = None,
         max_score: float | None = None,
     ) -> tuple[list[EnrichedClaim], int]:
@@ -284,10 +284,9 @@ class ClaimRepository:
             where_conditions.append("(c.metadata->>'score')::float <= %(max_score)s")
             params["max_score"] = max_score
 
-        if video_language:
-            joins.append("JOIN videos v ON c.video_id = v.id ")
-            where_conditions.append("v.metadata->>'language' = %(video_language)s")
-            params["video_language"] = video_language
+        if language:
+            where_conditions.append("c.metadata->>'language' = %(language)s")
+            params["language"] = language
 
         where_clause = (
             "WHERE " + " AND ".join(where_conditions) if where_conditions else ""
