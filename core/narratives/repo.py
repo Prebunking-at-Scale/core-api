@@ -250,9 +250,8 @@ class NarrativeRepository:
             query += """
                 INNER JOIN claim_narratives cn ON n.id = cn.narrative_id
                 INNER JOIN video_claims vc ON cn.claim_id = vc.id
-                INNER JOIN videos v ON vc.video_id = v.id
             """
-            where_conditions.append("v.metadata->>'language' = %(language)s")
+            where_conditions.append("vc.metadata->>'language' = %(language)s")
             params["language"] = language
 
         if text:
