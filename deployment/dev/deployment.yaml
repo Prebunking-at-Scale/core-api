@@ -43,6 +43,8 @@ spec:
           env:
             - name: APP_BASE_URL
               value: https://pas-dev.fullfact.org
+            - name: VIDEO_STORAGE_BUCKET_NAME
+              value: pas-prototyping-storage
             - name: DATABASE_HOST
               value: 127.0.0.1
             - name: DATABASE_PORT
