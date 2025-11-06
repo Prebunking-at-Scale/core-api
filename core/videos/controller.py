@@ -1,6 +1,7 @@
 import logging
 import os
 from uuid import UUID
+from collections import Counter
 
 import httpx
 from harmful_claim_finder.transcript_inference import get_claims
@@ -71,13 +72,14 @@ async def extract_transcript_and_claims(
         return
 
     result = await genai.generate_transcript(video.source_url)
-    sentences = [TranscriptSentence(**x.model_dump()) for x in result]
-    all_text = " ".join([s.text for s in sentences])
-    overall_language: str | None = (
-        language_id.predict_language(all_text) if all_text.strip() else None
-    )
-    for sentence in sentences:
-        sentence.metadata["language"] = language_id.predict_language(sentence.text)
+    sentences = [
+        TranscriptSentence(**x.model_dump(), metadata={"language": x.language})
+        for x in result
+    ]
+    all_languages = [s.language for s in result]
+    language_counts = Counter(all_languages)
+    most_common: str = language_counts.most_common(1)[0][0]
+    overall_language: str | None = most_common if sentences else None
 
     if sentences:
         transcript = Transcript(video_id=video.id, sentences=sentences)
@@ -151,12 +153,14 @@ async def analyze_for_narratives(video: Video, video_claims: list[Claim]) -> Non
 
     claims_data = []
     for claim in video_claims:
-        claims_data.append({
-            "id": str(claim.id),
-            "claim": claim.claim,
-            "score": claim.metadata.get("score", 0),
-            "video_id": str(video.id),
-        })
+        claims_data.append(
+            {
+                "id": str(claim.id),
+                "claim": claim.claim,
+                "score": claim.metadata.get("score", 0),
+                "video_id": str(video.id),
+            }
+        )
 
     payload = {"claims": claims_data}
 
