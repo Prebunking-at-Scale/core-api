@@ -242,6 +242,7 @@ class VideoController(Controller):
         platform: str | None = Parameter(None, query="platform"),
         channel: str | None = Parameter(None, query="channel"),
         text: str | None = Parameter(None, query="text"),
+        language: str | None = Parameter(None, query="language"),
         limit: int = Parameter(25, query="limit", gt=0, le=100),
         offset: int = Parameter(0, query="offset", ge=0),
     ) -> PaginatedJSON[list[AnalysedVideo]]:
@@ -251,6 +252,7 @@ class VideoController(Controller):
             platform=platform,
             channel=channel,
             text=text,
+            language=language,
         )
 
         # Fetch claims and narratives for each video

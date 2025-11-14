@@ -146,30 +146,113 @@ class NarrativeRepository:
         end_date: datetime | None = None,
         first_content_start: datetime | None = None,
         first_content_end: datetime | None = None,
-    ) -> tuple[list[Narrative], int]:
-        select_distinct_statement = """SELECT DISTINCT n.* FROM narratives n"""
-        select_count_statement = """SELECT COUNT(DISTINCT n.id) FROM narratives n"""
-        query = ''
+        language: str | None = None,
+    ) -> list[Narrative]:
+        query = """
+            SELECT DISTINCT n.* FROM narratives n
+        """
+
+        where_statement, params = self._build_get_all_narratives_where_statement(
+            topic_id=topic_id,
+            entity_id=entity_id,
+            language=language,
+            text=text,
+            start_date=start_date,
+            end_date=end_date,
+            first_content_start=first_content_start,
+            first_content_end=first_content_end,
+        )
+
+        query += where_statement
+
+        query += """
+            ORDER BY n.created_at DESC
+            LIMIT %(limit)s OFFSET %(offset)s
+        """
+        params["limit"] = limit
+        params["offset"] = offset
+
+        await self._session.execute(query, params)
+        rows = await self._session.fetchall()
+
+        narratives = []
+        for row in rows:
+            claims = await self._get_narrative_claims(row["id"])
+            topics = await self._get_narrative_topics(row["id"])
+            entities = await self._get_narrative_entities(row["id"])
+            videos = await self._get_narrative_videos(row["id"])
+            narratives.append(
+                Narrative(**row, claims=claims, topics=topics, entities=entities, videos=videos)
+            )
+
+        return narratives
+
+    async def count_all_narratives(
+        self,
+        topic_id: UUID | None = None,
+        entity_id: UUID | None = None,
+        language: str | None = None,
+        text: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+        first_content_start: datetime | None = None,
+        first_content_end: datetime | None = None,
+    ) -> int:
+        query = """
+            SELECT COUNT(DISTINCT n.id) FROM narratives n
+        """
+        where_statement, params = self._build_get_all_narratives_where_statement(
+            topic_id=topic_id,
+            entity_id=entity_id,
+            language=language,
+            text=text,
+            start_date=start_date,
+            end_date=end_date,
+            first_content_start=first_content_start,
+            first_content_end=first_content_end,
+        )
+        query += where_statement
+
+        await self._session.execute(query, params)
+        row = await self._session.fetchone()
+        return row["count"] if row else 0
+
+    def _build_get_all_narratives_where_statement(
+        self,
+        topic_id: UUID | None = None,
+        entity_id: UUID | None = None,
+        language: str | None = None,
+        text: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+        first_content_start: datetime | None = None,
+        first_content_end: datetime | None = None,
+    ) -> tuple[str, dict[str, int | UUID | str | datetime]]:
+
+        query = ""
+        where_conditions = []
+        params: dict[str, int | UUID | str | datetime] = {}
 
         if topic_id:
             query += """
                 INNER JOIN narrative_topics nt ON n.id = nt.narrative_id
             """
+            where_conditions.append("nt.topic_id = %(topic_id)s")
+            params["topic_id"] = topic_id
         if entity_id:
             query += """
                 INNER JOIN narrative_entities ne ON n.id = ne.narrative_id
             """
-
-        where_conditions = []
-        params: dict[str, int | UUID | str | datetime] = {"limit": limit, "offset": offset}
-
-        if topic_id:
-            where_conditions.append("nt.topic_id = %(topic_id)s")
-            params["topic_id"] = topic_id
-
-        if entity_id:
             where_conditions.append("ne.entity_id = %(entity_id)s")
             params["entity_id"] = entity_id
+
+        if language:
+            query += """
+                INNER JOIN claim_narratives cn ON n.id = cn.narrative_id
+                INNER JOIN video_claims vc ON cn.claim_id = vc.id
+            """
+            where_conditions.append("vc.metadata->>'language' = %(language)s")
+            params["language"] = language
 
         if text:
             where_conditions.append(
@@ -177,7 +260,6 @@ class NarrativeRepository:
             )
             params["text"] = f"%{text}%"
 
-        # Added filtering for start_date and end_date
         if start_date:
             where_conditions.append("n.created_at >= %(start_date)s")
             params["start_date"] = start_date
@@ -186,7 +268,6 @@ class NarrativeRepository:
             params["end_date"] = end_date
 
         if first_content_start or first_content_end:
-            # Filter narratives by their oldest video's uploaded date using ROW_NUMBER()
             oldest_video_filter = """
                 n.id IN (
                     SELECT narrative_id
@@ -215,34 +296,11 @@ class NarrativeRepository:
 
             oldest_video_filter += ")"
             where_conditions.append(oldest_video_filter)
-        
+
         if where_conditions:
             query += " WHERE " + " AND ".join(where_conditions)
-            
-        # Get total count
-        await self._session.execute(select_count_statement + query, params)
-        total_row = await self._session.fetchone()
-        total = total_row["count"] if total_row else 0
 
-        # Get paginated narratives
-        query += """
-            ORDER BY n.created_at DESC
-            LIMIT %(limit)s OFFSET %(offset)s
-        """
-        await self._session.execute(select_distinct_statement + query, params)
-        rows = await self._session.fetchall()
-
-        narratives = []
-        for row in rows:
-            claims = await self._get_narrative_claims(row["id"])
-            topics = await self._get_narrative_topics(row["id"])
-            entities = await self._get_narrative_entities(row["id"])
-            videos = await self._get_narrative_videos(row["id"])
-            narratives.append(
-                Narrative(**row, claims=claims, topics=topics, entities=entities, videos=videos)
-            )
-
-        return narratives, total
+        return query, params
 
     async def update_narrative(
         self,

@@ -259,16 +259,17 @@ class ClaimRepository:
         offset: int = 0,
         topic_id: UUID | None = None,
         text: str | None = None,
+        language: str | None = None,
         min_score: float | None = None,
         max_score: float | None = None,
     ) -> tuple[list[EnrichedClaim], int]:
         # Build the query conditionally
         where_conditions = []
-        join_clause = " "
+        joins = [" "]
         params: dict[str, int | UUID | str | float] = {"limit": limit, "offset": offset}
 
         if topic_id:
-            join_clause = " JOIN claim_topics ct ON c.id = ct.claim_id AND ct.topic_id = %(topic_id)s "
+            joins.append("JOIN claim_topics ct ON c.id = ct.claim_id AND ct.topic_id = %(topic_id)s ")
             params["topic_id"] = topic_id
 
         if text:
@@ -283,9 +284,14 @@ class ClaimRepository:
             where_conditions.append("(c.metadata->>'score')::float <= %(max_score)s")
             params["max_score"] = max_score
 
+        if language:
+            where_conditions.append("c.metadata->>'language' = %(language)s")
+            params["language"] = language
+
         where_clause = (
             "WHERE " + " AND ".join(where_conditions) if where_conditions else ""
         )
+        join_clause = " ".join(joins)
 
         # Get total count
         count_query = f"""

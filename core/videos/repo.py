@@ -8,6 +8,7 @@ from psycopg.types.json import Jsonb
 
 from core.analysis import embedding
 from core.errors import ConflictError
+from core.languages.models import LanguageWithVideoCount
 from core.models import Narrative, Video
 from core.videos.models import VideoFilters
 
@@ -178,6 +179,7 @@ class VideoRepository:
         platform: str | None = None,
         channel: str | None = None,
         text: str | None = None,
+        language: str | None = None,
     ) -> tuple[list[Video], int]:
         wheres = [sql.SQL("1=1")]
         params: dict[str, Any] = {"limit": limit, "offset": offset}
@@ -193,6 +195,10 @@ class VideoRepository:
         if text:
             wheres.append(sql.SQL("(LOWER(title) LIKE LOWER(%(text)s) OR LOWER(description) LIKE LOWER(%(text)s))"))
             params["text"] = f"%{text}%"
+
+        if language:
+            wheres.append(sql.SQL("metadata->>'language' = %(language)s"))
+            params["language"] = language
 
         where_clause = sql.Composed(wheres).join(" AND ")
 
@@ -233,3 +239,16 @@ class VideoRepository:
             {"video_id": video_id},
         )
         return [Narrative(**row) for row in await self._session.fetchall()]
+
+    async def get_languages_associated_with_videos(self) -> list[LanguageWithVideoCount]:
+        await self._session.execute(
+            """
+            SELECT metadata->>'language' as language, count(*)
+            FROM videos
+            WHERE metadata ? 'language'
+            GROUP BY metadata->>'language'
+            ORDER BY count(*) DESC
+            """,
+        )
+        rows = await self._session.fetchall()
+        return [LanguageWithVideoCount(**row) for row in rows]
