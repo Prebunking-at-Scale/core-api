@@ -17,7 +17,12 @@ from litestar.params import Parameter
 
 from core.analysis import genai, language_id
 from core.auth.guards import super_admin
-from core.config import APP_BASE_URL, NARRATIVES_API_KEY, NARRATIVES_BASE_URL
+from core.config import (
+    APP_BASE_URL,
+    NARRATIVES_API_KEY,
+    NARRATIVES_BASE_URL,
+    VIDEO_STORAGE_BUCKET_NAME,
+)
 from core.errors import ConflictError
 from core.media_feeds.service import MediaFeedsService
 from core.models import Claim, Transcript, TranscriptSentence, Video
@@ -67,10 +72,16 @@ async def extract_transcript_and_claims(
         # We don't want to run this during tests
         return
 
-    if video.platform.lower() != "youtube":
+    if not VIDEO_STORAGE_BUCKET_NAME:
+        log.warning("VIDEO_STORAGE_BUCKET_NAME not set - skipping video analysis")
         return
 
-    result = await genai.generate_transcript(video.source_url)
+    if not video.destination_path:
+        log.warning("skipping video without destination path")
+        return
+
+    video_path = f"gs://{VIDEO_STORAGE_BUCKET_NAME}/{video.destination_path}"
+    result = await genai.generate_transcript(video_path)
     sentences = [TranscriptSentence(**x.model_dump()) for x in result]
     all_text = " ".join([s.text for s in sentences])
     overall_language: str | None = (

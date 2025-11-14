@@ -15,6 +15,9 @@ DEV_MODE = os.environ.get("DEVELOPMENT_MODE", "prod") == "dev"
 # https://pas.fullfact.org
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "")
 
+# The name of the bucket used to store video content
+VIDEO_STORAGE_BUCKET_NAME = os.environ.get("VIDEO_STORAGE_BUCKET_NAME", "")
+
 """database settings"""
 DB_HOST = os.environ.get("DATABASE_HOST", "")
 DB_PORT = os.environ.get("DATABASE_PORT", "")
@@ -52,7 +55,6 @@ i18n.set("filename_format", "{locale}.{format}")
 i18n.set("skip_locale_root_data", True)
 i18n.set("fallback", "en")
 i18n.set("enable_memoization", True)
-
 
 locales_path = "./core/i18n/locales"
 i18n.set("load_path", [locales_path])
