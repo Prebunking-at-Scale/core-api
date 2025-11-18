@@ -14,7 +14,7 @@ from google.genai.types import (
     Part,
     SafetySetting,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 client = genai.Client(
     vertexai=True,
@@ -45,9 +45,20 @@ DEFAULT_SAFETY_SETTINGS = [
 
 
 class Sentence(BaseModel):
-    text: str
-    source: Literal["audio", "video"]
-    start_time_s: float
+    text: str = Field(description="A complete sentence.")
+    source: Literal["audio", "video"] = Field(
+        description=(
+            "The source of the sentence."
+            "'audio' if it's from the audio."
+            "'video' if it was text on the video."
+        )
+    )
+    start_time_s: float = Field(
+        description="Timestamp for when sentence starts, formatted as SS (seconds only)"
+    )
+    language: str = Field(
+        description="Language of the sentence as a two letter ISO language code (e.g. 'en', 'es')"
+    )
 
 
 class RetriesExceededError(Exception):
@@ -56,14 +67,16 @@ class RetriesExceededError(Exception):
 
 async def generate_transcript(video_url: str, retries: int = 3) -> list[Sentence]:
     prompt = """
-Transcribe the audio into sentences, splitting into complete sentences naturally.
-If text is displayed in the video that is in the audio transcript, ignore the text.
-If text is displayed in the video one word at a time, ignore the text.
-For all other text, if it can be combined to form complete sentences, then include the sentences in the transcript.
-For each transcript sentence, set the source to "audio" if it was extracted from the audio, or "video" otherwise.
-Return the transcript in the language it is spoken in the video.
-Do not translate the transcript.
-For each sentence, provide a timestamp formatted as SS (seconds only) using the `start_time_s` field.
+Transcribe the video into sentences by following these steps.
+
+1. Transcribe the audio from the video as a block of text.
+2. Split this text into complete sentences. The "source" value of these sentences should be "audio".
+3. Save any text in the video, and make sentences out of them. The source for these sentences should be "video". Ignore subtitles if the audio is already saved.
+4. Check for any duplicate sentences which appear as both "audio" and "video" sentences. If there are, only keep the "audio" version.
+5. Check that all the sentences are as complete as possible, and merge any partial sentences together.
+6. Sort the sentences by timestamp.
+
+Return the transcript in the language it is spoken in the video. Do not translate the transcript.
 """
     for _ in range(retries):
         try:

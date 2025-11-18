@@ -91,9 +91,10 @@ class NarrativeService:
         end_date: datetime | None = None,
         first_content_start: datetime | None = None,
         first_content_end : datetime | None = None,
+        language: str | None = None,
     ) -> tuple[list[Narrative], int]:
         async with self.repo() as repo:
-            return await repo.get_all_narratives(
+            narratives = await repo.get_all_narratives(
                 limit=limit,
                 offset=offset,
                 topic_id=topic_id,
@@ -103,15 +104,29 @@ class NarrativeService:
                 end_date=end_date,
                 first_content_start=first_content_start,
                 first_content_end=first_content_end,
+                language=language
             )
+            total = await repo.count_all_narratives(
+                topic_id=topic_id,
+                entity_id=entity_id,
+                text=text,
+                start_date=start_date,
+                end_date=end_date,
+                first_content_start=first_content_start,
+                first_content_end=first_content_end,
+                language=language
+            )
+            return narratives, total
 
     async def get_narratives_by_entity(
         self, entity_id: UUID, limit: int = 100, offset: int = 0
     ) -> tuple[list[Narrative], int]:
         async with self.repo() as repo:
-            return await repo.get_all_narratives(
+            narratives = await repo.get_all_narratives(
                 limit=limit, offset=offset, entity_id=entity_id
             )
+            total = await repo.count_all_narratives(entity_id=entity_id)
+            return narratives, total
 
     async def update_narrative(
         self,
