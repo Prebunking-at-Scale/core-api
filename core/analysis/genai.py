@@ -45,7 +45,11 @@ DEFAULT_SAFETY_SETTINGS = [
 
 
 class Sentence(BaseModel):
-    text: str = Field(description="A complete sentence.")
+    text: str = Field(
+        description=(
+            "A complete sentence. " "Do not translate from its original language."
+        )
+    )
     source: Literal["audio", "video"] = Field(
         description=(
             "The source of the sentence."
@@ -74,9 +78,13 @@ Transcribe the video into sentences by following these steps.
 3. Save any text in the video, and make sentences out of them. The source for these sentences should be "video". Ignore subtitles if the audio is already saved.
 4. Check for any duplicate sentences which appear as both "audio" and "video" sentences. If there are, only keep the "audio" version.
 5. Check that all the sentences are as complete as possible, and merge any partial sentences together.
-6. Sort the sentences by timestamp.
+6. Sort the sentences so they appear in the same order as in the video.
 
-Return the transcript in the language it is spoken in the video. Do not translate the transcript.
+Do not transcribe the lyrics of background music in the videos.
+
+Only include content from inside the video. Do not create any new content.
+
+Each sentence should be in the same language as it appears or is spoken in the video. Do not translate the transcript.
 """
     for _ in range(retries):
         try:
