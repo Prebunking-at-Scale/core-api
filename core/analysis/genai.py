@@ -1,6 +1,7 @@
 import asyncio
 import os
 import random
+import logging
 from typing import Literal
 
 from google import genai
@@ -15,6 +16,8 @@ from google.genai.types import (
     SafetySetting,
 )
 from pydantic import BaseModel, Field
+
+log = logging.getLogger(__name__)
 
 client = genai.Client(
     vertexai=True,
@@ -116,7 +119,8 @@ Each sentence should be in the same language as it appears or is spoken in the v
                 )
             return response.parsed
 
-        except Exception:
+        except Exception as exc:
+            log.info("Encountered an error during transcription: " + repr(exc))
             await asyncio.sleep(random.randint(5, 30))
             continue
 
