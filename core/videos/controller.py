@@ -3,7 +3,7 @@ import os
 from uuid import UUID
 
 import httpx
-from harmful_claim_finder.transcript_inference import get_claims
+from harmful_claim_finder.transcript_search import get_claims
 from harmful_claim_finder.utils.models import (
     TranscriptSentence as HarmfulClaimFinderSentence,
 )
@@ -115,7 +115,7 @@ async def extract_transcript_and_claims(
 
             claims = await get_claims(
                 keywords=keywords,
-                sentences=[
+                transcript=[
                     HarmfulClaimFinderSentence(
                         **(s.model_dump() | {"video_id": video.id})
                     )
@@ -162,12 +162,14 @@ async def analyze_for_narratives(video: Video, video_claims: list[Claim]) -> Non
 
     claims_data = []
     for claim in video_claims:
-        claims_data.append({
-            "id": str(claim.id),
-            "claim": claim.claim,
-            "score": claim.metadata.get("score", 0),
-            "video_id": str(video.id),
-        })
+        claims_data.append(
+            {
+                "id": str(claim.id),
+                "claim": claim.claim,
+                "score": claim.metadata.get("score", 0),
+                "video_id": str(video.id),
+            }
+        )
 
     payload = {"claims": claims_data}
 
