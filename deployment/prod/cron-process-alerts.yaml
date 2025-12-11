@@ -1,0 +1,90 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: core-api-process-alerts
+  labels:
+    app: core-api
+    component: alerts-processor
+spec:
+  schedule: "0 */4 * * *" # Every 4 hours at minute 0
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 12
+  failedJobsHistoryLimit: 12
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: process-alerts
+            component: alerts-processor
+        spec:
+          serviceAccountName: workload-identity-sa
+          restartPolicy: Never
+          initContainers:
+            - name: cloud-sql-proxy
+              restartPolicy: Always
+              image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.17.1
+              args:
+                - "--private-ip"
+                - "--auto-iam-authn"
+                - "--structured-logs"
+                - "--port=5432"
+                - "pas-production-1:europe-west4:pas-vectordb-instance"
+              securityContext:
+                runAsNonRoot: true
+          containers:
+            - name: process-alerts
+              image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api:v1.16.0
+              imagePullPolicy: Always
+              command: ["/bin/sh", "-c"]
+              args: ["uv run python -m core.cli process-alerts"]
+              resources:
+                requests:
+                  cpu: 500m
+                  memory: 1G
+                limits:
+                  cpu: 1
+                  memory: 2G
+              env:
+                - name: APP_BASE_URL
+                  value: https://prebunking.efcsn.com
+                - name: VIDEO_STORAGE_BUCKET_NAME
+                  value: pas-production-storage
+                - name: DATABASE_HOST
+                  value: 127.0.0.1
+                - name: DATABASE_PORT
+                  value: "5432"
+                - name: DATABASE_USER
+                  value: prebunker
+                - name: DATABASE_NAME
+                  value: pas-vectordb
+                - name: DATABASE_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: db
+                      key: password
+                - name: JWT_SECRET
+                  valueFrom:
+                    secretKeyRef:
+                      name: jwt
+                      key: secret
+                - name: API_KEYS
+                  valueFrom:
+                    secretKeyRef:
+                      name: core-api-keys
+                      key: keys
+                - name: EMAIL_FROM
+                  value: "auto@fullfact.org"
+                - name: NARRATIVES_BASE_ENDPOINT
+                  value: https://pas-narratives.fundacionmaldita.es
+                - name: NARRATIVES_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: narratives
+                      key: api-key
+                - name: GEMINI_PROJECT
+                  value: pas-production-1
+                - name: GEMINI_LOCATION
+                  value: global
+                - name: GEMINI_MODEL
+                  value: gemini-2.5-flash-lite
