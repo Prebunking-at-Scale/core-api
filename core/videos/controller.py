@@ -4,7 +4,7 @@ from uuid import UUID
 from collections import Counter
 
 import httpx
-from harmful_claim_finder.transcript_inference import get_claims
+from harmful_claim_finder.transcript_search import get_claims
 from harmful_claim_finder.utils.models import (
     TranscriptSentence as HarmfulClaimFinderSentence,
 )
@@ -117,7 +117,7 @@ async def extract_transcript_and_claims(
 
             claims = await get_claims(
                 keywords=keywords,
-                sentences=[
+                transcript=[
                     HarmfulClaimFinderSentence(
                         **(s.model_dump() | {"video_id": video.id})
                     )
