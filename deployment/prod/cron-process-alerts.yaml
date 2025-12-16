@@ -75,6 +75,17 @@ spec:
                       key: keys
                 - name: EMAIL_FROM
                   value: "auto@fullfact.org"
+                - name: SMTP_HOST
+                  value: smtp.gmail.com
+                - name: SMTP_PORT
+                  value: "465"
+                - name: SMTP_USERNAME
+                  value: "auto@fullfact.org"
+                - name: SMTP_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: smtp-details
+                      key: password
                 - name: NARRATIVES_BASE_ENDPOINT
                   value: https://pas-narratives.fundacionmaldita.es
                 - name: NARRATIVES_API_KEY
