@@ -55,8 +55,8 @@ class Sentence(BaseModel):
     )
     source: Literal["audio", "video"] = Field(
         description=(
-            "The source of the sentence."
-            "'audio' if it's from the audio."
+            "The source of the sentence. "
+            "'audio' if it's from the audio. "
             "'video' if it was text on the video."
         )
     )
