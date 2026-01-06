@@ -227,7 +227,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.1.0" },
     { name = "email-validator", specifier = ">=2.2.0" },
     { name = "google-genai", specifier = ">=1.25.0" },
-    { name = "harmful-claim-finder", git = "https://github.com/Prebunking-at-Scale/harmful-claim-finder.git?tag=v0.4.2" },
+    { name = "harmful-claim-finder", git = "https://github.com/Prebunking-at-Scale/harmful-claim-finder.git?tag=v0.5.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "langid", specifier = ">=1.1.6" },
     { name = "litestar", extras = ["jwt", "opentelemetry", "pydantic", "standard", "structlog"], specifier = ">=2.16.0" },
@@ -443,7 +443,7 @@ wheels = [
 [[package]]
 name = "genai-utils"
 version = "0.0.1"
-source = { git = "https://github.com/FullFact/genai-utils.git?tag=5.0.0#0a689e2a20bd32e09f1bb0d0543e2ba969392965" }
+source = { git = "https://github.com/FullFact/genai-utils.git?tag=5.2.0#da1638fde3e86c770f51d2aec7405f1f17cb303b" }
 dependencies = [
     { name = "google-cloud-core" },
     { name = "google-genai" },
@@ -590,7 +590,7 @@ wheels = [
 [[package]]
 name = "harmful-claim-finder"
 version = "0.0.1"
-source = { git = "https://github.com/Prebunking-at-Scale/harmful-claim-finder.git?tag=v0.4.2#7ed72e1e0e147039882bbf218a299d76896c3f22" }
+source = { git = "https://github.com/Prebunking-at-Scale/harmful-claim-finder.git?tag=v0.5.0#4dd1cee2d775791538d4b40f4310a114b39d7aee" }
 dependencies = [
     { name = "genai-utils" },
     { name = "google-cloud-storage" },
@@ -1134,7 +1134,7 @@ wheels = [
 [[package]]
 name = "pastel"
 version = "0.0.1"
-source = { git = "https://github.com/FullFact/pastel.git?tag=v0.7.0#f4fd60a8a7bdc701e78b7fd94d5ed9b4477d996a" }
+source = { git = "https://github.com/FullFact/pastel.git?tag=1.3.0#c50095f2d8e88595f2a627f85f34deba9b702d0a" }
 dependencies = [
     { name = "genai-utils" },
     { name = "google-cloud-core" },
