@@ -1,10 +1,10 @@
 import logging
 import os
-from urllib.parse import urljoin
 from uuid import UUID
+from collections import Counter
 
 import httpx
-from harmful_claim_finder.transcript_inference import get_claims
+from harmful_claim_finder.transcript_search import get_claims
 from harmful_claim_finder.utils.models import (
     TranscriptSentence as HarmfulClaimFinderSentence,
 )
@@ -18,8 +18,14 @@ from litestar.params import Parameter
 
 from core.analysis import genai, language_id
 from core.auth.guards import super_admin
-from core.config import APP_BASE_URL, NARRATIVES_API_KEY, NARRATIVES_BASE_URL
+from core.config import (
+    APP_BASE_URL,
+    NARRATIVES_API_KEY,
+    NARRATIVES_BASE_URL,
+    VIDEO_STORAGE_BUCKET_NAME,
+)
 from core.errors import ConflictError
+from core.media_feeds.service import MediaFeedsService
 from core.models import Claim, Transcript, TranscriptSentence, Video
 from core.narratives.service import NarrativeService
 from core.response import JSON, CursorJSON, PaginatedJSON
@@ -30,7 +36,6 @@ from core.videos.models import (
     VideoFilters,
     VideoPatch,
 )
-from core.videos.pastel import KEYWORDS
 from core.videos.service import VideoService
 from core.videos.transcripts.service import TranscriptService
 
@@ -53,27 +58,39 @@ async def narrative_service(state: State) -> NarrativeService:
     return NarrativeService(state.connection_factory)
 
 
+async def media_feeds_service(state: State) -> MediaFeedsService:
+    return MediaFeedsService(state.connection_factory)
+
+
 async def extract_transcript_and_claims(
     video: Video,
     video_service: VideoService,
     transcript_service: TranscriptService,
     claims_service: ClaimsService,
+    media_feeds_service: MediaFeedsService,
 ) -> None:
     if "PYTEST_CURRENT_TEST" in os.environ:
         # We don't want to run this during tests
         return
 
-    if video.platform.lower() != "youtube":
+    if not VIDEO_STORAGE_BUCKET_NAME:
+        log.warning("VIDEO_STORAGE_BUCKET_NAME not set - skipping video analysis")
         return
 
-    result = await genai.generate_transcript(video.source_url)
-    sentences = [TranscriptSentence(**x.model_dump()) for x in result]
-    all_text = " ".join([s.text for s in sentences])
-    overall_language: str | None = (
-        language_id.predict_language(all_text) if all_text.strip() else None
-    )
-    for sentence in sentences:
-        sentence.metadata["language"] = language_id.predict_language(sentence.text)
+    if not video.destination_path:
+        log.warning("skipping video without destination path")
+        return
+
+    video_path = f"gs://{VIDEO_STORAGE_BUCKET_NAME}/{video.destination_path}"
+    result = await genai.generate_transcript(video_path)
+    sentences = [
+        TranscriptSentence(**x.model_dump(), metadata={"language": x.language})
+        for x in result
+    ]
+    all_languages = [s.language for s in result]
+    language_counts = Counter(all_languages)
+    most_common: str = language_counts.most_common(1)[0][0]
+    overall_language: str | None = most_common if sentences else None
 
     if sentences:
         transcript = Transcript(video_id=video.id, sentences=sentences)
@@ -91,14 +108,16 @@ async def extract_transcript_and_claims(
     all_claims: list[Claim] = []
     for org in orgs:
         try:
-            keywords = KEYWORDS.get(org)
+            org_uuid = UUID(org)
+            keyword_feeds = await media_feeds_service.get_keyword_feeds(org_uuid)
+            keywords = {feed.topic: feed.keywords for feed in keyword_feeds}
             if not keywords:
                 log.error(f"org {org} not found")
                 continue
 
             claims = await get_claims(
                 keywords=keywords,
-                sentences=[
+                transcript=[
                     HarmfulClaimFinderSentence(
                         **(s.model_dump() | {"video_id": video.id})
                     )
@@ -145,12 +164,14 @@ async def analyze_for_narratives(video: Video, video_claims: list[Claim]) -> Non
 
     claims_data = []
     for claim in video_claims:
-        claims_data.append({
-            "id": str(claim.id),
-            "claim": claim.claim,
-            "score": claim.metadata.get("score", 0),
-            "video_id": str(video.id),
-        })
+        claims_data.append(
+            {
+                "id": str(claim.id),
+                "claim": claim.claim,
+                "score": claim.metadata.get("score", 0),
+                "video_id": str(video.id),
+            }
+        )
 
     payload = {"claims": claims_data}
 
@@ -183,6 +204,7 @@ class VideoController(Controller):
         "transcript_service": Provide(transcript_service),
         "claims_service": Provide(claims_service),
         "narrative_service": Provide(narrative_service),
+        "media_feeds_service": Provide(media_feeds_service),
     }
 
     @post(
@@ -196,6 +218,7 @@ class VideoController(Controller):
         video_service: VideoService,
         transcript_service: TranscriptService,
         claims_service: ClaimsService,
+        media_feeds_service: MediaFeedsService,
         data: Video,
     ) -> Response[JSON[Video]]:
         video = await video_service.add_video(data)
@@ -207,6 +230,7 @@ class VideoController(Controller):
                 video_service,
                 transcript_service,
                 claims_service,
+                media_feeds_service,
             ),
         )
 
@@ -222,6 +246,7 @@ class VideoController(Controller):
         platform: str | None = Parameter(None, query="platform"),
         channel: str | None = Parameter(None, query="channel"),
         text: str | None = Parameter(None, query="text"),
+        language: str | None = Parameter(None, query="language"),
         limit: int = Parameter(25, query="limit", gt=0, le=100),
         offset: int = Parameter(0, query="offset", ge=0),
     ) -> PaginatedJSON[list[AnalysedVideo]]:
@@ -231,6 +256,7 @@ class VideoController(Controller):
             platform=platform,
             channel=channel,
             text=text,
+            language=language,
         )
 
         # Fetch claims and narratives for each video
