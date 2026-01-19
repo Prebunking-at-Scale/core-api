@@ -20,6 +20,7 @@ from core.feedback.controller import (
     NarrativeFeedbackController,
     ClaimNarrativeFeedbackController,
 )
+from core.languages.controller import LanguageController
 from core.media_feeds.controller import MediaFeedController
 from core.migrate import migrate
 from core.narratives.controller import NarrativeController
@@ -106,6 +107,7 @@ api_router = Router(
         EntityController,
         NarrativeFeedbackController,
         ClaimNarrativeFeedbackController,
+        LanguageController,
     ],
 )
 

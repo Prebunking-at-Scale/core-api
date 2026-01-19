@@ -19,7 +19,7 @@ spec:
       serviceAccountName: workload-identity-sa
       containers:
         - name: core-api
-          image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api:v1.1.4
+          image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api:v1.16.0
           imagePullPolicy: Always
           ports:
             - containerPort: 8000
@@ -44,6 +44,8 @@ spec:
           env:
             - name: APP_BASE_URL
               value: https://prebunking.efcsn.com
+            - name: VIDEO_STORAGE_BUCKET_NAME
+              value: pas-production-storage
             - name: DATABASE_HOST
               value: 127.0.0.1
             - name: DATABASE_PORT

@@ -5,6 +5,7 @@ from uuid import UUID
 from litestar import Controller, delete, get, patch, post
 from litestar.di import Provide
 from litestar.exceptions import NotFoundException
+from litestar.params import Parameter
 
 from core.auth.guards import super_admin
 from core.errors import ConflictError
@@ -71,6 +72,7 @@ class NarrativeController(Controller):
         end_date: datetime | None = None,
         first_content_start: datetime | None = None,
         first_content_end: datetime | None = None,
+        language: str | None = None,
     ) -> PaginatedJSON[list[Narrative]]:
         narratives, total = await narrative_service.get_all_narratives(
             limit=limit,
@@ -82,6 +84,7 @@ class NarrativeController(Controller):
             end_date=end_date,
             first_content_start=first_content_start,
             first_content_end=first_content_end,
+            language=language,
         )
         page = (offset // limit) + 1 if limit > 0 else 1
         return PaginatedJSON(

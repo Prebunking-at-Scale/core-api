@@ -51,23 +51,19 @@ in an inconsistent state.
 Once a migration is ready, update `MIGRATION_TARGET_VERSION` in `core/app.py` to match the version you want the database to be at, and it will automatically apply when next run.
 
 ## Deploying
-Builds automatically happen whenever new code is pushed to the `dev` branch, and a new release is made.
+Builds automatically happen whenever new code is pushed to the `main` or `dev` branches, and a new release is made.
 
-Once a build has completed (check [Actions](https://github.com/Prebunking-at-Scale/core-api/actions) on GitHub to verify), you'll need to update the image version. To do this,
-update the `image:` line in `deployment.yaml` so that the version matches the [release](https://github.com/Prebunking-at-Scale/core-api/releases) you want to deploy e.g.:
+Once a build has completed (check [Actions](https://github.com/Prebunking-at-Scale/core-api/actions) on GitHub to verify), you'll need to update the image version.
+
+To do this, `cd deployment/dev` or `cd deployment/prod` depending on where you want to update, and change
+ the `image:` line so that the version matches the [release](https://github.com/Prebunking-at-Scale/core-api/releases) you want to deploy e.g.:
 
 ```
-image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api:v0.5.0-dev.0
-```
-save the file, and make sure you are authenticated against the development cluster:
-
-```bash
-gcloud container clusters get-credentials dev-cluster --project pas-development-1 --location europe-west4-b
+image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api:v0.5.0
 ```
 
-Then change to the deployment folder, and apply the new change:
+To deploy the change, run the login script to make sure you are authenticated against the correct cluster (dev or prod), and use kubectl to apply the change:
 ```
-cd deployment
-
+./login.sh
 kubectl apply -f deployment.yaml
 ```
