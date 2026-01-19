@@ -2,6 +2,7 @@ from uuid import UUID
 
 from litestar import Controller, get, post
 from litestar.di import Provide
+from litestar.exceptions import NotFoundException
 
 from core.auth.models import User
 from core.feedback.models import (
@@ -57,10 +58,12 @@ class NarrativeFeedbackController(Controller):
         feedback_service: FeedbackService,
         user: User,
         narrative_id: UUID,
-    ) -> JSON[NarrativeFeedback | None]:
+    ) -> JSON[NarrativeFeedback]:
         feedback = await feedback_service.get_narrative_feedback(
             user_id=user.id, narrative_id=narrative_id
         )
+        if feedback is None:
+            raise NotFoundException(f"No feedback found for narrative {narrative_id}")
         return JSON(feedback)
 
 
@@ -104,9 +107,13 @@ class ClaimNarrativeFeedbackController(Controller):
         user: User,
         claim_id: UUID,
         narrative_id: UUID,
-    ) -> JSON[ClaimNarrativeFeedback | None]:
+    ) -> JSON[ClaimNarrativeFeedback]:
         feedback = await feedback_service.get_claim_narrative_feedback(
             user_id=user.id, claim_id=claim_id, narrative_id=narrative_id
         )
+        if feedback is None:
+            raise NotFoundException(
+                f"No feedback found for claim {claim_id} and narrative {narrative_id}"
+            )
         return JSON(feedback)
 
