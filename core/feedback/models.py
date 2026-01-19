@@ -1,6 +1,3 @@
-from typing import Literal
-from uuid import UUID
-
 from pydantic import BaseModel, Field
 
 
@@ -18,21 +15,3 @@ class NarrativeFeedbackInput(FeedbackInput):
 class ClaimNarrativeFeedbackInput(FeedbackInput):
     """Input model for submitting claim-narrative feedback"""
     pass
-
-
-class FeedbackResponse(BaseModel):
-    """Response model for feedback queries"""
-    feedback_id: UUID
-    user_id: UUID
-    target_id: UUID
-    target_type: Literal["narrative", "claim", "entity"]
-    feedback_score: float
-    created_at: str
-    updated_at: str
-
-
-class BulkFeedbackResponse(BaseModel):
-    """Response model for bulk feedback operations"""
-    success: bool
-    message: str
-    updated_count: int = 0

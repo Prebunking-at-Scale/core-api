@@ -81,11 +81,6 @@ class FeedbackService:
         async with self.repo() as repo:
             return await repo.get_claim_narrative_feedback(user_id, claim_id, narrative_id)
 
-    # Utility methods
-    async def validate_feedback_score(self, score: float) -> bool:
-        """Validate that feedback score is within acceptable range"""
-        return 0.0 <= score <= 1.0
-
     async def send_feedback_score_to_external_narratives_api(self, narrative_id: UUID, feedback_score: float, content_id: UUID | None = None) -> None:
         """Send feedback score to external analytics service"""
         payload = {
