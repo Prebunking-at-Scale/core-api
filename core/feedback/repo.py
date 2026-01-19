@@ -12,16 +12,17 @@ class FeedbackRepository:
 
     # Narrative feedback methods
     async def submit_narrative_feedback(
-        self, user_id: UUID, narrative_id: UUID, feedback_score: float
+        self, user_id: UUID, narrative_id: UUID, feedback_score: float, feedback_text: str | None = None
     ) -> NarrativeFeedback:
         """Submit or update feedback for a narrative"""
         await self._session.execute(
             """
-            INSERT INTO narrative_feedback (user_id, narrative_id, feedback_score, created_at, updated_at)
-            VALUES (%(user_id)s, %(narrative_id)s, %(feedback_score)s, now(), now())
+            INSERT INTO narrative_feedback (user_id, narrative_id, feedback_score, feedback_text, created_at, updated_at)
+            VALUES (%(user_id)s, %(narrative_id)s, %(feedback_score)s, %(feedback_text)s, now(), now())
             ON CONFLICT (user_id, narrative_id)
-            DO UPDATE SET 
+            DO UPDATE SET
                 feedback_score = EXCLUDED.feedback_score,
+                feedback_text = EXCLUDED.feedback_text,
                 updated_at = now()
             RETURNING *
             """,
@@ -29,6 +30,7 @@ class FeedbackRepository:
                 "user_id": user_id,
                 "narrative_id": narrative_id,
                 "feedback_score": feedback_score,
+                "feedback_text": feedback_text,
             },
         )
         row = await self._session.fetchone()
@@ -52,16 +54,17 @@ class FeedbackRepository:
 
     # Claim-narrative feedback methods
     async def submit_claim_narrative_feedback(
-        self, user_id: UUID, claim_id: UUID, narrative_id: UUID, feedback_score: float
+        self, user_id: UUID, claim_id: UUID, narrative_id: UUID, feedback_score: float, feedback_text: str | None = None
     ) -> ClaimNarrativeFeedback:
         """Submit or update feedback for a claim-narrative relationship"""
         await self._session.execute(
             """
-            INSERT INTO claim_narratives_feedback (user_id, claim_id, narrative_id, feedback_score, created_at, updated_at)
-            VALUES (%(user_id)s, %(claim_id)s, %(narrative_id)s, %(feedback_score)s, now(), now())
+            INSERT INTO claim_narratives_feedback (user_id, claim_id, narrative_id, feedback_score, feedback_text, created_at, updated_at)
+            VALUES (%(user_id)s, %(claim_id)s, %(narrative_id)s, %(feedback_score)s, %(feedback_text)s, now(), now())
             ON CONFLICT (user_id, claim_id, narrative_id)
-            DO UPDATE SET 
+            DO UPDATE SET
                 feedback_score = EXCLUDED.feedback_score,
+                feedback_text = EXCLUDED.feedback_text,
                 updated_at = now()
             RETURNING *
             """,
@@ -70,6 +73,7 @@ class FeedbackRepository:
                 "claim_id": claim_id,
                 "narrative_id": narrative_id,
                 "feedback_score": feedback_score,
+                "feedback_text": feedback_text,
             },
         )
         row = await self._session.fetchone()

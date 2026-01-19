@@ -45,6 +45,7 @@ class NarrativeFeedbackController(Controller):
             user_id=user.id,
             narrative_id=narrative_id,
             feedback_score=data.feedback_score,
+            feedback_text=data.feedback_text,
         )
         return JSON(feedback)
 
@@ -93,6 +94,7 @@ class ClaimNarrativeFeedbackController(Controller):
             claim_id=claim_id,
             narrative_id=narrative_id,
             feedback_score=data.feedback_score,
+            feedback_text=data.feedback_text,
         )
         return JSON(feedback)
 

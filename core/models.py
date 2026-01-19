@@ -82,6 +82,7 @@ class NarrativeFeedback(BaseModel):
     user_id: UUID
     narrative_id: UUID
     feedback_score: float = Field(ge=0.0, le=1.0)
+    feedback_text: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -92,6 +93,7 @@ class ClaimNarrativeFeedback(BaseModel):
     claim_id: UUID
     narrative_id: UUID
     feedback_score: float = Field(ge=0.0, le=1.0)
+    feedback_text: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

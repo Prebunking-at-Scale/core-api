@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS narrative_feedback (
     user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     narrative_id uuid NOT NULL REFERENCES narratives(id) ON DELETE CASCADE,
     feedback_score numeric(3,2) NOT NULL CHECK (feedback_score >= 0.00 AND feedback_score <= 1.00),
+    feedback_text TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id, narrative_id)
@@ -18,6 +19,7 @@ CREATE TABLE IF NOT EXISTS claim_narratives_feedback (
     claim_id uuid NOT NULL REFERENCES video_claims(id) ON DELETE CASCADE,
     narrative_id uuid NOT NULL REFERENCES narratives(id) ON DELETE CASCADE,
     feedback_score numeric(3,2) NOT NULL CHECK (feedback_score >= 0.00 AND feedback_score <= 1.00),
+    feedback_text TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(user_id, claim_id, narrative_id),
