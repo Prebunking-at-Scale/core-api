@@ -588,8 +588,14 @@ class NarrativeRepository:
         self, limit: int = 100, offset: int = 0, hours: int | None = None
     ) -> list[Narrative]:
         # Get narratives with claims from the specified time period, ordered by total video views
-        await self._session.execute(
-            """
+        where_clause = ""
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        
+        if hours is not None:
+            where_clause = "WHERE v.updated_at >= NOW() - (%(hours)s || ' hours')::INTERVAL"
+            params["hours"] = hours
+        
+        query = f"""
             WITH recent_narrative_views AS (
                 SELECT
                     n.id as narrative_id,
@@ -603,7 +609,7 @@ class NarrativeRepository:
                 JOIN claim_narratives cn ON n.id = cn.narrative_id
                 JOIN video_claims c ON cn.claim_id = c.id
                 JOIN videos v ON c.video_id = v.id
-                WHERE %(hours)s IS NULL OR v.updated_at >= NOW() - (%(hours)s || ' hours')::INTERVAL
+                {where_clause}
                 GROUP BY n.id, n.title, n.description, n.metadata, n.created_at, n.updated_at
             )
             SELECT
@@ -617,9 +623,9 @@ class NarrativeRepository:
             FROM recent_narrative_views
             ORDER BY total_views DESC
             LIMIT %(limit)s OFFSET %(offset)s
-            """,
-            {"limit": limit, "offset": offset, "hours": hours},
-        )
+        """
+        
+        await self._session.execute(query, params)
         rows = await self._session.fetchall()
 
         narratives = []
@@ -643,8 +649,14 @@ class NarrativeRepository:
         self, limit: int = 100, offset: int = 0, hours: int | None = None
     ) -> list[Narrative]:
         # Get narratives ordered by the count of associated videos within the specified time period
-        await self._session.execute(
-            """
+        where_clause = ""
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        
+        if hours is not None:
+            where_clause = "WHERE v.updated_at >= NOW() - (%(hours)s || ' hours')::INTERVAL"
+            params["hours"] = hours
+        
+        query = f"""
             WITH narrative_video_counts AS (
                 SELECT
                     n.id as narrative_id,
@@ -658,7 +670,7 @@ class NarrativeRepository:
                 JOIN claim_narratives cn ON n.id = cn.narrative_id
                 JOIN video_claims c ON cn.claim_id = c.id
                 JOIN videos v ON c.video_id = v.id
-                WHERE %(hours)s IS NULL OR v.updated_at >= NOW() - (%(hours)s || ' hours')::INTERVAL
+                {where_clause}
                 GROUP BY n.id, n.title, n.description, n.metadata, n.created_at, n.updated_at
             )
             SELECT
@@ -672,9 +684,9 @@ class NarrativeRepository:
             FROM narrative_video_counts
             ORDER BY video_count DESC
             LIMIT %(limit)s OFFSET %(offset)s
-            """,
-            {"limit": limit, "offset": offset, "hours": hours},
-        )
+        """
+        
+        await self._session.execute(query, params)
         rows = await self._session.fetchall()
 
         narratives = []
