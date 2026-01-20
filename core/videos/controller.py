@@ -300,6 +300,7 @@ class VideoController(Controller):
         transcript = await transcript_service.get_transcript_for_video(video_id)
         claims = await claims_service.get_claims_for_video(video_id)
         narratives = await video_service.get_narratives_for_video(video_id)
+        stats_history = await video_service.get_video_stats_history(video_id)
 
         return JSON(
             AnalysedVideo(
@@ -307,6 +308,7 @@ class VideoController(Controller):
                 transcript=transcript,
                 claims=claims,
                 narratives=narratives,
+                stats_history=stats_history,
             )
         )
 

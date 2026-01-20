@@ -4,7 +4,7 @@ from uuid import UUID
 from litestar.dto import DTOData
 
 from core.languages.models import LanguageWithVideoCount
-from core.models import Narrative, Video
+from core.models import Narrative, Video, VideoStats
 from core.uow import ConnectionFactory, uow
 from core.videos.models import VideoFilters
 from core.videos.repo import VideoRepository
@@ -67,3 +67,7 @@ class VideoService:
     async def get_languages_associated_with_videos(self) -> list[LanguageWithVideoCount]:
         async with self.repo() as repo:
             return await repo.get_languages_associated_with_videos()
+
+    async def get_video_stats_history(self, video_id: UUID) -> list[VideoStats]:
+        async with self.repo() as repo:
+            return await repo.get_video_stats_history(video_id)
