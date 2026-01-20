@@ -54,8 +54,8 @@ class AuthService:
         self, token: AuthToken, connection: ASGIConnection
     ) -> Identity:
         async with self.repo() as repo:
-            if token.token_type != TokenType.AUTH:
-                raise NotAuthorizedError("invalid token type")
+            if token.token_type not in [TokenType.AUTH, TokenType.PASSWORD_RESET]:
+                raise NotAuthorizedError(f"invalid token type: {token.token_type}")
 
             if token.is_api_user:
                 user = await repo.get_user_by_email("api@pas")
