@@ -345,3 +345,19 @@ class VideoController(Controller):
         videos = await video_service.filter_videos(data)
         cursor = videos[-1].id if videos else None
         return CursorJSON(data=videos, cursor=cursor)
+
+    @get(
+        path="/by-expected-views",
+        summary="Get videos ordered by expected views since last stats update",
+    )
+    async def get_videos_by_expected_views(
+        self,
+        video_service: VideoService,
+        limit: int = Parameter(default=20, query="limit", gt=0, le=100),
+        min_age_hours: float = Parameter(default=1.0, query="min_age_hours", ge=0),
+        platform: str | None = Parameter(default=None, query="platform"),
+    ) -> JSON[list[Video]]:
+        videos = await video_service.get_videos_by_expected_views(
+            limit, min_age_hours, platform
+        )
+        return JSON(videos)

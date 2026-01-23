@@ -73,3 +73,9 @@ class VideoService:
     async def get_video_stats_history(self, video_id: UUID) -> list[VideoStats]:
         async with self.repo() as repo:
             return await repo.get_video_stats_history(video_id)
+
+    async def get_videos_by_expected_views(
+        self, limit: int, min_age_hours: float, platform: str | None = None
+    ) -> list[Video]:
+        async with self.repo() as repo:
+            return await repo.get_videos_by_expected_views(limit, min_age_hours, platform)

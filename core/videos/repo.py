@@ -339,3 +339,91 @@ class VideoRepository:
             {"video_id": video_id},
         )
         return [VideoStats(**row) for row in await self._session.fetchall()]
+
+    async def get_videos_by_expected_views(
+        self, limit: int, min_age_hours: float, platform: str | None = None
+    ) -> list[Video]:
+        """Get videos ordered by expected views since last stats update"""
+        params: dict[str, Any] = {
+            "limit": limit,
+            "min_age_seconds": min_age_hours * 3600,
+        }
+
+        platform_filter = sql.SQL("")
+        if platform:
+            platform_filter = sql.SQL("AND LOWER(v.platform) LIKE LOWER(%(platform)s)")
+            params["platform"] = f"%{platform}%"
+
+        query = sql.SQL("""
+            WITH latest_stats AS (
+                SELECT DISTINCT ON (video_id)
+                    video_id,
+                    views,
+                    likes,
+                    comments,
+                    channel_followers,
+                    recorded_at
+                FROM video_stats
+                ORDER BY video_id, recorded_at DESC
+            ),
+            previous_stats AS (
+                SELECT DISTINCT ON (vs.video_id)
+                    vs.video_id,
+                    vs.views as prev_views,
+                    vs.recorded_at as prev_recorded_at
+                FROM video_stats vs
+                INNER JOIN latest_stats ls ON vs.video_id = ls.video_id
+                WHERE vs.recorded_at < ls.recorded_at
+                ORDER BY vs.video_id, vs.recorded_at DESC
+            ),
+            view_rates AS (
+                SELECT
+                    ls.video_id,
+                    ls.views,
+                    ls.likes,
+                    ls.comments,
+                    ls.channel_followers,
+                    ls.recorded_at,
+                    CASE
+                        WHEN ps.prev_views IS NOT NULL
+                             AND EXTRACT(EPOCH FROM (ls.recorded_at - ps.prev_recorded_at)) > 0
+                        THEN (ls.views - ps.prev_views) / EXTRACT(EPOCH FROM (ls.recorded_at - ps.prev_recorded_at))
+                        WHEN v.uploaded_at IS NOT NULL
+                             AND EXTRACT(EPOCH FROM (ls.recorded_at - v.uploaded_at)) > 0
+                        THEN ls.views / EXTRACT(EPOCH FROM (ls.recorded_at - v.uploaded_at))
+                        ELSE 0
+                    END as views_per_second,
+                    EXTRACT(EPOCH FROM (NOW() - ls.recorded_at)) as seconds_since_update
+                FROM latest_stats ls
+                LEFT JOIN previous_stats ps ON ls.video_id = ps.video_id
+                INNER JOIN videos v ON ls.video_id = v.id
+            )
+            SELECT
+                v.id,
+                v.title,
+                v.description,
+                v.platform,
+                v.source_url,
+                v.destination_path,
+                v.uploaded_at,
+                v.channel,
+                v.scrape_topic,
+                v.scrape_keyword,
+                v.metadata,
+                v.created_at,
+                v.updated_at,
+                vr.views,
+                vr.likes,
+                vr.comments,
+                vr.channel_followers,
+                (vr.views_per_second * vr.seconds_since_update) as expected_views
+            FROM videos v
+            INNER JOIN view_rates vr ON v.id = vr.video_id
+            WHERE vr.seconds_since_update >= %(min_age_seconds)s
+            {platform_filter}
+            ORDER BY expected_views DESC
+            LIMIT %(limit)s
+            """).format(platform_filter=platform_filter)
+
+        await self._session.execute(query, params)
+        return [Video(**row) for row in await self._session.fetchall()]

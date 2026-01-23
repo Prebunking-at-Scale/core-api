@@ -244,3 +244,152 @@ async def test_stats_history_preserves_current_stats(
     assert data["likes"] == new_stats["likes"]
     assert data["comments"] == new_stats["comments"]
     assert data["channel_followers"] == new_stats["channel_followers"]
+
+
+async def test_get_videos_by_expected_views_default_limit(
+    api_key_client: AsyncTestClient[Litestar],
+) -> None:
+    response = await api_key_client.get("/api/videos/by-expected-views")
+    assert response.status_code == 200
+    assert "data" in response.json()
+    assert isinstance(response.json()["data"], list)
+
+
+async def test_get_videos_by_expected_views_custom_limit(
+    api_key_client: AsyncTestClient[Litestar],
+) -> None:
+    for i in range(10):
+        video = VideoFactory.build(views=100 * (i + 1))
+        await api_key_client.post("/api/videos/", json=video.model_dump(mode="json"))
+
+    response = await api_key_client.get("/api/videos/by-expected-views?limit=5")
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert len(data) <= 5
+
+
+async def test_get_videos_by_expected_views_ordering(
+    api_key_client: AsyncTestClient[Litestar],
+) -> None:
+    import asyncio
+
+    video1 = VideoFactory.build(views=100)
+    video1_response = await api_key_client.post(
+        "/api/videos/", json=video1.model_dump(mode="json")
+    )
+    assert video1_response.status_code == 201
+
+    await asyncio.sleep(0.1)
+
+    await api_key_client.patch(
+        f"/api/videos/{video1.id}",
+        json={"views": 200},
+    )
+
+    video2 = VideoFactory.build(views=100)
+    video2_response = await api_key_client.post(
+        "/api/videos/", json=video2.model_dump(mode="json")
+    )
+    assert video2_response.status_code == 201
+
+    await asyncio.sleep(0.1)
+
+    await api_key_client.patch(
+        f"/api/videos/{video2.id}",
+        json={"views": 500},
+    )
+
+    await asyncio.sleep(0.1)
+
+    response = await api_key_client.get("/api/videos/by-expected-views?min_age_hours=0")
+    assert response.status_code == 200
+
+    videos = response.json()["data"]
+    assert len(videos) >= 2
+
+    video_ids = [v["id"] for v in videos]
+    video2_index = video_ids.index(str(video2.id))
+    video1_index = video_ids.index(str(video1.id))
+
+    assert video2_index < video1_index
+
+
+async def test_get_videos_by_expected_views_min_age_filter(
+    api_key_client: AsyncTestClient[Litestar],
+) -> None:
+    import asyncio
+    from datetime import datetime, timedelta
+
+    old_video = VideoFactory.build(views=1000)
+    old_video_response = await api_key_client.post(
+        "/api/videos/", json=old_video.model_dump(mode="json")
+    )
+    assert old_video_response.status_code == 201
+
+    await asyncio.sleep(2)
+
+    new_video = VideoFactory.build(views=1000)
+    new_video_response = await api_key_client.post(
+        "/api/videos/", json=new_video.model_dump(mode="json")
+    )
+    assert new_video_response.status_code == 201
+
+    response_no_filter = await api_key_client.get(
+        "/api/videos/by-expected-views?min_age_hours=0"
+    )
+    assert response_no_filter.status_code == 200
+    videos_no_filter = response_no_filter.json()["data"]
+    video_ids_no_filter = [v["id"] for v in videos_no_filter]
+
+    assert str(old_video.id) in video_ids_no_filter
+    assert str(new_video.id) in video_ids_no_filter
+
+    response_with_filter = await api_key_client.get(
+        "/api/videos/by-expected-views?min_age_hours=0.0005"
+    )
+    assert response_with_filter.status_code == 200
+    videos_with_filter = response_with_filter.json()["data"]
+    video_ids_with_filter = [v["id"] for v in videos_with_filter]
+
+    assert str(old_video.id) in video_ids_with_filter
+    assert str(new_video.id) not in video_ids_with_filter
+
+
+async def test_get_videos_by_expected_views_platform_filter(
+    api_key_client: AsyncTestClient[Litestar],
+) -> None:
+    youtube_video = VideoFactory.build(platform="youtube", views=1000)
+    await api_key_client.post(
+        "/api/videos/", json=youtube_video.model_dump(mode="json")
+    )
+
+    tiktok_video = VideoFactory.build(platform="tiktok", views=1000)
+    await api_key_client.post(
+        "/api/videos/", json=tiktok_video.model_dump(mode="json")
+    )
+
+    response = await api_key_client.get(
+        "/api/videos/by-expected-views?min_age_hours=0&platform=youtube"
+    )
+    assert response.status_code == 200
+    videos = response.json()["data"]
+    video_ids = [v["id"] for v in videos]
+
+    assert str(youtube_video.id) in video_ids
+    assert str(tiktok_video.id) not in video_ids
+
+
+async def test_get_videos_by_expected_views_platform_filter_case_insensitive(
+    api_key_client: AsyncTestClient[Litestar],
+) -> None:
+    video = VideoFactory.build(platform="YouTube", views=1000)
+    await api_key_client.post("/api/videos/", json=video.model_dump(mode="json"))
+
+    response = await api_key_client.get(
+        "/api/videos/by-expected-views?min_age_hours=0&platform=youtube"
+    )
+    assert response.status_code == 200
+    videos = response.json()["data"]
+    video_ids = [v["id"] for v in videos]
+
+    assert str(video.id) in video_ids
