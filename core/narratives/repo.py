@@ -478,12 +478,19 @@ class NarrativeRepository:
         await self._session.execute(
             """
             SELECT DISTINCT v.id, v.title, v.description, v.platform, v.source_url,
-                   v.destination_path, v.uploaded_at, v.views, v.likes, v.comments,
-                   v.channel, v.channel_followers, v.scrape_topic, v.scrape_keyword,
-                   v.metadata, v.created_at, v.updated_at
+                   v.destination_path, v.uploaded_at, v.channel, v.scrape_topic,
+                   v.scrape_keyword, v.metadata, v.created_at, v.updated_at,
+                   vs.views, vs.likes, vs.comments, vs.channel_followers
             FROM videos v
             JOIN video_claims c ON v.id = c.video_id
             JOIN claim_narratives cn ON c.id = cn.claim_id
+            LEFT JOIN LATERAL (
+                SELECT views, likes, comments, channel_followers
+                FROM video_stats
+                WHERE video_id = v.id
+                ORDER BY recorded_at DESC
+                LIMIT 1
+            ) vs ON true
             WHERE cn.narrative_id = %(narrative_id)s
             ORDER BY v.uploaded_at DESC
             """,
@@ -598,11 +605,18 @@ class NarrativeRepository:
                     n.metadata,
                     n.created_at,
                     n.updated_at,
-                    SUM(COALESCE(v.views, 0)) as total_views
+                    SUM(COALESCE(vs.views, 0)) as total_views
                 FROM narratives n
                 JOIN claim_narratives cn ON n.id = cn.narrative_id
                 JOIN video_claims c ON cn.claim_id = c.id
                 JOIN videos v ON c.video_id = v.id
+                LEFT JOIN LATERAL (
+                    SELECT views
+                    FROM video_stats
+                    WHERE video_id = v.id
+                    ORDER BY recorded_at DESC
+                    LIMIT 1
+                ) vs ON true
                 WHERE %(hours)s IS NULL OR v.updated_at >= NOW() - (%(hours)s || ' hours')::INTERVAL
                 GROUP BY n.id, n.title, n.description, n.metadata, n.created_at, n.updated_at
             )

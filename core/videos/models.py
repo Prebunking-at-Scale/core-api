@@ -6,7 +6,7 @@ from litestar.dto import DTOConfig
 from litestar.plugins.pydantic import PydanticDTO
 from pydantic import BaseModel
 
-from core.models import Narrative, Transcript, Video
+from core.models import Narrative, Transcript, Video, VideoStats
 from core.videos.claims.models import VideoClaims
 
 
@@ -14,6 +14,7 @@ class AnalysedVideo(Video):
     transcript: Transcript | None = None
     claims: VideoClaims | None = None
     narratives: list[Narrative] = []
+    stats_history: list[VideoStats] = []
 
 
 class VideoPatch(PydanticDTO[Video]):

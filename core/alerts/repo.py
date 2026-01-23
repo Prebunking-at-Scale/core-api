@@ -279,23 +279,30 @@ class AlertRepository:
     ) -> list[tuple[Alert, UUID, int]]:
         """Check for narrative stats alerts that should be triggered.
         Returns list of (alert, narrative_id, current_value) tuples."""
-        
+
         # For general alerts, check all narratives
         # For specific alerts, only check the specified narrative
         query = """
             WITH narrative_stats AS (
-                SELECT 
+                SELECT
                     n.id AS narrative_id,
-                    SUM(COALESCE(v.views, 0)) AS total_views,
+                    SUM(COALESCE(vs.views, 0)) AS total_views,
                     COUNT(DISTINCT cn.claim_id) AS claims_count,
                     COUNT(DISTINCT v.id) AS videos_count
                 FROM narratives n
                 LEFT JOIN claim_narratives cn ON n.id = cn.narrative_id
                 LEFT JOIN video_claims c ON cn.claim_id = c.id
                 LEFT JOIN videos v ON c.video_id = v.id
-                WHERE 
+                LEFT JOIN LATERAL (
+                    SELECT views
+                    FROM video_stats
+                    WHERE video_id = v.id
+                    ORDER BY recorded_at DESC
+                    LIMIT 1
+                ) vs ON true
+                WHERE
                     -- Only include narratives created or with videos updated since last check
-                    (%(since)s::timestamp IS NULL 
+                    (%(since)s::timestamp IS NULL
                      OR n.created_at >= %(since)s::timestamp
                      OR EXISTS (
                         SELECT 1 FROM claim_narratives cn2

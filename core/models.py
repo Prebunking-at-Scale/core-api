@@ -13,14 +13,23 @@ class Video(BaseModel):
     source_url: str
     destination_path: str = ""
     uploaded_at: datetime | None
+    channel: str | None = None
+    scrape_topic: str | None = None
+    scrape_keyword: str | None = None
     views: int | None = None
     likes: int | None = None
     comments: int | None = None
-    channel: str | None = None
     channel_followers: int | None = None
-    scrape_topic: str | None = None
-    scrape_keyword: str | None = None
     metadata: dict[str, Any] = {}
+
+
+class VideoStats(BaseModel):
+    video_id: UUID
+    views: int | None = None
+    likes: int | None = None
+    comments: int | None = None
+    channel_followers: int | None = None
+    recorded_at: datetime | None = None
 
 
 class TranscriptSentence(BaseModel):

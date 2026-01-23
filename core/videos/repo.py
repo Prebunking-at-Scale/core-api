@@ -9,7 +9,7 @@ from psycopg.types.json import Jsonb
 from core.analysis import embedding
 from core.errors import ConflictError
 from core.languages.models import LanguageWithVideoCount
-from core.models import Narrative, Video
+from core.models import Narrative, Video, VideoStats
 from core.videos.models import VideoFilters
 
 
@@ -20,7 +20,19 @@ class VideoRepository:
     async def get_video_by_id(self, video_id: UUID) -> Video | None:
         await self._session.execute(
             """
-            SELECT * FROM videos WHERE id = %(video_id)s
+            SELECT v.id, v.title, v.description, v.platform, v.source_url,
+                   v.destination_path, v.uploaded_at, v.channel, v.scrape_topic,
+                   v.scrape_keyword, v.metadata, v.created_at, v.updated_at,
+                   vs.views, vs.likes, vs.comments, vs.channel_followers
+            FROM videos v
+            LEFT JOIN LATERAL (
+                SELECT views, likes, comments, channel_followers
+                FROM video_stats
+                WHERE video_id = v.id
+                ORDER BY recorded_at DESC
+                LIMIT 1
+            ) vs ON true
+            WHERE v.id = %(video_id)s
             """,
             {"video_id": video_id},
         )
@@ -42,11 +54,7 @@ class VideoRepository:
                     source_url,
                     destination_path,
                     uploaded_at,
-                    views,
-                    likes,
-                    comments,
                     channel,
-                    channel_followers,
                     scrape_topic,
                     scrape_keyword,
                     metadata,
@@ -60,11 +68,7 @@ class VideoRepository:
                     %(source_url)s,
                     %(destination_path)s,
                     %(uploaded_at)s,
-                    %(views)s,
-                    %(likes)s,
-                    %(comments)s,
                     %(channel)s,
-                    %(channel_followers)s,
                     %(scrape_topic)s,
                     %(scrape_keyword)s,
                     %(metadata)s,
@@ -73,7 +77,16 @@ class VideoRepository:
                 RETURNING *
                 """,
                 {
-                    **video.model_dump(),
+                    "id": video.id,
+                    "title": video.title,
+                    "description": video.description,
+                    "platform": video.platform,
+                    "source_url": video.source_url,
+                    "destination_path": video.destination_path,
+                    "uploaded_at": video.uploaded_at,
+                    "channel": video.channel,
+                    "scrape_topic": video.scrape_topic,
+                    "scrape_keyword": video.scrape_keyword,
                     "metadata": Jsonb(video.metadata),
                     "embedding": list(encoded),
                 },
@@ -83,7 +96,28 @@ class VideoRepository:
         row = await self._session.fetchone()
         if not row:
             raise ValueError("Failed to insert video")
-        return Video(**row)
+
+        await self._session.execute(
+            """
+            INSERT INTO video_stats (video_id, views, likes, comments, channel_followers)
+            VALUES (%(video_id)s, %(views)s, %(likes)s, %(comments)s, %(channel_followers)s)
+            """,
+            {
+                "video_id": video.id,
+                "views": video.views,
+                "likes": video.likes,
+                "comments": video.comments,
+                "channel_followers": video.channel_followers,
+            },
+        )
+
+        return Video(
+            **row,
+            views=video.views,
+            likes=video.likes,
+            comments=video.comments,
+            channel_followers=video.channel_followers,
+        )
 
     async def update_video(self, video: Video) -> Video:
         await self._session.execute(
@@ -92,20 +126,42 @@ class VideoRepository:
             SET
                 title = %(title)s,
                 description = %(description)s,
-                views = %(views)s,
-                likes = %(likes)s,
-                comments = %(comments)s,
-                channel_followers = %(channel_followers)s,
                 metadata = metadata || %(metadata)s
             WHERE id = %(id)s
             RETURNING *
             """,
-            video.model_dump() | {"metadata": Jsonb(video.metadata)},
+            {
+                "id": video.id,
+                "title": video.title,
+                "description": video.description,
+                "metadata": Jsonb(video.metadata),
+            },
         )
         row = await self._session.fetchone()
         if not row:
             raise ValueError(f"Video with ID {video.id} not found")
-        return Video(**row)
+
+        await self._session.execute(
+            """
+            INSERT INTO video_stats (video_id, views, likes, comments, channel_followers)
+            VALUES (%(video_id)s, %(views)s, %(likes)s, %(comments)s, %(channel_followers)s)
+            """,
+            {
+                "video_id": video.id,
+                "views": video.views,
+                "likes": video.likes,
+                "comments": video.comments,
+                "channel_followers": video.channel_followers,
+            },
+        )
+
+        return Video(
+            **row,
+            views=video.views,
+            likes=video.likes,
+            comments=video.comments,
+            channel_followers=video.channel_followers,
+        )
 
     async def delete_video(self, video_id: UUID) -> None:
         await self._session.execute(
@@ -151,17 +207,24 @@ class VideoRepository:
                 v.source_url,
                 v.destination_path,
                 v.uploaded_at,
-                v.views,
-                v.likes,
-                v.comments,
                 v.channel,
-                v.channel_followers,
                 v.scrape_topic,
                 v.scrape_keyword,
                 v.metadata,
                 v.updated_at,
-                v.created_at
+                v.created_at,
+                vs.views,
+                vs.likes,
+                vs.comments,
+                vs.channel_followers
             FROM videos v
+            LEFT JOIN LATERAL (
+                SELECT views, likes, comments, channel_followers
+                FROM video_stats
+                WHERE video_id = v.id
+                ORDER BY recorded_at DESC
+                LIMIT 1
+            ) vs ON true
             WHERE {wheres}
             ORDER BY v.created_at DESC
             LIMIT %(limit)s
@@ -213,9 +276,20 @@ class VideoRepository:
 
         # Get paginated results
         data_query = sql.SQL("""
-            SELECT * FROM videos
+            SELECT v.id, v.title, v.description, v.platform, v.source_url,
+                   v.destination_path, v.uploaded_at, v.channel, v.scrape_topic,
+                   v.scrape_keyword, v.metadata, v.created_at, v.updated_at,
+                   vs.views, vs.likes, vs.comments, vs.channel_followers
+            FROM videos v
+            LEFT JOIN LATERAL (
+                SELECT views, likes, comments, channel_followers
+                FROM video_stats
+                WHERE video_id = v.id
+                ORDER BY recorded_at DESC
+                LIMIT 1
+            ) vs ON true
             WHERE {wheres}
-            ORDER BY created_at DESC
+            ORDER BY v.created_at DESC
             LIMIT %(limit)s OFFSET %(offset)s
         """).format(wheres=where_clause)
 
@@ -252,3 +326,104 @@ class VideoRepository:
         )
         rows = await self._session.fetchall()
         return [LanguageWithVideoCount(**row) for row in rows]
+
+    async def get_video_stats_history(self, video_id: UUID) -> list[VideoStats]:
+        """Get all historical stats records for a video, ordered by recorded_at descending"""
+        await self._session.execute(
+            """
+            SELECT video_id, views, likes, comments, channel_followers, recorded_at
+            FROM video_stats
+            WHERE video_id = %(video_id)s
+            ORDER BY recorded_at DESC
+            """,
+            {"video_id": video_id},
+        )
+        return [VideoStats(**row) for row in await self._session.fetchall()]
+
+    async def get_videos_by_expected_views(
+        self, limit: int, min_age_hours: float, platform: str | None = None
+    ) -> list[Video]:
+        """Get videos ordered by expected views since last stats update"""
+        params: dict[str, Any] = {
+            "limit": limit,
+            "min_age_seconds": min_age_hours * 3600,
+        }
+
+        platform_filter = sql.SQL("")
+        if platform:
+            platform_filter = sql.SQL("AND LOWER(v.platform) LIKE LOWER(%(platform)s)")
+            params["platform"] = f"%{platform}%"
+
+        query = sql.SQL("""
+            WITH latest_stats AS (
+                SELECT DISTINCT ON (video_id)
+                    video_id,
+                    views,
+                    likes,
+                    comments,
+                    channel_followers,
+                    recorded_at
+                FROM video_stats
+                ORDER BY video_id, recorded_at DESC
+            ),
+            previous_stats AS (
+                SELECT DISTINCT ON (vs.video_id)
+                    vs.video_id,
+                    vs.views as prev_views,
+                    vs.recorded_at as prev_recorded_at
+                FROM video_stats vs
+                INNER JOIN latest_stats ls ON vs.video_id = ls.video_id
+                WHERE vs.recorded_at < ls.recorded_at
+                ORDER BY vs.video_id, vs.recorded_at DESC
+            ),
+            view_rates AS (
+                SELECT
+                    ls.video_id,
+                    ls.views,
+                    ls.likes,
+                    ls.comments,
+                    ls.channel_followers,
+                    ls.recorded_at,
+                    CASE
+                        WHEN ps.prev_views IS NOT NULL
+                             AND EXTRACT(EPOCH FROM (ls.recorded_at - ps.prev_recorded_at)) > 0
+                        THEN (ls.views - ps.prev_views) / EXTRACT(EPOCH FROM (ls.recorded_at - ps.prev_recorded_at))
+                        WHEN v.uploaded_at IS NOT NULL
+                             AND EXTRACT(EPOCH FROM (ls.recorded_at - v.uploaded_at)) > 0
+                        THEN ls.views / EXTRACT(EPOCH FROM (ls.recorded_at - v.uploaded_at))
+                        ELSE 0
+                    END as views_per_second,
+                    EXTRACT(EPOCH FROM (NOW() - ls.recorded_at)) as seconds_since_update
+                FROM latest_stats ls
+                LEFT JOIN previous_stats ps ON ls.video_id = ps.video_id
+                INNER JOIN videos v ON ls.video_id = v.id
+            )
+            SELECT
+                v.id,
+                v.title,
+                v.description,
+                v.platform,
+                v.source_url,
+                v.destination_path,
+                v.uploaded_at,
+                v.channel,
+                v.scrape_topic,
+                v.scrape_keyword,
+                v.metadata,
+                v.created_at,
+                v.updated_at,
+                vr.views,
+                vr.likes,
+                vr.comments,
+                vr.channel_followers,
+                (vr.views_per_second * vr.seconds_since_update) as expected_views
+            FROM videos v
+            INNER JOIN view_rates vr ON v.id = vr.video_id
+            WHERE vr.seconds_since_update >= %(min_age_seconds)s
+            {platform_filter}
+            ORDER BY expected_views DESC
+            LIMIT %(limit)s
+            """).format(platform_filter=platform_filter)
+
+        await self._session.execute(query, params)
+        return [Video(**row) for row in await self._session.fetchall()]
