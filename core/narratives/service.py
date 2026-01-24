@@ -4,7 +4,7 @@ from uuid import UUID
 
 from core.entities.service import EntityService
 from core.models import Narrative
-from core.narratives.models import NarrativeInput, NarrativePatchInput
+from core.narratives.models import NarrativeInput, NarrativePatchInput, NarrativeSummary, ViralNarrativeSummary
 from core.narratives.repo import NarrativeRepository
 from core.uow import ConnectionFactory, uow
 
@@ -204,5 +204,21 @@ class NarrativeService:
     ) -> list[Narrative]:
         async with self.repo() as repo:
             return await repo.get_prevalent_narratives(
+                limit=limit, offset=offset, hours=hours
+            )
+
+    async def get_viral_narratives_summary(
+        self, limit: int = 100, offset: int = 0, hours: int | None = None
+    ) -> list[ViralNarrativeSummary]:
+        async with self.repo() as repo:
+            return await repo.get_viral_narratives_summary(
+                limit=limit, offset=offset, hours=hours
+            )
+
+    async def get_prevalent_narratives_summary(
+        self, limit: int = 100, offset: int = 0, hours: int | None = None
+    ) -> list[NarrativeSummary]:
+        async with self.repo() as repo:
+            return await repo.get_prevalent_narratives_summary(
                 limit=limit, offset=offset, hours=hours
             )

@@ -10,7 +10,7 @@ from litestar.params import Parameter
 from core.auth.guards import super_admin
 from core.errors import ConflictError
 from core.models import Narrative
-from core.narratives.models import NarrativeInput, NarrativePatchInput
+from core.narratives.models import NarrativeInput, NarrativePatchInput, NarrativeSummary, ViralNarrativeSummary
 from core.narratives.service import NarrativeService
 from core.response import JSON, PaginatedJSON
 from core.uow import ConnectionFactory
@@ -118,6 +118,23 @@ class NarrativeController(Controller):
         )
 
     @get(
+        path="/viral/summary",
+        summary="Get viral narrative summaries optimized for dashboard display",
+    )
+    async def get_viral_narratives_summary(
+        self,
+        narrative_service: NarrativeService,
+        limit: int = 100,
+        offset: int = 0,
+        hours: int | None = None,
+    ) -> JSON[list[ViralNarrativeSummary]]:
+        return JSON(
+            await narrative_service.get_viral_narratives_summary(
+                limit=limit, offset=offset, hours=hours
+            )
+        )
+
+    @get(
         path="/prevalent",
         summary="Get prevalent narratives sorted by video count in a specified time period",
     )
@@ -130,6 +147,23 @@ class NarrativeController(Controller):
     ) -> JSON[list[Narrative]]:
         return JSON(
             await narrative_service.get_prevalent_narratives(
+                limit=limit, offset=offset, hours=hours
+            )
+        )
+
+    @get(
+        path="/prevalent/summary",
+        summary="Get prevalent narrative summaries optimized for dashboard display",
+    )
+    async def get_prevalent_narratives_summary(
+        self,
+        narrative_service: NarrativeService,
+        limit: int = 100,
+        offset: int = 0,
+        hours: int | None = None,
+    ) -> JSON[list[NarrativeSummary]]:
+        return JSON(
+            await narrative_service.get_prevalent_narratives_summary(
                 limit=limit, offset=offset, hours=hours
             )
         )
