@@ -364,9 +364,7 @@ async def test_get_videos_by_expected_views_platform_filter(
     )
 
     tiktok_video = VideoFactory.build(platform="tiktok", views=1000)
-    await api_key_client.post(
-        "/api/videos/", json=tiktok_video.model_dump(mode="json")
-    )
+    await api_key_client.post("/api/videos/", json=tiktok_video.model_dump(mode="json"))
 
     response = await api_key_client.get(
         "/api/videos/by-expected-views?min_age_hours=0&platform=youtube"
@@ -393,3 +391,28 @@ async def test_get_videos_by_expected_views_platform_filter_case_insensitive(
     video_ids = [v["id"] for v in videos]
 
     assert str(video.id) in video_ids
+
+
+async def test_metadata_only_update_does_not_add_stats_history(
+    api_key_client: AsyncTestClient[Litestar],
+    video: Video,
+) -> None:
+    initial_response = await api_key_client.get(f"/api/videos/{video.id}")
+    assert initial_response.status_code == 200
+    initial_stats_history = initial_response.json()["data"]["stats_history"]
+    assert len(initial_stats_history) == 1
+
+    patch_response = await api_key_client.patch(
+        f"/api/videos/{video.id}",
+        json={"title": "Test Update", "metadata": {"language": "en"}},
+    )
+    assert patch_response.status_code == 200
+
+    updated_response = await api_key_client.get(f"/api/videos/{video.id}")
+    assert updated_response.status_code == 200
+
+    data = updated_response.json()["data"]
+    stats_history = data["stats_history"]
+
+    assert len(stats_history) == 1
+    assert data["metadata"]["language"] == "en"

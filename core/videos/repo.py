@@ -103,6 +103,17 @@ class VideoRepository:
     async def update_video(self, video: Video) -> Video:
         await self._session.execute(
             """
+            SELECT views, likes, comments, channel_followers
+            FROM videos WHERE id = %(id)s
+            """,
+            {"id": video.id},
+        )
+        old_row = await self._session.fetchone()
+        if not old_row:
+            raise ValueError(f"Video with ID {video.id} not found")
+
+        await self._session.execute(
+            """
             UPDATE videos
             SET
                 title = %(title)s,
@@ -121,19 +132,26 @@ class VideoRepository:
         if not row:
             raise ValueError(f"Video with ID {video.id} not found")
 
-        await self._session.execute(
-            """
-            INSERT INTO video_stats (video_id, views, likes, comments, channel_followers)
-            VALUES (%(video_id)s, %(views)s, %(likes)s, %(comments)s, %(channel_followers)s)
-            """,
-            {
-                "video_id": video.id,
-                "views": video.views,
-                "likes": video.likes,
-                "comments": video.comments,
-                "channel_followers": video.channel_followers,
-            },
+        stats_changed = (
+            old_row["views"] != video.views
+            or old_row["likes"] != video.likes
+            or old_row["comments"] != video.comments
+            or old_row["channel_followers"] != video.channel_followers
         )
+        if stats_changed:
+            await self._session.execute(
+                """
+                INSERT INTO video_stats (video_id, views, likes, comments, channel_followers)
+                VALUES (%(video_id)s, %(views)s, %(likes)s, %(comments)s, %(channel_followers)s)
+                """,
+                {
+                    "video_id": video.id,
+                    "views": video.views,
+                    "likes": video.likes,
+                    "comments": video.comments,
+                    "channel_followers": video.channel_followers,
+                },
+            )
 
         return Video(**row)
 
