@@ -9,7 +9,7 @@ from psycopg.types.json import Jsonb
 from core.analysis import embedding
 from core.errors import ConflictError
 from core.languages.models import LanguageWithVideoCount
-from core.models import Narrative, Video
+from core.models import Narrative, Video, VideoStats
 from core.videos.models import VideoFilters
 
 
@@ -83,6 +83,21 @@ class VideoRepository:
         row = await self._session.fetchone()
         if not row:
             raise ValueError("Failed to insert video")
+
+        await self._session.execute(
+            """
+            INSERT INTO video_stats (video_id, views, likes, comments, channel_followers)
+            VALUES (%(video_id)s, %(views)s, %(likes)s, %(comments)s, %(channel_followers)s)
+            """,
+            {
+                "video_id": video.id,
+                "views": video.views,
+                "likes": video.likes,
+                "comments": video.comments,
+                "channel_followers": video.channel_followers,
+            },
+        )
+
         return Video(**row)
 
     async def update_video(self, video: Video) -> Video:
@@ -105,6 +120,21 @@ class VideoRepository:
         row = await self._session.fetchone()
         if not row:
             raise ValueError(f"Video with ID {video.id} not found")
+
+        await self._session.execute(
+            """
+            INSERT INTO video_stats (video_id, views, likes, comments, channel_followers)
+            VALUES (%(video_id)s, %(views)s, %(likes)s, %(comments)s, %(channel_followers)s)
+            """,
+            {
+                "video_id": video.id,
+                "views": video.views,
+                "likes": video.likes,
+                "comments": video.comments,
+                "channel_followers": video.channel_followers,
+            },
+        )
+
         return Video(**row)
 
     async def delete_video(self, video_id: UUID) -> None:
@@ -191,9 +221,13 @@ class VideoRepository:
         if channel:
             wheres.append(sql.SQL("LOWER(channel) LIKE LOWER(%(channel)s)"))
             params["channel"] = f"%{channel}%"
-            
+
         if text:
-            wheres.append(sql.SQL("(LOWER(title) LIKE LOWER(%(text)s) OR LOWER(description) LIKE LOWER(%(text)s))"))
+            wheres.append(
+                sql.SQL(
+                    "(LOWER(title) LIKE LOWER(%(text)s) OR LOWER(description) LIKE LOWER(%(text)s))"
+                )
+            )
             params["text"] = f"%{text}%"
 
         if language:
@@ -240,7 +274,9 @@ class VideoRepository:
         )
         return [Narrative(**row) for row in await self._session.fetchall()]
 
-    async def get_languages_associated_with_videos(self) -> list[LanguageWithVideoCount]:
+    async def get_languages_associated_with_videos(
+        self,
+    ) -> list[LanguageWithVideoCount]:
         await self._session.execute(
             """
             SELECT metadata->>'language' as language, count(*)
@@ -252,3 +288,96 @@ class VideoRepository:
         )
         rows = await self._session.fetchall()
         return [LanguageWithVideoCount(**row) for row in rows]
+
+    async def get_video_stats_history(self, video_id: UUID) -> list[VideoStats]:
+        """Get all historical stats records for a video, ordered by recorded_at descending"""
+        await self._session.execute(
+            """
+            SELECT video_id, views, likes, comments, channel_followers, recorded_at
+            FROM video_stats
+            WHERE video_id = %(video_id)s
+            ORDER BY recorded_at DESC
+            """,
+            {"video_id": video_id},
+        )
+        return [VideoStats(**row) for row in await self._session.fetchall()]
+
+    async def get_videos_by_expected_views(
+        self, limit: int, min_age_hours: float, platform: str | None = None
+    ) -> list[Video]:
+        """Get videos ordered by expected views since last stats update"""
+        params: dict[str, Any] = {
+            "limit": limit,
+            "min_age_seconds": min_age_hours * 3600,
+        }
+
+        platform_filter = sql.SQL("")
+        if platform:
+            platform_filter = sql.SQL("AND LOWER(v.platform) LIKE LOWER(%(platform)s)")
+            params["platform"] = f"%{platform}%"
+
+        query = sql.SQL("""
+            WITH latest_stats AS (
+                SELECT DISTINCT ON (video_id)
+                    video_id,
+                    recorded_at
+                FROM video_stats
+                ORDER BY video_id, recorded_at DESC
+            ),
+            previous_stats AS (
+                SELECT DISTINCT ON (vs.video_id)
+                    vs.video_id,
+                    vs.views as prev_views,
+                    vs.recorded_at as prev_recorded_at
+                FROM video_stats vs
+                INNER JOIN latest_stats ls ON vs.video_id = ls.video_id
+                WHERE vs.recorded_at < ls.recorded_at
+                ORDER BY vs.video_id, vs.recorded_at DESC
+            ),
+            view_rates AS (
+                SELECT
+                    v.id as video_id,
+                    ls.recorded_at,
+                    CASE
+                        WHEN ps.prev_views IS NOT NULL
+                             AND EXTRACT(EPOCH FROM (ls.recorded_at - ps.prev_recorded_at)) > 0
+                        THEN (v.views - ps.prev_views) / EXTRACT(EPOCH FROM (ls.recorded_at - ps.prev_recorded_at))
+                        WHEN v.uploaded_at IS NOT NULL
+                             AND EXTRACT(EPOCH FROM (ls.recorded_at - v.uploaded_at)) > 0
+                        THEN v.views / EXTRACT(EPOCH FROM (ls.recorded_at - v.uploaded_at))
+                        ELSE 0
+                    END as views_per_second,
+                    EXTRACT(EPOCH FROM (NOW() - ls.recorded_at)) as seconds_since_update
+                FROM videos v
+                INNER JOIN latest_stats ls ON v.id = ls.video_id
+                LEFT JOIN previous_stats ps ON v.id = ps.video_id
+            )
+            SELECT
+                v.id,
+                v.title,
+                v.description,
+                v.platform,
+                v.source_url,
+                v.destination_path,
+                v.uploaded_at,
+                v.channel,
+                v.scrape_topic,
+                v.scrape_keyword,
+                v.metadata,
+                v.created_at,
+                v.updated_at,
+                v.views,
+                v.likes,
+                v.comments,
+                v.channel_followers,
+                (vr.views_per_second * vr.seconds_since_update) as expected_views
+            FROM videos v
+            INNER JOIN view_rates vr ON v.id = vr.video_id
+            WHERE vr.seconds_since_update >= %(min_age_seconds)s
+            {platform_filter}
+            ORDER BY expected_views DESC
+            LIMIT %(limit)s
+            """).format(platform_filter=platform_filter)
+
+        await self._session.execute(query, params)
+        return [Video(**row) for row in await self._session.fetchall()]
