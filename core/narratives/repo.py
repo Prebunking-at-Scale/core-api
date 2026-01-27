@@ -793,10 +793,11 @@ class NarrativeRepository:
                 SUM(COALESCE(v.views, 0)) as total_views,
                 SUM(COALESCE(v.likes, 0)) as total_likes,
                 SUM(COALESCE(v.comments, 0)) as total_comments,
-                count(distinct vn.languages) as language_count
+                count(distinct l.languages)
             FROM relevant_narratives n
             JOIN video_narratives vn ON vn.narrative_id = n.id
             JOIN videos v ON v.id = vn.video_id
+            LEFT JOIN LATERAL (SELECT unnest(vn.languages) as languages) l on TRUE
             GROUP BY n.id, n.title, n.description, n.metadata, n.created_at, n.updated_at
             ORDER BY SUM(COALESCE(v.views, 0)) DESC
             """,
@@ -895,10 +896,11 @@ class NarrativeRepository:
                 SUM(COALESCE(v.views, 0)) as total_views,
                 SUM(COALESCE(v.likes, 0)) as total_likes,
                 SUM(COALESCE(v.comments, 0)) as total_comments,
-                count(distinct vn.languages) as language_count
+                count(distinct l.languages)
             FROM relevant_narratives n
             JOIN video_narratives vn ON vn.narrative_id = n.id
             JOIN videos v ON v.id = vn.video_id
+            LEFT JOIN LATERAL (SELECT unnest(vn.languages) as languages) l on TRUE
             GROUP BY n.id, n.title, n.description, n.metadata, n.created_at, n.updated_at
             ORDER BY COUNT(DISTINCT v.id) DESC
             """,
