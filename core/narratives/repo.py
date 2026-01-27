@@ -604,7 +604,7 @@ class NarrativeRepository:
                 JOIN claim_narratives cn ON n.id = cn.narrative_id
                 JOIN video_claims c ON cn.claim_id = c.id
                 JOIN videos v ON c.video_id = v.id
-                WHERE %(hours)s IS NULL OR v.updated_at >= NOW() - (%(hours)s || ' hours')::INTERVAL
+                WHERE %(hours)s::integer IS NULL OR v.updated_at >= NOW() - (%(hours)s || ' hours')::INTERVAL
                 GROUP BY n.id, n.title, n.description, n.metadata, n.created_at, n.updated_at
             )
             SELECT
@@ -659,7 +659,7 @@ class NarrativeRepository:
                 JOIN claim_narratives cn ON n.id = cn.narrative_id
                 JOIN video_claims c ON cn.claim_id = c.id
                 JOIN videos v ON c.video_id = v.id
-                WHERE %(hours)s IS NULL OR v.updated_at >= NOW() - (%(hours)s || ' hours')::INTERVAL
+                WHERE %(hours)s::integer IS NULL OR v.updated_at >= NOW() - (%(hours)s || ' hours')::INTERVAL
                 GROUP BY n.id, n.title, n.description, n.metadata, n.created_at, n.updated_at
             )
             SELECT
@@ -722,7 +722,7 @@ class NarrativeRepository:
                 JOIN claim_narratives cn ON n.id = cn.narrative_id
                 JOIN video_claims c ON cn.claim_id = c.id
                 JOIN videos v ON c.video_id = v.id
-                WHERE %(hours)s IS NULL OR v.updated_at >= NOW() - (%(hours)s || ' hours')::INTERVAL
+                WHERE %(hours)s::integer IS NULL OR v.updated_at >= NOW() - (%(hours)s || ' hours')::INTERVAL
                 GROUP BY n.id, n.title
             ),
             narrative_topics AS (
@@ -807,7 +807,7 @@ class NarrativeRepository:
                 JOIN claim_narratives cn ON n.id = cn.narrative_id
                 JOIN video_claims c ON cn.claim_id = c.id
                 JOIN videos v ON c.video_id = v.id
-                WHERE %(hours)s IS NULL OR v.updated_at >= NOW() - (%(hours)s || ' hours')::INTERVAL
+                WHERE %(hours)s::integer IS NULL OR v.updated_at >= NOW() - (%(hours)s || ' hours')::INTERVAL
                 GROUP BY n.id, n.title
             ),
             narrative_topics AS (
