@@ -1,7 +1,7 @@
 import logging
 import os
-from uuid import UUID
 from collections import Counter
+from uuid import UUID
 
 import httpx
 from harmful_claim_finder.transcript_search import get_claims
@@ -16,7 +16,7 @@ from litestar.dto import DTOData
 from litestar.exceptions import NotFoundException
 from litestar.params import Parameter
 
-from core.analysis import genai, language_id
+from core.analysis import genai
 from core.auth.guards import super_admin
 from core.config import (
     APP_BASE_URL,
@@ -164,14 +164,12 @@ async def analyze_for_narratives(video: Video, video_claims: list[Claim]) -> Non
 
     claims_data = []
     for claim in video_claims:
-        claims_data.append(
-            {
-                "id": str(claim.id),
-                "claim": claim.claim,
-                "score": claim.metadata.get("score", 0),
-                "video_id": str(video.id),
-            }
-        )
+        claims_data.append({
+            "id": str(claim.id),
+            "claim": claim.claim,
+            "score": claim.metadata.get("score", 0),
+            "video_id": str(video.id),
+        })
 
     payload = {"claims": claims_data}
 
@@ -300,6 +298,7 @@ class VideoController(Controller):
         transcript = await transcript_service.get_transcript_for_video(video_id)
         claims = await claims_service.get_claims_for_video(video_id)
         narratives = await video_service.get_narratives_for_video(video_id)
+        stats_history = await video_service.get_video_stats_history(video_id)
 
         return JSON(
             AnalysedVideo(
@@ -307,6 +306,7 @@ class VideoController(Controller):
                 transcript=transcript,
                 claims=claims,
                 narratives=narratives,
+                stats_history=stats_history,
             )
         )
 
@@ -343,3 +343,19 @@ class VideoController(Controller):
         videos = await video_service.filter_videos(data)
         cursor = videos[-1].id if videos else None
         return CursorJSON(data=videos, cursor=cursor)
+
+    @get(
+        path="/by-expected-views",
+        summary="Get videos ordered by expected views since last stats update",
+    )
+    async def get_videos_by_expected_views(
+        self,
+        video_service: VideoService,
+        limit: int = Parameter(default=20, query="limit", gt=0, le=100),
+        min_age_hours: float = Parameter(default=1.0, query="min_age_hours", ge=0),
+        platform: str | None = Parameter(default=None, query="platform"),
+    ) -> JSON[list[Video]]:
+        videos = await video_service.get_videos_by_expected_views(
+            limit, min_age_hours, platform
+        )
+        return JSON(videos)
