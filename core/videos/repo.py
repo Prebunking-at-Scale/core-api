@@ -359,7 +359,7 @@ class VideoRepository:
                     CASE
                         WHEN ps.prev_views IS NOT NULL
                              AND EXTRACT(EPOCH FROM (ls.recorded_at - ps.prev_recorded_at)) > 0
-                        THEN (v.views - ps.prev_views) / EXTRACT(EPOCH FROM (ls.recorded_at - ps.prev_recorded_at))
+                        THEN (GREATEST((v.views - ps.prev_views), 0)) / EXTRACT(EPOCH FROM (ls.recorded_at - ps.prev_recorded_at))
                         WHEN v.uploaded_at IS NOT NULL
                              AND EXTRACT(EPOCH FROM (ls.recorded_at - v.uploaded_at)) > 0
                         THEN v.views / EXTRACT(EPOCH FROM (ls.recorded_at - v.uploaded_at))
