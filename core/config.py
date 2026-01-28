@@ -39,7 +39,10 @@ PASSWORD_RESET_TTL = timedelta(minutes=30)
 MAGIC_LINK_TTL = timedelta(minutes=15)
 
 """email settings"""
-EMAIL_FROM = os.environ.get("EMAIL_FROM", "auto@fullfact.org")
+EMAIL_FROM = os.environ.get("EMAIL_FROM", "no-reply@mail.prebunking.efcsn.com")
+MAILGUN_DOMAIN = os.environ.get("MAILGUN_DOMAIN", "")
+MAILGUN_API_KEY = os.environ.get("MAILGUN_API_KEY", "")
+
 SMTP_HOST = os.environ.get("SMTP_HOST", "")
 SMTP_PORT = os.environ.get("SMTP_PORT", "")
 SMTP_USERNAME = os.environ.get("SMTP_USERNAME", "")
