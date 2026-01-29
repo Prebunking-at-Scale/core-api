@@ -276,6 +276,33 @@ async def test_resend_invite_already_accepted_fails(
         )
 
 
+async def test_can_reaccept_invite_until_password_set(
+    auth_service: AuthService, organisation: Organisation
+) -> None:
+    email = "reaccept_test@example.com"
+
+    token = await auth_service.invite_token(
+        organisation_id=organisation.id,
+        email=email,
+        as_admin=False,
+        auto_accept=False,
+    )
+    assert token
+
+    options1 = await auth_service.accept_invite(token)
+    assert options1.first_time_setup
+    user = options1.user
+
+    options2 = await auth_service.accept_invite(token)
+    assert options2.first_time_setup
+    assert options2.user.id == user.id
+
+    await auth_service.update_password(user, "password123")
+
+    with raises(InvalidInviteError):
+        await auth_service.accept_invite(token)
+
+
 async def test_magic_link_token_existing_user(
     auth_service: AuthService, user: User
 ) -> None:
