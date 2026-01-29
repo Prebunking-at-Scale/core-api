@@ -25,7 +25,7 @@ def test_mailgun_emailer_send_success() -> None:
         )
 
         mock_post.assert_called_once_with(
-            "https://api.mailgun.net/v3/test.mailgun.org/messages",
+            "https://api.eu.mailgun.net/v3/test.mailgun.org/messages",
             auth=("api", "test-api-key"),
             data={
                 "from": "Prebunking at Scale <test@example.com>",
