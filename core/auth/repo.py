@@ -245,8 +245,11 @@ class AuthRepository:
             WHERE
                 user_id = %(user_id)s
                 AND organisation_id = %(organisation_id)s
-                AND accepted IS NULL
                 AND deactivated IS NULL
+                AND (
+                    accepted IS NULL
+                    OR (SELECT password_last_updated IS NULL FROM users WHERE id = %(user_id)s)
+                )
             """,
             {
                 "organisation_id": organisation_id,
