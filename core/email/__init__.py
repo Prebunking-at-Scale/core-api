@@ -1,7 +1,7 @@
 from typing import Protocol, runtime_checkable
 
 from core import config
-from core.email import smtp
+from core.email import mailgun, smtp
 from core.email.print import PrinterEmailer
 
 
@@ -11,6 +11,12 @@ class Emailer(Protocol):
 
 
 async def get_emailer() -> Emailer:
+    if config.MAILGUN_API_KEY:
+        return mailgun.MailgunEmailer(
+            config.MAILGUN_DOMAIN,
+            config.MAILGUN_API_KEY,
+            config.EMAIL_FROM,
+        )
     if config.SMTP_HOST:
         return smtp.SMTPEmailer(
             config.SMTP_HOST,
