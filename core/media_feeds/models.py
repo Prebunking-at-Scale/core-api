@@ -1,7 +1,7 @@
 import abc
 import re
 from datetime import datetime
-from typing import Literal
+from typing import Literal, get_args
 from uuid import UUID, uuid4
 
 from litestar.dto import DTOConfig
@@ -9,6 +9,7 @@ from litestar.plugins.pydantic import PydanticDTO
 from pydantic import BaseModel, Field, JsonValue, field_validator
 
 Platform = Literal["youtube", "instagram", "tiktok"]
+VALID_PLATFORMS: tuple[str, ...] = get_args(Platform)
 
 
 class MediaFeed(BaseModel, abc.ABC):
@@ -78,6 +79,43 @@ class CursorDTO(PydanticDTO[Cursor]):
     )
 
 
+def parse_channel_from_url(url: str) -> tuple[Platform, str]:
+    youtube_patterns = [
+        r"(?:youtube\.com|m\.youtube\.com)/(?:channel|c|user)/([a-zA-Z0-9_-]+)",
+        r"(?:youtube\.com|m\.youtube\.com)/(@[a-zA-Z0-9_-]+)",
+        r"youtu\.be/([a-zA-Z0-9_-]+)",
+    ]
+
+    instagram_patterns = [
+        r"(?:instagram\.com|instagr\.am)/([a-zA-Z0-9._]+)/?(?:\?|$)",
+    ]
+
+    tiktok_patterns = [
+        r"tiktok\.com/(@[a-zA-Z0-9._]+)/?(?:\?|$)",
+    ]
+
+    for pattern in youtube_patterns:
+        match = re.search(pattern, url, flags=re.IGNORECASE)
+        if match:
+            return "youtube", match.group(1)
+
+    for pattern in instagram_patterns:
+        match = re.search(pattern, url, flags=re.IGNORECASE)
+        if match:
+            return "instagram", match.group(1)
+
+    for pattern in tiktok_patterns:
+        match = re.search(pattern, url, flags=re.IGNORECASE)
+        if match:
+            return "tiktok", match.group(1)
+
+    raise ValueError(
+        f"Could not parse channel from URL: {url}. "
+        f"Expected formats: youtube.com/@channel, youtube.com/channel/ID, "
+        f"instagram.com/username, tiktok.com/@username"
+    )
+
+
 class ChannelURLRequest(BaseModel):
     url: str
 
@@ -89,37 +127,19 @@ class ChannelURLRequest(BaseModel):
         return v.strip()
 
     def parse_channel_info(self) -> tuple[Platform, str]:
-        youtube_patterns = [
-            r"(?:youtube\.com/channel/|youtube\.com/c/|youtube\.com/user/|youtube\.com/)([^/?&]+)",
-            r"youtu\.be/([^/?&]+)",
-        ]
-
-        instagram_patterns = [
-            r"instagram\.com/([^/?&]+)",
-            r"instagr\.am/([^/?&]+)",
-        ]
-
-        tiktok_patterns = [
-            r"tiktok\.com/([^/?&]+)",
-        ]
-
-        for pattern in youtube_patterns:
-            match = re.search(pattern, self.url, flags=re.IGNORECASE)
-            if match:
-                return "youtube", match.group(1)
-
-        for pattern in instagram_patterns:
-            match = re.search(pattern, self.url, flags=re.IGNORECASE)
-            if match:
-                return "instagram", match.group(1)
-
-        for pattern in tiktok_patterns:
-            match = re.search(pattern, self.url, flags=re.IGNORECASE)
-            if match:
-                return "tiktok", match.group(1)
-
-        raise ValueError("URL is not a valid YouTube, Instagram, or TikTok channel URL")
+        return parse_channel_from_url(self.url)
 
 
 class ChannelURLRequestDTO(PydanticDTO[ChannelURLRequest]):
     pass
+
+
+class SkippedChannel(BaseModel):
+    channel: str
+    platform: Platform
+
+
+class BulkChannelUploadResult(BaseModel):
+    created: list[ChannelFeed]
+    skipped: list[SkippedChannel]
+    errors: list[str]

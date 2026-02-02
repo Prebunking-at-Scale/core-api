@@ -116,13 +116,44 @@ class MediaFeedRepository:
                 },
             )
         except psycopg.errors.UniqueViolation:
-            raise ConflictError("keyword already exists")
+            raise ConflictError("channel already exists")
 
         row = await self._session.fetchone()
         if not row:
             raise ValueError("failed to create topic")
 
         return ChannelFeed(**row)
+
+    async def bulk_create_channel_feeds(
+        self, organisation_id: UUID, channels: list[tuple[str, str]]
+    ) -> list[ChannelFeed]:
+        if not channels:
+            return []
+
+        created_feeds: list[ChannelFeed] = []
+        for channel, platform in channels:
+            try:
+                await self._session.execute(
+                    """
+                    INSERT INTO channel_feeds (organisation_id, channel, platform)
+                    VALUES (%(organisation_id)s, %(channel)s, %(platform)s)
+                    ON CONFLICT (organisation_id, channel, platform) WHERE is_archived = FALSE
+                    DO NOTHING
+                    RETURNING *
+                    """,
+                    {
+                        "organisation_id": str(organisation_id),
+                        "channel": channel,
+                        "platform": platform,
+                    },
+                )
+                row = await self._session.fetchone()
+                if row:
+                    created_feeds.append(ChannelFeed(**row))
+            except psycopg.Error:
+                continue
+
+        return created_feeds
 
     async def create_keyword_feed(
         self, organisation_id: UUID, topic: str, keywords: list[str]
