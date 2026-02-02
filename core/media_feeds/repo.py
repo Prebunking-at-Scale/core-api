@@ -1,5 +1,4 @@
 import json
-from typing import Any
 from uuid import UUID
 
 import psycopg
@@ -137,7 +136,7 @@ class MediaFeedRepository:
                     """
                     INSERT INTO channel_feeds (organisation_id, channel, platform)
                     VALUES (%(organisation_id)s, %(channel)s, %(platform)s)
-                    ON CONFLICT (organisation_id, channel, platform) WHERE is_archived = FALSE
+                    ON CONFLICT (organisation_id, lower(channel), platform) WHERE is_archived = FALSE
                     DO NOTHING
                     RETURNING *
                     """,
