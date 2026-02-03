@@ -146,6 +146,7 @@ async def extract_transcript_and_claims(
                 formatted_claim: Claim = Claim(**claim.model_dump())
                 nearest_sentence = find_nearest_sentence(formatted_claim, sentences)
                 formatted_claim.metadata["for_organisation"] = org
+                formatted_claim.metadata["sentence"] = str(nearest_sentence.id)
                 formatted_claim.metadata["language"] = nearest_sentence.metadata.get(
                     "language"
                 )
