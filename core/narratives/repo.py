@@ -8,6 +8,7 @@ from psycopg.types.json import Jsonb
 
 from core.errors import ConflictError
 from core.models import Claim, Entity, Narrative, Topic, Video
+from core.narratives.models import NarrativeSummary, TopicSummary, ViralNarrativeSummary
 
 
 class NarrativeRepository:
@@ -92,7 +93,9 @@ class NarrativeRepository:
         entities = await self._get_narrative_entities(narrative_id)
         videos = await self._get_narrative_videos(narrative_id)
 
-        return Narrative(**row, claims=claims, topics=topics, entities=entities, videos=videos)
+        return Narrative(
+            **row, claims=claims, topics=topics, entities=entities, videos=videos
+        )
 
     async def get_narrative(self, narrative_id: UUID) -> Narrative | None:
         await self._session.execute(
@@ -110,7 +113,9 @@ class NarrativeRepository:
         topics = await self._get_narrative_topics(narrative_id)
         entities = await self._get_narrative_entities(narrative_id)
         videos = await self._get_narrative_videos(narrative_id)
-        return Narrative(**row, claims=claims, topics=topics, entities=entities, videos=videos)
+        return Narrative(
+            **row, claims=claims, topics=topics, entities=entities, videos=videos
+        )
 
     async def get_narratives_by_claim(self, claim_id: UUID) -> list[Narrative]:
         await self._session.execute(
@@ -130,7 +135,13 @@ class NarrativeRepository:
             entities = await self._get_narrative_entities(row["id"])
             videos = await self._get_narrative_videos(row["id"])
             narratives.append(
-                Narrative(**row, claims=claims, topics=topics, entities=entities, videos=videos)
+                Narrative(
+                    **row,
+                    claims=claims,
+                    topics=topics,
+                    entities=entities,
+                    videos=videos,
+                )
             )
 
         return narratives
@@ -182,7 +193,13 @@ class NarrativeRepository:
             entities = await self._get_narrative_entities(row["id"])
             videos = await self._get_narrative_videos(row["id"])
             narratives.append(
-                Narrative(**row, claims=claims, topics=topics, entities=entities, videos=videos)
+                Narrative(
+                    **row,
+                    claims=claims,
+                    topics=topics,
+                    entities=entities,
+                    videos=videos,
+                )
             )
 
         return narratives
@@ -228,7 +245,6 @@ class NarrativeRepository:
         first_content_start: datetime | None = None,
         first_content_end: datetime | None = None,
     ) -> tuple[str, dict[str, int | UUID | str | datetime]]:
-
         query = ""
         where_conditions = []
         params: dict[str, int | UUID | str | datetime] = {}
@@ -421,7 +437,9 @@ class NarrativeRepository:
         topics = await self._get_narrative_topics(narrative_id)
         entities = await self._get_narrative_entities(narrative_id)
         videos = await self._get_narrative_videos(narrative_id)
-        return Narrative(**row, claims=claims, topics=topics, entities=entities, videos=videos)
+        return Narrative(
+            **row, claims=claims, topics=topics, entities=entities, videos=videos
+        )
 
     async def delete_narrative(self, narrative_id: UUID) -> None:
         await self._session.execute(
@@ -511,7 +529,9 @@ class NarrativeRepository:
             return False
         return row["count"] == len(claim_ids)
 
-    async def find_by_narrative_id_in_metadata(self, narrative_id: str) -> Narrative | None:
+    async def find_by_narrative_id_in_metadata(
+        self, narrative_id: str
+    ) -> Narrative | None:
         await self._session.execute(
             """
             SELECT * FROM narratives
@@ -634,7 +654,13 @@ class NarrativeRepository:
             videos = await self._get_narrative_videos(narrative_data["id"])
 
             narratives.append(
-                Narrative(**narrative_data, claims=claims, topics=topics, entities=entities, videos=videos)
+                Narrative(
+                    **narrative_data,
+                    claims=claims,
+                    topics=topics,
+                    entities=entities,
+                    videos=videos,
+                )
             )
 
         return narratives
@@ -689,7 +715,218 @@ class NarrativeRepository:
             videos = await self._get_narrative_videos(narrative_data["id"])
 
             narratives.append(
-                Narrative(**narrative_data, claims=claims, topics=topics, entities=entities, videos=videos)
+                Narrative(
+                    **narrative_data,
+                    claims=claims,
+                    topics=topics,
+                    entities=entities,
+                    videos=videos,
+                )
             )
 
         return narratives
+
+    async def get_viral_narratives_summary(
+        self, limit: int = 100, offset: int = 0, hours: int | None = None
+    ) -> list[ViralNarrativeSummary]:
+        """
+        Get viral narratives with pre-aggregated stats in a single query.
+        This is optimized for dashboard display and avoids N+1 queries.
+        """
+        await self._session.execute(
+            """
+            WITH relevant_narratives AS (
+                SELECT
+                    n.id,
+                    n.title,
+                    n.description,
+                    n.metadata,
+                    n.created_at,
+                    n.updated_at,
+                    SUM(COALESCE(v.views, 0)) as total_views
+                FROM narratives n
+                JOIN claim_narratives cn ON n.id = cn.narrative_id
+                JOIN video_claims c ON cn.claim_id = c.id
+                JOIN videos v ON c.video_id = v.id
+                WHERE %(hours)s::integer is NULL OR v.updated_at >= NOW() - (%(hours)s  || ' hours')::interval
+                group by n.id, n.title, n.description, n.metadata, n.created_at, n.updated_at
+                order by SUM(COALESCE(v.views, 0)) desc
+                LIMIT %(limit)s OFFSET %(offset)s
+            ),
+            video_narratives as (
+                select
+                    v.id as video_id,
+                    n.id as narrative_id,
+                    count(distinct c.id) as claim_count,
+                    array_agg(DISTINCT c.metadata->>'language') FILTER (
+                        WHERE c.metadata->>'language' IS NOT NULL
+                        AND c.metadata->>'language' != ''
+                    ) as languages
+                from videos v
+                JOIN video_claims c ON c.video_id = v.id
+                JOIN claim_narratives cn ON cn.claim_id = c.id
+                JOIN relevant_narratives n ON n.id = cn.narrative_id
+                GROUP BY v.id, n.id
+            ),
+            narrative_topics AS (
+                SELECT
+                    nt.narrative_id,
+                    JSON_AGG(
+                        JSON_BUILD_OBJECT('id', t.id, 'topic', t.topic)
+                        ORDER BY t.topic
+                    ) as topics
+                FROM narrative_topics nt
+                JOIN topics t ON nt.topic_id = t.id
+                GROUP BY nt.narrative_id
+            )
+            select
+                n.id,
+                n.title,
+                n.description,
+                n.metadata,
+                n.created_at,
+                n.updated_at,
+                (select topics from narrative_topics where narrative_id = n.id) as topics,
+                COUNT(DISTINCT v.id) as video_count,
+                SUM(vn.claim_count) as claim_count,
+                ARRAY_AGG(DISTINCT v.platform) FILTER (WHERE v.platform IS NOT NULL) as platforms,
+                SUM(COALESCE(v.views, 0)) as total_views,
+                SUM(COALESCE(v.likes, 0)) as total_likes,
+                SUM(COALESCE(v.comments, 0)) as total_comments,
+                count(distinct l.languages) as language_count
+            FROM relevant_narratives n
+            JOIN video_narratives vn ON vn.narrative_id = n.id
+            JOIN videos v ON v.id = vn.video_id
+            LEFT JOIN LATERAL (SELECT unnest(vn.languages) as languages) l on TRUE
+            GROUP BY n.id, n.title, n.description, n.metadata, n.created_at, n.updated_at
+            ORDER BY SUM(COALESCE(v.views, 0)) DESC
+            """,
+            {"limit": limit, "offset": offset, "hours": hours},
+        )
+        rows = await self._session.fetchall()
+
+        summaries = []
+        for row in rows:
+            topics = [
+                TopicSummary(id=t["id"], topic=t["topic"])
+                for t in (row["topics"] or [])
+            ]
+            summaries.append(
+                ViralNarrativeSummary(
+                    id=row["id"],
+                    title=row["title"],
+                    topics=topics,
+                    platforms=row["platforms"] or [],
+                    total_views=row["total_views"] or 0,
+                    total_likes=row["total_likes"] or 0,
+                    total_comments=row["total_comments"] or 0,
+                    claim_count=row["claim_count"] or 0,
+                    video_count=row["video_count"] or 0,
+                    language_count=row["language_count"] or 0,
+                )
+            )
+
+        return summaries
+
+    async def get_prevalent_narratives_summary(
+        self, limit: int = 100, offset: int = 0, hours: int | None = None
+    ) -> list[NarrativeSummary]:
+        """
+        Get prevalent narratives with pre-aggregated stats in a single query.
+        Sorted by video count (most videos first).
+        This is optimized for dashboard display and avoids N+1 queries.
+        """
+        await self._session.execute(
+            """
+            WITH relevant_narratives AS (
+                SELECT
+                    n.id,
+                    n.title,
+                    n.description,
+                    n.metadata,
+                    n.created_at,
+                    n.updated_at,
+                    SUM(COALESCE(v.views, 0)) as total_views
+                FROM narratives n
+                JOIN claim_narratives cn ON n.id = cn.narrative_id
+                JOIN video_claims c ON cn.claim_id = c.id
+                JOIN videos v ON c.video_id = v.id
+                WHERE %(hours)s::integer is NULL OR v.updated_at >= NOW() - (%(hours)s  || ' hours')::interval
+                group by n.id, n.title, n.description, n.metadata, n.created_at, n.updated_at
+                order by count(distinct v.id) desc
+                LIMIT %(limit)s OFFSET %(offset)s
+            ),
+            video_narratives as (
+                select
+                    v.id as video_id,
+                    n.id as narrative_id,
+                    count(distinct c.id) as claim_count,
+                    array_agg(DISTINCT c.metadata->>'language') FILTER (
+                        WHERE c.metadata->>'language' IS NOT NULL
+                        AND c.metadata->>'language' != ''
+                    ) as languages
+                from videos v
+                JOIN video_claims c ON c.video_id = v.id
+                JOIN claim_narratives cn ON cn.claim_id = c.id
+                JOIN relevant_narratives n ON n.id = cn.narrative_id
+                GROUP BY v.id, n.id
+            ),
+            narrative_topics AS (
+                SELECT
+                    nt.narrative_id,
+                    JSON_AGG(
+                        JSON_BUILD_OBJECT('id', t.id, 'topic', t.topic)
+                        ORDER BY t.topic
+                    ) as topics
+                FROM narrative_topics nt
+                JOIN topics t ON nt.topic_id = t.id
+                GROUP BY nt.narrative_id
+            )
+            SELECT
+                n.id,
+                n.title,
+                n.description,
+                n.metadata,
+                n.created_at,
+                n.updated_at,
+                (SELECT topics from narrative_topics where narrative_id = n.id) as topics,
+                COUNT(DISTINCT v.id) as video_count,
+                SUM(vn.claim_count) as claim_count,
+                ARRAY_AGG(DISTINCT v.platform) FILTER (WHERE v.platform IS NOT NULL) as platforms,
+                SUM(COALESCE(v.views, 0)) as total_views,
+                SUM(COALESCE(v.likes, 0)) as total_likes,
+                SUM(COALESCE(v.comments, 0)) as total_comments,
+                count(distinct l.languages) as language_count
+            FROM relevant_narratives n
+            JOIN video_narratives vn ON vn.narrative_id = n.id
+            JOIN videos v ON v.id = vn.video_id
+            LEFT JOIN LATERAL (SELECT unnest(vn.languages) as languages) l on TRUE
+            GROUP BY n.id, n.title, n.description, n.metadata, n.created_at, n.updated_at
+            ORDER BY COUNT(DISTINCT v.id) DESC
+            """,
+            {"limit": limit, "offset": offset, "hours": hours},
+        )
+        rows = await self._session.fetchall()
+
+        summaries = []
+        for row in rows:
+            topics = [
+                TopicSummary(id=t["id"], topic=t["topic"])
+                for t in (row["topics"] or [])
+            ]
+            summaries.append(
+                NarrativeSummary(
+                    id=row["id"],
+                    title=row["title"],
+                    topics=topics,
+                    platforms=row["platforms"] or [],
+                    total_views=row["total_views"] or 0,
+                    total_likes=row["total_likes"] or 0,
+                    total_comments=row["total_comments"] or 0,
+                    claim_count=row["claim_count"] or 0,
+                    video_count=row["video_count"] or 0,
+                    language_count=row["language_count"] or 0,
+                )
+            )
+
+        return summaries

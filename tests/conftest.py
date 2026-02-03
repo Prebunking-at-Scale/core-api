@@ -1,3 +1,4 @@
+import os
 from collections.abc import AsyncIterator
 from typing import Any, Generator
 
@@ -27,7 +28,12 @@ def tables_to_truncate() -> list[str]:
 
 @fixture(scope="module")
 def temp_db() -> Generator[Postgresql, Any, None]:
-    db = Postgresql()
+    # Set locale to fix PostgreSQL 18 multithreading issue on macOS
+    os.environ.setdefault("LC_ALL", "C")
+    db = Postgresql(
+        initdb_params="--locale-provider=builtin --encoding=UTF8",
+        postgres_args="-c client_encoding=UTF8",
+    )
     yield db
     db.stop()
 

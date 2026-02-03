@@ -23,6 +23,15 @@ class Video(BaseModel):
     metadata: dict[str, Any] = {}
 
 
+class VideoStats(BaseModel):
+    video_id: UUID
+    views: int | None = None
+    likes: int | None = None
+    comments: int | None = None
+    channel_followers: int | None = None
+    recorded_at: datetime | None = None
+
+
 class TranscriptSentence(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     source: str  # Speech-to-text, OCR, etc

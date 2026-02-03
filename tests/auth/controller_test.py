@@ -1,3 +1,4 @@
+import time
 from litestar import Litestar
 from litestar.testing import AsyncTestClient
 
@@ -121,6 +122,35 @@ async def test_password_reset_request_nonexistent_user(
     )
 
     assert response.status_code == 200
+
+
+async def test_password_reset_token(
+    auth_client: AsyncTestClient[Litestar],
+    auth_service: AuthService,
+    organisation: Organisation,
+) -> None:
+    """Test the complete password reset flow: request token, then use it to update password"""
+    user = await create_user(auth_service, organisation, False)
+
+    # Step 1: Generate a password reset token
+    reset_token = await auth_service.password_reset_token(user.email)
+    assert reset_token is not None
+
+    # Step 2: Use the PASSWORD_RESET token to update the password
+    new_password = "newresetpassword123456"
+    response = await auth_client.patch(
+        "/api/auth/user/password",
+        json={"new_password": new_password},
+        headers={"Authorization": f"Bearer {reset_token}"},
+    )
+    assert response.status_code == 200
+
+    # Step 3: Verify the password was actually updated by logging in with new password
+    login_response = await auth_client.post(
+        "/api/auth/login",
+        json={"email": user.email, "password": new_password},
+    )
+    assert login_response.status_code == 200
 
 
 async def test_password_update(
