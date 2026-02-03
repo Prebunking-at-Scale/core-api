@@ -34,7 +34,7 @@ spec:
                 runAsNonRoot: true
           containers:
             - name: process-alerts
-              image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api:v1.16.0
+              image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api:v1.21.0
               imagePullPolicy: Always
               command: ["/bin/sh", "-c"]
               args: ["uv run python -m core.cli process-alerts"]

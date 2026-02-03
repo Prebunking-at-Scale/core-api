@@ -59,6 +59,12 @@ class MediaFeedsService:
         async with self.repo() as repo:
             return await repo.create_channel_feed(organisation_id, channel, platform)
 
+    async def bulk_create_channel_feeds(
+        self, organisation_id: UUID, channels: list[tuple[str, str]]
+    ) -> list[ChannelFeed]:
+        async with self.repo() as repo:
+            return await repo.bulk_create_channel_feeds(organisation_id, channels)
+
     async def create_keyword_feed(
         self, organisation_id: UUID, topic: str, keywords: list[str]
     ) -> KeywordFeed:

@@ -62,6 +62,23 @@ async def media_feeds_service(state: State) -> MediaFeedsService:
     return MediaFeedsService(state.connection_factory)
 
 
+def find_nearest_sentence(
+    claim: Claim, sentences: list[TranscriptSentence]
+) -> TranscriptSentence:
+    """
+    Finds the nearest sentence to the current claim.
+    """
+    nearest_sentence = sentences[0]
+    nearest_distance = abs(sentences[0].start_time_s - claim.start_time_s)
+    for sentence in sentences:
+        distance = abs(sentence.start_time_s - claim.start_time_s)
+        if distance < nearest_distance:
+            nearest_sentence = sentence
+            nearest_distance = distance
+
+    return nearest_sentence
+
+
 async def extract_transcript_and_claims(
     video: Video,
     video_service: VideoService,
@@ -127,7 +144,12 @@ async def extract_transcript_and_claims(
 
             for claim in claims:
                 formatted_claim: Claim = Claim(**claim.model_dump())
+                nearest_sentence = find_nearest_sentence(formatted_claim, sentences)
                 formatted_claim.metadata["for_organisation"] = org
+                formatted_claim.metadata["sentence"] = str(nearest_sentence.id)
+                formatted_claim.metadata["language"] = nearest_sentence.metadata.get(
+                    "language"
+                )
                 all_claims.append(formatted_claim)
 
         except Exception as e:
@@ -164,12 +186,14 @@ async def analyze_for_narratives(video: Video, video_claims: list[Claim]) -> Non
 
     claims_data = []
     for claim in video_claims:
-        claims_data.append({
-            "id": str(claim.id),
-            "claim": claim.claim,
-            "score": claim.metadata.get("score", 0),
-            "video_id": str(video.id),
-        })
+        claims_data.append(
+            {
+                "id": str(claim.id),
+                "claim": claim.claim,
+                "score": claim.metadata.get("score", 0),
+                "video_id": str(video.id),
+            }
+        )
 
     payload = {"claims": claims_data}
 

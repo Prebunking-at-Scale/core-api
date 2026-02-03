@@ -1,3 +1,4 @@
+import io
 import uuid
 
 from litestar import Litestar
@@ -566,3 +567,159 @@ async def test_delete_cursor_not_found(
         "/api/media_feeds/cursors/nonexistent/youtube",
     )
     assert response.status_code == 404
+
+
+async def test_bulk_upload_channels_txt_with_urls(
+    api_key_client: AsyncTestClient[Litestar],
+    organisation: Organisation,
+) -> None:
+    file_content = """https://www.instagram.com/user1
+https://www.tiktok.com/@user2
+https://www.youtube.com/@user3
+"""
+    files = {"data": ("channels.txt", io.BytesIO(file_content.encode()), "text/plain")}
+    response = await api_key_client.post(
+        "/api/media_feeds/channels/bulk-upload",
+        params={"organisation_id": str(organisation.id)},
+        files=files,
+    )
+    assert response.status_code == 201
+    data = response.json()["data"]
+    assert len(data["created"]) == 3
+    assert data["skipped"] == []
+    assert data["errors"] == []
+    created = {(feed["channel"], feed["platform"]) for feed in data["created"]}
+    assert created == {("user1", "instagram"), ("@user2", "tiktok"), ("@user3", "youtube")}
+
+
+async def test_bulk_upload_channels_csv_with_columns(
+    api_key_client: AsyncTestClient[Litestar],
+    organisation: Organisation,
+) -> None:
+    file_content = "channel,platform\nuser1,instagram\nuser2,tiktok\nuser3,youtube\n"
+    files = {"data": ("channels.csv", io.BytesIO(file_content.encode()), "text/csv")}
+    response = await api_key_client.post(
+        "/api/media_feeds/channels/bulk-upload",
+        params={"organisation_id": str(organisation.id)},
+        files=files,
+    )
+    assert response.status_code == 201
+    data = response.json()["data"]
+    assert len(data["created"]) == 3
+    assert data["skipped"] == []
+    created = {(feed["channel"], feed["platform"]) for feed in data["created"]}
+    assert created == {("user1", "instagram"), ("user2", "tiktok"), ("user3", "youtube")}
+
+
+async def test_bulk_upload_channels_csv_with_urls(
+    api_key_client: AsyncTestClient[Litestar],
+    organisation: Organisation,
+) -> None:
+    file_content = "url\nhttps://www.instagram.com/user1\nhttps://www.tiktok.com/@user2\n"
+    files = {"data": ("channels.csv", io.BytesIO(file_content.encode()), "text/csv")}
+    response = await api_key_client.post(
+        "/api/media_feeds/channels/bulk-upload",
+        params={"organisation_id": str(organisation.id)},
+        files=files,
+    )
+    assert response.status_code == 201
+    data = response.json()["data"]
+    assert len(data["created"]) == 2
+    created = {(feed["channel"], feed["platform"]) for feed in data["created"]}
+    assert created == {("user1", "instagram"), ("@user2", "tiktok")}
+
+
+async def test_bulk_upload_channels_skips_duplicates(
+    api_key_client: AsyncTestClient[Litestar],
+    organisation: Organisation,
+) -> None:
+    await api_key_client.post(
+        "/api/media_feeds/channels",
+        params={"organisation_id": str(organisation.id)},
+        json={"channel": "existing_user", "platform": "instagram"},
+    )
+
+    file_content = "https://www.instagram.com/existing_user\nhttps://www.instagram.com/new_user\n"
+    files = {"data": ("channels.txt", io.BytesIO(file_content.encode()), "text/plain")}
+    response = await api_key_client.post(
+        "/api/media_feeds/channels/bulk-upload",
+        params={"organisation_id": str(organisation.id)},
+        files=files,
+    )
+    assert response.status_code == 201
+    data = response.json()["data"]
+    assert len(data["created"]) == 1
+    assert data["created"][0]["channel"] == "new_user"
+    assert len(data["skipped"]) == 1
+    assert data["skipped"][0]["channel"] == "existing_user"
+    assert data["skipped"][0]["platform"] == "instagram"
+
+
+async def test_bulk_upload_channels_empty_file(
+    api_key_client: AsyncTestClient[Litestar],
+    organisation: Organisation,
+) -> None:
+    file_content = ""
+    files = {"data": ("channels.txt", io.BytesIO(file_content.encode()), "text/plain")}
+    response = await api_key_client.post(
+        "/api/media_feeds/channels/bulk-upload",
+        params={"organisation_id": str(organisation.id)},
+        files=files,
+    )
+    assert response.status_code == 400
+
+
+async def test_bulk_upload_channels_with_blank_lines(
+    api_key_client: AsyncTestClient[Litestar],
+    organisation: Organisation,
+) -> None:
+    file_content = "https://instagram.com/user1\n\n\nhttps://instagram.com/user2\n   \nhttps://instagram.com/user3\n"
+    files = {"data": ("channels.txt", io.BytesIO(file_content.encode()), "text/plain")}
+    response = await api_key_client.post(
+        "/api/media_feeds/channels/bulk-upload",
+        params={"organisation_id": str(organisation.id)},
+        files=files,
+    )
+    assert response.status_code == 201
+    data = response.json()["data"]
+    assert len(data["created"]) == 3
+    channels = {feed["channel"] for feed in data["created"]}
+    assert channels == {"user1", "user2", "user3"}
+
+
+async def test_bulk_upload_channels_invalid_urls_reported_as_errors(
+    api_key_client: AsyncTestClient[Litestar],
+    organisation: Organisation,
+) -> None:
+    file_content = "https://instagram.com/valid_user\nhttps://example.com/invalid\n"
+    files = {"data": ("channels.txt", io.BytesIO(file_content.encode()), "text/plain")}
+    response = await api_key_client.post(
+        "/api/media_feeds/channels/bulk-upload",
+        params={"organisation_id": str(organisation.id)},
+        files=files,
+    )
+    assert response.status_code == 201
+    data = response.json()["data"]
+    assert len(data["created"]) == 1
+    assert data["created"][0]["channel"] == "valid_user"
+    assert len(data["errors"]) == 1
+    assert "Line 2" in data["errors"][0]
+
+
+async def test_bulk_upload_channels_csv_invalid_platform(
+    api_key_client: AsyncTestClient[Litestar],
+    organisation: Organisation,
+) -> None:
+    file_content = "channel,platform\nuser1,instagram\nuser2,facebook\n"
+    files = {"data": ("channels.csv", io.BytesIO(file_content.encode()), "text/csv")}
+    response = await api_key_client.post(
+        "/api/media_feeds/channels/bulk-upload",
+        params={"organisation_id": str(organisation.id)},
+        files=files,
+    )
+    assert response.status_code == 201
+    data = response.json()["data"]
+    assert len(data["created"]) == 1
+    assert data["created"][0]["channel"] == "user1"
+    assert len(data["errors"]) == 1
+    assert "Invalid platform" in data["errors"][0]

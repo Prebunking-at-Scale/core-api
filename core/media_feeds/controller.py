@@ -1,16 +1,23 @@
+import csv
+import io
 from typing import Any
 from uuid import UUID
 
 from litestar import Controller, delete, get, patch, post
+from litestar.datastructures import UploadFile
 from litestar.di import Provide
 from litestar.dto import DTOData
+from litestar.enums import RequestEncodingType
 from litestar.exceptions import NotFoundException, ValidationException
+from litestar.params import Body
 
 from core.auth.guards import api_only, organisation_admin
 from core.auth.models import Organisation
 from core.errors import ConflictError
 from core.media_feeds.models import (
+    VALID_PLATFORMS,
     AllFeeds,
+    BulkChannelUploadResult,
     ChannelFeed,
     ChannelFeedDTO,
     ChannelURLRequest,
@@ -18,16 +25,97 @@ from core.media_feeds.models import (
     Cursor,
     KeywordFeed,
     KeywordFeedDTO,
+    SkippedChannel,
+    parse_channel_from_url,
 )
 from core.media_feeds.service import MediaFeedsService
 from core.response import JSON
 from core.uow import ConnectionFactory
+
+MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
+MAX_CHANNELS_PER_UPLOAD = 10000
 
 
 async def media_feeds_service(
     connection_factory: ConnectionFactory,
 ) -> MediaFeedsService:
     return MediaFeedsService(connection_factory=connection_factory)
+
+
+def parse_channels_from_csv(text: str) -> tuple[list[tuple[str, str]], list[str]]:
+    channels: list[tuple[str, str]] = []
+    errors: list[str] = []
+    reader = csv.reader(io.StringIO(text))
+    header: list[str] | None = None
+
+    for row_num, row in enumerate(reader, start=1):
+        if not row or all(not cell.strip() for cell in row):
+            continue
+
+        if row_num == 1:
+            normalized_row = [col.strip().lower() for col in row]
+            if (
+                "channel" in normalized_row
+                or "url" in normalized_row
+                or "platform" in normalized_row
+            ):
+                header = normalized_row
+                continue
+
+        if header:
+            row_dict = dict(zip(header, row))
+            channel = row_dict.get("channel", "").strip()
+            platform = row_dict.get("platform", "").strip().lower()
+            url = row_dict.get("url", "").strip()
+
+            if url and not channel:
+                try:
+                    platform, channel = parse_channel_from_url(url)
+                except ValueError as e:
+                    errors.append(f"Row {row_num}: {e}")
+                    continue
+            elif not channel:
+                continue
+
+            if not platform:
+                errors.append(f"Row {row_num}: Missing platform")
+                continue
+
+            if platform not in VALID_PLATFORMS:
+                errors.append(
+                    f"Row {row_num}: Invalid platform '{platform}'. "
+                    f"Valid platforms: {', '.join(VALID_PLATFORMS)}"
+                )
+                continue
+
+            channels.append((channel, platform))
+        else:
+            # Assume we're getting a list of URLs
+            value = row[0].strip() if row else ""
+            if not value:
+                continue
+            try:
+                platform, channel = parse_channel_from_url(value)
+                channels.append((channel, platform))
+            except ValueError as e:
+                errors.append(f"Row {row_num}: {e}")
+
+    return channels, errors
+
+
+def parse_channels_from_text(text: str) -> tuple[list[tuple[str, str]], list[str]]:
+    channels: list[tuple[str, str]] = []
+    errors: list[str] = []
+    for line_num, line in enumerate(text.splitlines(), start=1):
+        value = line.strip()
+        if not value:
+            continue
+        try:
+            platform, channel = parse_channel_from_url(value)
+            channels.append((channel, platform))
+        except ValueError as e:
+            errors.append(f"Line {line_num}: {e}")
+    return channels, errors
 
 
 class MediaFeedController(Controller):
@@ -171,6 +259,64 @@ class MediaFeedController(Controller):
                 organisation_id=organisation.id,
                 channel=channel,
                 platform=platform,
+            )
+        )
+
+    @post(
+        path="/channels/bulk-upload",
+        summary="Bulk upload channels from CSV or TXT file",
+        guards=[organisation_admin],
+        raises=[ValidationException],
+    )
+    async def bulk_upload_channels(
+        self,
+        media_feeds_service: MediaFeedsService,
+        organisation: Organisation,
+        data: UploadFile = Body(media_type=RequestEncodingType.MULTI_PART),
+    ) -> JSON[BulkChannelUploadResult]:
+        content = await data.read()
+
+        if len(content) > MAX_FILE_SIZE_BYTES:
+            raise ValidationException(
+                f"File size exceeds maximum allowed size of {MAX_FILE_SIZE_BYTES // (1024 * 1024)}MB"
+            )
+
+        try:
+            text = content.decode("utf-8")
+        except UnicodeDecodeError:
+            raise ValidationException("File must be UTF-8 encoded")
+
+        filename = data.filename or ""
+        if filename.endswith(".csv"):
+            channels_to_create, errors = parse_channels_from_csv(text)
+        else:
+            channels_to_create, errors = parse_channels_from_text(text)
+
+        if not channels_to_create:
+            raise ValidationException("No valid channels found in file")
+
+        if len(channels_to_create) > MAX_CHANNELS_PER_UPLOAD:
+            raise ValidationException(
+                f"Too many channels ({len(channels_to_create)}). "
+                f"Maximum allowed is {MAX_CHANNELS_PER_UPLOAD}"
+            )
+
+        created = await media_feeds_service.bulk_create_channel_feeds(
+            organisation_id=organisation.id,
+            channels=channels_to_create,
+        )
+
+        created_channels = {(feed.channel, feed.platform) for feed in created}
+        skipped: list[SkippedChannel] = []
+        for channel, platform in channels_to_create:
+            if (channel, platform) not in created_channels:
+                skipped.append(SkippedChannel(channel=channel, platform=platform))  # type: ignore[arg-type]
+
+        return JSON(
+            BulkChannelUploadResult(
+                created=created,
+                skipped=skipped,
+                errors=errors,
             )
         )
 
