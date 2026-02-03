@@ -27,14 +27,14 @@ CREATE TABLE IF NOT EXISTS claim_narratives_feedback (
 );
 
 -- Indexes for better query performance
-CREATE INDEX idx_narrative_feedback_user_id ON narrative_feedback(user_id);
-CREATE INDEX idx_narrative_feedback_narrative_id ON narrative_feedback(narrative_id);
-CREATE INDEX idx_narrative_feedback_score ON narrative_feedback(feedback_score);
+CREATE INDEX IF NOT EXISTS idx_narrative_feedback_user_id ON narrative_feedback(user_id);
+CREATE INDEX IF NOT EXISTS idx_narrative_feedback_narrative_id ON narrative_feedback(narrative_id);
+CREATE INDEX IF NOT EXISTS idx_narrative_feedback_score ON narrative_feedback(feedback_score);
 
-CREATE INDEX idx_claim_narratives_feedback_user_id ON claim_narratives_feedback(user_id);
-CREATE INDEX idx_claim_narratives_feedback_claim_id ON claim_narratives_feedback(claim_id);
-CREATE INDEX idx_claim_narratives_feedback_narrative_id ON claim_narratives_feedback(narrative_id);
-CREATE INDEX idx_claim_narratives_feedback_score ON claim_narratives_feedback(feedback_score);
-CREATE INDEX idx_claim_narratives_feedback_claim_narrative ON claim_narratives_feedback(claim_id, narrative_id);
+CREATE INDEX IF NOT EXISTS idx_claim_narratives_feedback_user_id ON claim_narratives_feedback(user_id);
+CREATE INDEX IF NOT EXISTS idx_claim_narratives_feedback_claim_id ON claim_narratives_feedback(claim_id);
+CREATE INDEX IF NOT EXISTS idx_claim_narratives_feedback_narrative_id ON claim_narratives_feedback(narrative_id);
+CREATE INDEX IF NOT EXISTS idx_claim_narratives_feedback_score ON claim_narratives_feedback(feedback_score);
+CREATE INDEX IF NOT EXISTS idx_claim_narratives_feedback_claim_narrative ON claim_narratives_feedback(claim_id, narrative_id);
 
 COMMIT;
