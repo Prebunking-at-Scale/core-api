@@ -5,12 +5,18 @@ from uuid import UUID
 from litestar import Controller, delete, get, patch, post
 from litestar.di import Provide
 from litestar.exceptions import NotFoundException
-from litestar.params import Parameter
 
 from core.auth.guards import super_admin
 from core.errors import ConflictError
-from core.models import Narrative
-from core.narratives.models import NarrativeInput, NarrativePatchInput, NarrativeSummary, ViralNarrativeSummary
+from core.models import Claim, Narrative, Video
+from core.narratives.models import (
+    NarrativeDetail,
+    NarrativeInput,
+    NarrativePatchInput,
+    NarrativeStats,
+    NarrativeSummary,
+    ViralNarrativeSummary,
+)
 from core.narratives.service import NarrativeService
 from core.response import JSON, PaginatedJSON
 from core.uow import ConnectionFactory
@@ -46,19 +52,79 @@ class NarrativeController(Controller):
 
     @get(
         path="/{narrative_id:uuid}",
-        summary="Get a specific narrative",
+        summary="Get a specific narrative with preview of claims/videos and counts",
     )
     async def get_narrative(
-        self, narrative_service: NarrativeService, narrative_id: UUID
-    ) -> JSON[Narrative]:
-        narrative = await narrative_service.get_narrative(narrative_id)
+        self,
+        narrative_service: NarrativeService,
+        narrative_id: UUID,
+        claims_limit: int = 10,
+        videos_limit: int = 10,
+    ) -> JSON[NarrativeDetail]:
+        narrative = await narrative_service.get_narrative_detail(
+            narrative_id, claims_limit=claims_limit, videos_limit=videos_limit
+        )
         if not narrative:
             raise NotFoundException()
         return JSON(narrative)
 
     @get(
+        path="/{narrative_id:uuid}/claims",
+        summary="Get paginated claims for a narrative",
+    )
+    async def get_narrative_claims(
+        self,
+        narrative_service: NarrativeService,
+        narrative_id: UUID,
+        limit: int = 25,
+        offset: int = 0,
+    ) -> PaginatedJSON[list[Claim]]:
+        try:
+            claims, total = await narrative_service.get_narrative_claims(
+                narrative_id, limit=limit, offset=offset
+            )
+        except ValueError:
+            raise NotFoundException()
+        page = (offset // limit) + 1 if limit > 0 else 1
+        return PaginatedJSON(data=claims, total=total, page=page, size=len(claims))
+
+    @get(
+        path="/{narrative_id:uuid}/videos",
+        summary="Get paginated videos for a narrative",
+    )
+    async def get_narrative_videos(
+        self,
+        narrative_service: NarrativeService,
+        narrative_id: UUID,
+        limit: int = 25,
+        offset: int = 0,
+    ) -> PaginatedJSON[list[Video]]:
+        try:
+            videos, total = await narrative_service.get_narrative_videos(
+                narrative_id, limit=limit, offset=offset
+            )
+        except ValueError:
+            raise NotFoundException()
+        page = (offset // limit) + 1 if limit > 0 else 1
+        return PaginatedJSON(data=videos, total=total, page=page, size=len(videos))
+
+    @get(
+        path="/{narrative_id:uuid}/stats",
+        summary="Get time-series stats for a narrative (for evolution charts)",
+    )
+    async def get_narrative_stats(
+        self,
+        narrative_service: NarrativeService,
+        narrative_id: UUID,
+    ) -> JSON[NarrativeStats]:
+        stats = await narrative_service.get_narrative_stats(narrative_id)
+        if not stats:
+            raise NotFoundException()
+        return JSON(stats)
+
+    @get(
         path="/",
-        summary="Get all narratives",
+        summary="Get all narratives with counts",
     )
     async def get_narratives(
         self,
@@ -73,8 +139,8 @@ class NarrativeController(Controller):
         first_content_start: datetime | None = None,
         first_content_end: datetime | None = None,
         language: str | None = None,
-    ) -> PaginatedJSON[list[Narrative]]:
-        narratives, total = await narrative_service.get_all_narratives(
+    ) -> PaginatedJSON[list[NarrativeSummary]]:
+        narratives, total = await narrative_service.get_all_narratives_list(
             limit=limit,
             offset=offset,
             topic_id=topic_id,
@@ -93,16 +159,16 @@ class NarrativeController(Controller):
 
     @get(
         path="/claims/{claim_id:uuid}",
-        summary="Get all narratives for a specific claim",
+        summary="Get all narratives for a specific claim with counts",
     )
     async def get_narratives_by_claim(
         self, narrative_service: NarrativeService, claim_id: UUID
-    ) -> JSON[list[Narrative]]:
-        return JSON(await narrative_service.get_narratives_by_claim(claim_id))
+    ) -> JSON[list[NarrativeSummary]]:
+        return JSON(await narrative_service.get_narratives_by_claim_list(claim_id))
 
     @get(
         path="/viral",
-        summary="Get viral narratives from a specified time period sorted by views",
+        summary="Get viral narratives with counts sorted by views",
     )
     async def get_viral_narratives(
         self,
@@ -110,9 +176,9 @@ class NarrativeController(Controller):
         limit: int = 100,
         offset: int = 0,
         hours: int | None = None,
-    ) -> JSON[list[Narrative]]:
+    ) -> JSON[list[NarrativeSummary]]:
         return JSON(
-            await narrative_service.get_viral_narratives(
+            await narrative_service.get_viral_narratives_summary(
                 limit=limit, offset=offset, hours=hours
             )
         )
@@ -136,7 +202,7 @@ class NarrativeController(Controller):
 
     @get(
         path="/prevalent",
-        summary="Get prevalent narratives sorted by video count in a specified time period",
+        summary="Get prevalent narratives with counts sorted by video count",
     )
     async def get_prevalent_narratives(
         self,
@@ -144,9 +210,9 @@ class NarrativeController(Controller):
         limit: int = 100,
         offset: int = 0,
         hours: int | None = None,
-    ) -> JSON[list[Narrative]]:
+    ) -> JSON[list[NarrativeSummary]]:
         return JSON(
-            await narrative_service.get_prevalent_narratives(
+            await narrative_service.get_prevalent_narratives_summary(
                 limit=limit, offset=offset, hours=hours
             )
         )
