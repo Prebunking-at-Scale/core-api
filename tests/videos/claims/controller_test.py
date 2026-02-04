@@ -3,9 +3,11 @@ from unittest.mock import ANY
 from litestar import Litestar
 from litestar.testing import AsyncTestClient
 
-from core.models import Video
+from core.models import Video, TranscriptSentence, Claim
 from core.videos.claims.models import VideoClaims
 from tests.videos.conftest import ClaimsFactory
+
+from core.videos.controller import find_nearest_sentence
 
 
 async def test_add_claims(
@@ -46,7 +48,7 @@ async def test_get_claims(
         "created_at": ANY,
         "updated_at": ANY,
         "video_id": str(video.id),
-        "entities": ANY
+        "entities": ANY,
     }
     assert response.json() == {"data": claims_json}
 
@@ -116,3 +118,22 @@ async def test_update_claim_metadata(
     )
     assert update_response.status_code == 200
     assert update_response.json() == {"data": claim.metadata | updated_metadata}
+
+
+async def test_find_nearest_sentence():
+    claim1 = Claim(video_id=None, claim="", start_time_s=1.5)
+    claim2 = Claim(video_id=None, claim="", start_time_s=2.6)
+    claim3 = Claim(video_id=None, claim="", start_time_s=0)
+    claim4 = Claim(video_id=None, claim="", start_time_s=7)
+
+    sentences = [
+        TranscriptSentence(source="", text="", start_time_s=1),
+        TranscriptSentence(source="", text="", start_time_s=2),
+        TranscriptSentence(source="", text="", start_time_s=3),
+        TranscriptSentence(source="", text="", start_time_s=4),
+    ]
+
+    assert find_nearest_sentence(claim1, sentences) == sentences[0]
+    assert find_nearest_sentence(claim2, sentences) == sentences[2]
+    assert find_nearest_sentence(claim3, sentences) == sentences[0]
+    assert find_nearest_sentence(claim4, sentences) == sentences[3]
