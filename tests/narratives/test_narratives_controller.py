@@ -1,4 +1,3 @@
-from unittest.mock import ANY
 from uuid import UUID, uuid4
 
 from litestar import Litestar
@@ -90,6 +89,35 @@ async def test_get_narrative(
     assert response_data["id"] == str(narrative.id)
     assert response_data["title"] == narrative.title
     assert response_data["description"] == narrative.description
+
+    # Verify new NarrativeDetail fields are present
+    assert "claims" in response_data  # Preview claims
+    assert "claim_count" in response_data  # Total count
+    assert "videos" in response_data  # Preview videos
+    assert "video_count" in response_data  # Total count
+    assert "total_views" in response_data
+    assert "total_likes" in response_data
+    assert "total_comments" in response_data
+    assert "platforms" in response_data
+    assert "language_count" in response_data
+    assert "topics" in response_data
+    assert "entities" in response_data
+
+
+async def test_get_narrative_with_custom_limits(
+    api_key_client: AsyncTestClient[Litestar],
+    narrative: Narrative
+) -> None:
+    response = await api_key_client.get(
+        f"/api/narratives/{narrative.id}?claims_limit=5&videos_limit=5"
+    )
+
+    assert response.status_code == 200
+    response_data = response.json()["data"]
+    assert response_data["id"] == str(narrative.id)
+    # Preview lists should respect the limits (may have fewer if not enough data)
+    assert len(response_data["claims"]) <= 5
+    assert len(response_data["videos"]) <= 5
 
 
 async def test_get_narrative_not_found(
@@ -274,3 +302,138 @@ async def test_get_all_narratives(
 
     assert len(response_data["data"]) >= 2
     assert response_data["total"] >= 2
+
+    # Verify the response contains counts instead of full lists
+    first_item = response_data["data"][0]
+    assert "claim_count" in first_item
+    assert "video_count" in first_item
+    assert "language_count" in first_item
+    assert "entity_count" in first_item
+    assert "description" in first_item
+    assert "created_at" in first_item
+    assert "updated_at" in first_item
+    # Full lists should NOT be present
+    assert "claims" not in first_item
+    assert "videos" not in first_item
+    assert "entities" not in first_item
+
+
+async def test_get_narrative_claims(
+    api_key_client: AsyncTestClient[Litestar],
+    narrative: Narrative
+) -> None:
+    response = await api_key_client.get(
+        f"/api/narratives/{narrative.id}/claims?limit=25&offset=0"
+    )
+
+    assert response.status_code == 200
+    response_data = response.json()
+    assert "data" in response_data
+    assert "total" in response_data
+    assert "page" in response_data
+    assert "size" in response_data
+
+    # Verify it returns a list of claims
+    assert isinstance(response_data["data"], list)
+    assert response_data["page"] == 1
+
+
+async def test_get_narrative_claims_pagination(
+    api_key_client: AsyncTestClient[Litestar],
+    narrative: Narrative
+) -> None:
+    # Test with offset
+    response = await api_key_client.get(
+        f"/api/narratives/{narrative.id}/claims?limit=10&offset=10"
+    )
+
+    assert response.status_code == 200
+    response_data = response.json()
+    assert response_data["page"] == 2
+
+
+async def test_get_narrative_claims_not_found(
+    api_key_client: AsyncTestClient[Litestar]
+) -> None:
+    fake_id = uuid4()
+    response = await api_key_client.get(f"/api/narratives/{fake_id}/claims")
+
+    assert response.status_code == 404
+
+
+async def test_get_narrative_videos(
+    api_key_client: AsyncTestClient[Litestar],
+    narrative: Narrative
+) -> None:
+    response = await api_key_client.get(
+        f"/api/narratives/{narrative.id}/videos?limit=25&offset=0"
+    )
+
+    assert response.status_code == 200
+    response_data = response.json()
+    assert "data" in response_data
+    assert "total" in response_data
+    assert "page" in response_data
+    assert "size" in response_data
+
+    # Verify it returns a list of videos
+    assert isinstance(response_data["data"], list)
+    assert response_data["page"] == 1
+
+
+async def test_get_narrative_videos_pagination(
+    api_key_client: AsyncTestClient[Litestar],
+    narrative: Narrative
+) -> None:
+    # Test with offset
+    response = await api_key_client.get(
+        f"/api/narratives/{narrative.id}/videos?limit=10&offset=10"
+    )
+
+    assert response.status_code == 200
+    response_data = response.json()
+    assert response_data["page"] == 2
+
+
+async def test_get_narrative_videos_not_found(
+    api_key_client: AsyncTestClient[Litestar]
+) -> None:
+    fake_id = uuid4()
+    response = await api_key_client.get(f"/api/narratives/{fake_id}/videos")
+
+    assert response.status_code == 404
+
+
+async def test_get_narrative_stats(
+    api_key_client: AsyncTestClient[Litestar],
+    narrative: Narrative
+) -> None:
+    response = await api_key_client.get(f"/api/narratives/{narrative.id}/stats")
+
+    assert response.status_code == 200
+    response_data = response.json()["data"]
+
+    # Verify the response structure
+    assert "narrative_id" in response_data
+    assert response_data["narrative_id"] == str(narrative.id)
+    assert "time_series" in response_data
+    assert "totals" in response_data
+
+    # Verify time_series is a list
+    assert isinstance(response_data["time_series"], list)
+
+    # Verify totals structure
+    totals = response_data["totals"]
+    assert "views" in totals
+    assert "likes" in totals
+    assert "comments" in totals
+    assert "video_count" in totals
+
+
+async def test_get_narrative_stats_not_found(
+    api_key_client: AsyncTestClient[Litestar]
+) -> None:
+    fake_id = uuid4()
+    response = await api_key_client.get(f"/api/narratives/{fake_id}/stats")
+
+    assert response.status_code == 404

@@ -3,8 +3,16 @@ from typing import Any, AsyncContextManager
 from uuid import UUID
 
 from core.entities.service import EntityService
-from core.models import Narrative
-from core.narratives.models import NarrativeInput, NarrativePatchInput, NarrativeSummary, ViralNarrativeSummary
+from core.models import Claim, Narrative, Video
+from core.narratives.models import (
+    NarrativeDetail,
+    NarrativeInput,
+    NarrativeListItem,
+    NarrativePatchInput,
+    NarrativeStats,
+    NarrativeSummary,
+    ViralNarrativeSummary,
+)
 from core.narratives.repo import NarrativeRepository
 from core.uow import ConnectionFactory, uow
 
@@ -76,9 +84,44 @@ class NarrativeService:
         async with self.repo() as repo:
             return await repo.get_narrative(narrative_id)
 
+    async def get_narrative_detail(
+        self,
+        narrative_id: UUID,
+        claims_limit: int = 10,
+        videos_limit: int = 10,
+    ) -> NarrativeDetail | None:
+        async with self.repo() as repo:
+            return await repo.get_narrative_detail(
+                narrative_id, claims_limit=claims_limit, videos_limit=videos_limit
+            )
+
+    async def get_narrative_claims(
+        self, narrative_id: UUID, limit: int, offset: int
+    ) -> tuple[list[Claim], int]:
+        async with self.repo() as repo:
+            if not await repo.narrative_exists(narrative_id):
+                raise ValueError("narrative not found")
+            return await repo.get_narrative_claims(narrative_id, limit, offset)
+
+    async def get_narrative_videos(
+        self, narrative_id: UUID, limit: int, offset: int
+    ) -> tuple[list[Video], int]:
+        async with self.repo() as repo:
+            if not await repo.narrative_exists(narrative_id):
+                raise ValueError("narrative not found")
+            return await repo.get_narrative_videos(narrative_id, limit, offset)
+
+    async def get_narrative_stats(self, narrative_id: UUID) -> NarrativeStats | None:
+        async with self.repo() as repo:
+            return await repo.get_narrative_stats(narrative_id)
+
     async def get_narratives_by_claim(self, claim_id: UUID) -> list[Narrative]:
         async with self.repo() as repo:
             return await repo.get_narratives_by_claim(claim_id)
+
+    async def get_narratives_by_claim_list(self, claim_id: UUID) -> list[NarrativeListItem]:
+        async with self.repo() as repo:
+            return await repo.get_narratives_by_claim_list(claim_id)
 
     async def get_all_narratives(
         self,
@@ -95,6 +138,44 @@ class NarrativeService:
     ) -> tuple[list[Narrative], int]:
         async with self.repo() as repo:
             narratives = await repo.get_all_narratives(
+                limit=limit,
+                offset=offset,
+                topic_id=topic_id,
+                entity_id=entity_id,
+                text=text,
+                start_date=start_date,
+                end_date=end_date,
+                first_content_start=first_content_start,
+                first_content_end=first_content_end,
+                language=language
+            )
+            total = await repo.count_all_narratives(
+                topic_id=topic_id,
+                entity_id=entity_id,
+                text=text,
+                start_date=start_date,
+                end_date=end_date,
+                first_content_start=first_content_start,
+                first_content_end=first_content_end,
+                language=language
+            )
+            return narratives, total
+
+    async def get_all_narratives_list(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        topic_id: UUID | None = None,
+        entity_id: UUID | None = None,
+        text: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+        first_content_start: datetime | None = None,
+        first_content_end: datetime | None = None,
+        language: str | None = None,
+    ) -> tuple[list[NarrativeListItem], int]:
+        async with self.repo() as repo:
+            narratives = await repo.get_all_narratives_list(
                 limit=limit,
                 offset=offset,
                 topic_id=topic_id,
