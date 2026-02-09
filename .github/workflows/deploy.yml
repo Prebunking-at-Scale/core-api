@@ -1,0 +1,88 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Git tag (e.g. v1.21.0). Leave empty to deploy the latest production release."
+        required: false
+        type: string
+
+env:
+  REGISTRY: europe-west4-docker.pkg.dev/pas-shared/pas
+  IMAGE: core-api
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag and determine environment
+        id: config
+        run: |
+          TAG="${{ inputs.tag }}"
+
+          if [ -z "$TAG" ]; then
+            TAG=$(git tag -l "v*" | grep -v -- '-' | sort -V | tail -1)
+            if [ -z "$TAG" ]; then
+              echo "::error::No production release found"
+              exit 1
+            fi
+            echo "No tag specified, using latest production release: $TAG"
+          fi
+
+          if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag '$TAG' does not exist"
+            exit 1
+          fi
+
+          if [[ "$TAG" == *-dev ]]; then
+            echo "environment=dev" >> "$GITHUB_OUTPUT"
+            echo "gcp_project=pas-development-1" >> "$GITHUB_OUTPUT"
+            echo "cluster=dev-cluster" >> "$GITHUB_OUTPUT"
+          else
+            echo "environment=prod" >> "$GITHUB_OUTPUT"
+            echo "gcp_project=pas-production-1" >> "$GITHUB_OUTPUT"
+            echo "cluster=prod-cluster" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Print deploy details
+        run: |
+          echo "Tag:         ${{ steps.config.outputs.tag }}"
+          echo "Image:       ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ steps.config.outputs.tag }}"
+          echo "Environment: ${{ steps.config.outputs.environment }}"
+          echo "Cluster:     ${{ steps.config.outputs.cluster }}"
+          echo "Project:     ${{ steps.config.outputs.gcp_project }}"
+
+      - name: Update kustomize image tag
+        run: |
+          cd deployment/overlays/${{ steps.config.outputs.environment }}
+          kustomize edit set image \
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ steps.config.outputs.tag }}
+
+      - name: Authenticate with Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: access_token
+          project_id: ${{ steps.config.outputs.gcp_project }}
+          workload_identity_provider: projects/1086645519617/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider
+          service_account: github-actions-service-account@pas-shared.iam.gserviceaccount.com
+          access_token_lifetime: 600s
+
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ steps.config.outputs.cluster }}
+          location: europe-west4-b
+          project_id: ${{ steps.config.outputs.gcp_project }}
+
+      - name: Deploy
+        run: kubectl apply -k deployment/overlays/${{ steps.config.outputs.environment }}
