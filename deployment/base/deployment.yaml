@@ -18,7 +18,7 @@ spec:
       serviceAccountName: workload-identity-sa
       containers:
         - name: core-api
-          image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api:v1.20.0
+          image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api
           imagePullPolicy: Always
           ports:
             - containerPort: 8000
@@ -41,10 +41,6 @@ spec:
             periodSeconds: 60
             timeoutSeconds: 30
           env:
-            - name: APP_BASE_URL
-              value: https://pas-dev.fullfact.org
-            - name: VIDEO_STORAGE_BUCKET_NAME
-              value: pas-prototyping-storage
             - name: DATABASE_HOST
               value: 127.0.0.1
             - name: DATABASE_PORT
@@ -87,8 +83,6 @@ spec:
                 secretKeyRef:
                   name: narratives
                   key: api-key
-            - name: GEMINI_PROJECT
-              value: pas-development-1
             - name: GEMINI_LOCATION
               value: global
             - name: GEMINI_MODEL
@@ -100,6 +94,5 @@ spec:
             - "--auto-iam-authn"
             - "--structured-logs"
             - "--port=5432"
-            - "pas-development-1:europe-west4:pas-vectordb-instance"
           securityContext:
             runAsNonRoot: true

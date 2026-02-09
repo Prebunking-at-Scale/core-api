@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: core-api
+spec:
+  template:
+    spec:
+      containers:
+        - name: core-api
+          env:
+            - name: APP_BASE_URL
+              value: https://pas-dev.fullfact.org
+            - name: VIDEO_STORAGE_BUCKET_NAME
+              value: pas-prototyping-storage
+            - name: GEMINI_PROJECT
+              value: pas-development-1
+        - name: cloud-sql-proxy
+          args:
+            - "--private-ip"
+            - "--auto-iam-authn"
+            - "--structured-logs"
+            - "--port=5432"
+            - "pas-development-1:europe-west4:pas-vectordb-instance"
