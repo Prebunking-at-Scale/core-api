@@ -5,7 +5,6 @@ metadata:
   annotations:
     kubernetes.io/ingress.class: "gce"
     kubernetes.io/ingress.global-static-ip-name: pas-static-ip
-    networking.gke.io/managed-certificates: managed-cert
     networking.gke.io/v1beta1.FrontendConfig: frontend-frontend-config
   labels:
     app: frontend
@@ -15,13 +14,3 @@ spec:
       name: frontend
       port:
         number: 3000
-  rules:
-    - http:
-        paths:
-          - path: /schema/*
-            pathType: ImplementationSpecific
-            backend:
-              service:
-                name: core-api
-                port:
-                  number: 8000

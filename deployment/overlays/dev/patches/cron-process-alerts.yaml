@@ -22,7 +22,5 @@ spec:
                   value: https://pas-dev.fullfact.org
                 - name: VIDEO_STORAGE_BUCKET_NAME
                   value: pas-prototyping-storage
-                - name: EMAIL_FROM
-                  value: "auto@fullfact.org"
                 - name: GEMINI_PROJECT
                   value: pas-development-1

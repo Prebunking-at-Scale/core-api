@@ -7,3 +7,4 @@ resources:
   - frontend-config.yaml
   - backend-config.yaml
   - frontend-service.yaml
+  - ingress.yaml

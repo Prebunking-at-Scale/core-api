@@ -3,7 +3,6 @@ kind: Kustomization
 resources:
   - ../../base
   - managed-cert.yaml
-  - ingress.yaml
 images:
   - name: europe-west4-docker.pkg.dev/pas-shared/pas/core-api
     newTag: v1.21.0
@@ -11,3 +10,4 @@ patches:
   - path: patches/deployment.yaml
   - path: patches/cron-process-alerts.yaml
   - path: patches/service-account.yaml
+  - path: patches/ingress.yaml

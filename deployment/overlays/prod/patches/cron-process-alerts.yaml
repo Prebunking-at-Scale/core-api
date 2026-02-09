@@ -22,17 +22,5 @@ spec:
                   value: https://prebunking.efcsn.com
                 - name: VIDEO_STORAGE_BUCKET_NAME
                   value: pas-production-storage
-                - name: EMAIL_FROM
-                  value: "no-reply@mail.prebunking.efcsn.com"
                 - name: GEMINI_PROJECT
                   value: pas-production-1
-                - name: MAILGUN_DOMAIN
-                  valueFrom:
-                    secretKeyRef:
-                      name: mailgun
-                      key: domain
-                - name: MAILGUN_API_KEY
-                  valueFrom:
-                    secretKeyRef:
-                      name: mailgun
-                      key: api-key
