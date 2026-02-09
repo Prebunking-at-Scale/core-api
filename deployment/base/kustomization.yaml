@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml
+  - cron-process-alerts.yaml
+  - service-account.yaml
+  - frontend-config.yaml
+  - backend-config.yaml
+  - frontend-service.yaml
+  - ingress.yaml

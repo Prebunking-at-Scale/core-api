@@ -6,7 +6,7 @@ metadata:
     app: core-api
     component: alerts-processor
 spec:
-  schedule: "0 */4 * * *" # Every 4 hours at minute 0
+  schedule: "0 */4 * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 12
   failedJobsHistoryLimit: 12
@@ -29,12 +29,11 @@ spec:
                 - "--auto-iam-authn"
                 - "--structured-logs"
                 - "--port=5432"
-                - "pas-production-1:europe-west4:pas-vectordb-instance"
               securityContext:
                 runAsNonRoot: true
           containers:
             - name: process-alerts
-              image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api:v1.21.0
+              image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api
               imagePullPolicy: Always
               command: ["/bin/sh", "-c"]
               args: ["uv run python -m core.cli process-alerts"]
@@ -46,10 +45,6 @@ spec:
                   cpu: 1
                   memory: 2G
               env:
-                - name: APP_BASE_URL
-                  value: https://prebunking.efcsn.com
-                - name: VIDEO_STORAGE_BUCKET_NAME
-                  value: pas-production-storage
                 - name: DATABASE_HOST
                   value: 127.0.0.1
                 - name: DATABASE_PORT
@@ -92,8 +87,6 @@ spec:
                     secretKeyRef:
                       name: narratives
                       key: api-key
-                - name: GEMINI_PROJECT
-                  value: pas-production-1
                 - name: GEMINI_LOCATION
                   value: global
                 - name: GEMINI_MODEL
