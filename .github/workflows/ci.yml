@@ -52,6 +52,8 @@ jobs:
     needs: test
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
     runs-on: ubuntu-latest
+    outputs:
+      new_tag: ${{ steps.tag_version.outputs.new_tag }}
 
     permissions:
       contents: "write"
@@ -107,3 +109,39 @@ jobs:
           tag: ${{ steps.tag_version.outputs.new_tag }}
           name: Release ${{ steps.tag_version.outputs.new_tag }}
           body: ${{ steps.tag_version.outputs.changelog }}
+
+  deploy-dev:
+    name: Deploy to Dev
+    needs: build
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update kustomize image tag
+        run: |
+          cd deployment/overlays/dev
+          kustomize edit set image \
+            europe-west4-docker.pkg.dev/pas-shared/pas/core-api:${{ needs.build.outputs.new_tag }}
+
+      - name: Authenticate with Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: access_token
+          project_id: pas-development-1
+          workload_identity_provider: projects/1086645519617/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider
+          service_account: github-actions-service-account@pas-shared.iam.gserviceaccount.com
+          access_token_lifetime: 600s
+
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: dev-cluster
+          location: europe-west4-b
+          project_id: pas-development-1
+
+      - name: Deploy
+        run: kubectl apply -k deployment/overlays/dev
