@@ -42,7 +42,7 @@ jobs:
             exit 1
           fi
 
-          if [[ "$TAG" == *-dev ]]; then
+          if [[ "$TAG" == *-dev* ]]; then
             echo "environment=dev" >> "$GITHUB_OUTPUT"
             echo "gcp_project=pas-development-1" >> "$GITHUB_OUTPUT"
             echo "cluster=dev-cluster" >> "$GITHUB_OUTPUT"
