@@ -435,19 +435,29 @@ class NarrativeRepository:
                 LEFT JOIN claim_narratives cn ON fn.id = cn.narrative_id
                 GROUP BY fn.id
             ),
-            narrative_videos AS (
-                SELECT
+            distinct_narrative_videos AS (
+                SELECT DISTINCT
                     fn.id as narrative_id,
-                    COUNT(DISTINCT v.id) as video_count,
-                    COALESCE(SUM(v.views), 0) as total_views,
-                    COALESCE(SUM(v.likes), 0) as total_likes,
-                    COALESCE(SUM(v.comments), 0) as total_comments,
-                    ARRAY_AGG(DISTINCT v.platform) FILTER (WHERE v.platform IS NOT NULL) as platforms
+                    v.id as video_id,
+                    v.views,
+                    v.likes,
+                    v.comments,
+                    v.platform
                 FROM filtered_narratives fn
                 LEFT JOIN claim_narratives cn ON fn.id = cn.narrative_id
                 LEFT JOIN video_claims vc ON cn.claim_id = vc.id
                 LEFT JOIN videos v ON vc.video_id = v.id
-                GROUP BY fn.id
+            ),
+            narrative_videos AS (
+                SELECT
+                    narrative_id,
+                    COUNT(video_id) as video_count,
+                    COALESCE(SUM(views), 0) as total_views,
+                    COALESCE(SUM(likes), 0) as total_likes,
+                    COALESCE(SUM(comments), 0) as total_comments,
+                    ARRAY_AGG(DISTINCT platform) FILTER (WHERE platform IS NOT NULL) as platforms
+                FROM distinct_narrative_videos
+                GROUP BY narrative_id
             ),
             narrative_languages AS (
                 SELECT
@@ -554,19 +564,29 @@ class NarrativeRepository:
                 LEFT JOIN claim_narratives cn ON fn.id = cn.narrative_id
                 GROUP BY fn.id
             ),
-            narrative_videos AS (
-                SELECT
+            distinct_narrative_videos AS (
+                SELECT DISTINCT
                     fn.id as narrative_id,
-                    COUNT(DISTINCT v.id) as video_count,
-                    COALESCE(SUM(v.views), 0) as total_views,
-                    COALESCE(SUM(v.likes), 0) as total_likes,
-                    COALESCE(SUM(v.comments), 0) as total_comments,
-                    ARRAY_AGG(DISTINCT v.platform) FILTER (WHERE v.platform IS NOT NULL) as platforms
+                    v.id as video_id,
+                    v.views,
+                    v.likes,
+                    v.comments,
+                    v.platform
                 FROM claim_narratives_filtered fn
                 LEFT JOIN claim_narratives cn ON fn.id = cn.narrative_id
                 LEFT JOIN video_claims vc ON cn.claim_id = vc.id
                 LEFT JOIN videos v ON vc.video_id = v.id
-                GROUP BY fn.id
+            ),
+            narrative_videos AS (
+                SELECT
+                    narrative_id,
+                    COUNT(video_id) as video_count,
+                    COALESCE(SUM(views), 0) as total_views,
+                    COALESCE(SUM(likes), 0) as total_likes,
+                    COALESCE(SUM(comments), 0) as total_comments,
+                    ARRAY_AGG(DISTINCT platform) FILTER (WHERE platform IS NOT NULL) as platforms
+                FROM distinct_narrative_videos
+                GROUP BY narrative_id
             ),
             narrative_languages AS (
                 SELECT
@@ -872,15 +892,18 @@ class NarrativeRepository:
             ),
             video_stats AS (
                 SELECT
-                    COUNT(DISTINCT v.id) as video_count,
-                    COALESCE(SUM(v.views), 0) as total_views,
-                    COALESCE(SUM(v.likes), 0) as total_likes,
-                    COALESCE(SUM(v.comments), 0) as total_comments,
-                    ARRAY_AGG(DISTINCT v.platform) FILTER (WHERE v.platform IS NOT NULL) as platforms
-                FROM videos v
-                JOIN video_claims vc ON v.id = vc.video_id
-                JOIN claim_narratives cn ON vc.id = cn.claim_id
-                WHERE cn.narrative_id = %(narrative_id)s
+                    COUNT(*) as video_count,
+                    COALESCE(SUM(views), 0) as total_views,
+                    COALESCE(SUM(likes), 0) as total_likes,
+                    COALESCE(SUM(comments), 0) as total_comments,
+                    ARRAY_AGG(DISTINCT platform) FILTER (WHERE platform IS NOT NULL) as platforms
+                FROM (
+                    SELECT DISTINCT v.id, v.views, v.likes, v.comments, v.platform
+                    FROM videos v
+                    JOIN video_claims vc ON v.id = vc.video_id
+                    JOIN claim_narratives cn ON vc.id = cn.claim_id
+                    WHERE cn.narrative_id = %(narrative_id)s
+                ) distinct_videos
             ),
             language_stats AS (
                 SELECT COUNT(DISTINCT vc.metadata->>'language') FILTER (
@@ -1057,20 +1080,24 @@ class NarrativeRepository:
             return None
 
         query = """
-            WITH daily_stats AS (
-                SELECT
-                    DATE(v.uploaded_at) as date,
-                    COUNT(DISTINCT v.id) as video_count,
-                    COALESCE(SUM(v.views), 0) as views,
-                    COALESCE(SUM(v.likes), 0) as likes,
-                    COALESCE(SUM(v.comments), 0) as comments
+            WITH distinct_videos AS (
+                SELECT DISTINCT v.id, v.uploaded_at, v.views, v.likes, v.comments
                 FROM videos v
                 JOIN video_claims vc ON v.id = vc.video_id
                 JOIN claim_narratives cn ON vc.id = cn.claim_id
                 WHERE cn.narrative_id = %(narrative_id)s
                   AND v.uploaded_at IS NOT NULL
-                GROUP BY DATE(v.uploaded_at)
-                ORDER BY DATE(v.uploaded_at)
+            ),
+            daily_stats AS (
+                SELECT
+                    DATE(uploaded_at) as date,
+                    COUNT(*) as video_count,
+                    COALESCE(SUM(views), 0) as views,
+                    COALESCE(SUM(likes), 0) as likes,
+                    COALESCE(SUM(comments), 0) as comments
+                FROM distinct_videos
+                GROUP BY DATE(uploaded_at)
+                ORDER BY DATE(uploaded_at)
             )
             SELECT
                 date,
