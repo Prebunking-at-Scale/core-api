@@ -51,19 +51,41 @@ in an inconsistent state.
 Once a migration is ready, update `MIGRATION_TARGET_VERSION` in `core/app.py` to match the version you want the database to be at, and it will automatically apply when next run.
 
 ## Deploying
-Builds automatically happen whenever new code is pushed to the `main` or `dev` branches, and a new release is made.
 
-Once a build has completed (check [Actions](https://github.com/Prebunking-at-Scale/core-api/actions) on GitHub to verify), you'll need to update the image version.
+The app is deployed to GKE clusters using [Kustomize](https://kustomize.io/) overlays. The deployment manifests live in `deployment/`, with a shared `base/` and environment-specific `overlays/dev` and `overlays/prod`.
 
-To do this, `cd deployment/dev` or `cd deployment/prod` depending on where you want to update, and change
- the `image:` line so that the version matches the [release](https://github.com/Prebunking-at-Scale/core-api/releases) you want to deploy e.g.:
+Docker images are pushed to Google Artifact Registry at `europe-west4-docker.pkg.dev/pas-shared/pas/core-api`.
 
-```
-image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api:v0.5.0
+### Automatic deploys
+
+Pushing to `main` or `dev` triggers the **Build** workflow, which runs tests, builds a Docker image, tags it, and pushes it to Artifact Registry.
+
+- **`dev` branch**: After a successful build, the image is automatically deployed to the dev cluster.
+- **`main` branch**: The image is built and pushed, but **not** automatically deployed to production.
+
+You can check build status on the [Actions](https://github.com/Prebunking-at-Scale/core-api/actions) page.
+
+### Deploy via GitHub Actions (recommended)
+
+The **Deploy** workflow can be triggered manually from the [Actions](https://github.com/Prebunking-at-Scale/core-api/actions/workflows/deploy.yml) page:
+
+1. Click **Run workflow**
+2. Optionally provide a tag (e.g. `v1.21.0`). If left empty, the latest production release tag is used.
+3. The environment is determined by the tag: tags containing `-dev` deploy to dev, all others deploy to prod.
+
+### Deploy manually without GitHub Actions
+
+Prerequisites:
+- `gcloud` CLI installed and authenticated
+- `kubectl` installed
+- `kustomize` installed (or use `kubectl` which includes it)
+
+#### Using the deploy script
+
+The simplest approach is the provided deploy script:
+
+```bash
+./deployment/deploy.sh <dev|prod>
 ```
 
-To deploy the change, run the login script to make sure you are authenticated against the correct cluster (dev or prod), and use kubectl to apply the change:
-```
-./login.sh
-kubectl apply -f deployment.yaml
-```
+This authenticates against the correct GKE cluster and applies the kustomize overlay for the given environment. The image tag deployed will be whatever is currently set in `deployment/overlays/<env>/kustomization.yaml`.
