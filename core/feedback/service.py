@@ -35,6 +35,7 @@ class FeedbackService:
             await self.send_feedback_score_to_external_narratives_api(
                 narrative_id=narrative_id,
                 feedback_score=feedback_score,
+                comment=feedback_text,
             )
             logger.info(f"Successfully sent narrative feedback to external API: narrative_id={narrative_id}, score={feedback_score}")
 
@@ -66,6 +67,7 @@ class FeedbackService:
                 narrative_id=narrative_id,
                 feedback_score=feedback_score,
                 content_id=claim_id,  # Use claim_id as content_id
+                comment=feedback_text,
             )
             logger.info(f"Successfully sent claim-narrative feedback to external API: claim_id={claim_id}, narrative_id={narrative_id}, score={feedback_score}")
 
@@ -82,7 +84,13 @@ class FeedbackService:
         async with self.repo() as repo:
             return await repo.get_claim_narrative_feedback(user_id, claim_id, narrative_id)
 
-    async def send_feedback_score_to_external_narratives_api(self, narrative_id: UUID, feedback_score: float, content_id: UUID | None = None) -> None:
+    async def send_feedback_score_to_external_narratives_api(
+        self,
+        narrative_id: UUID,
+        feedback_score: float,
+        content_id: UUID | None = None,
+        comment: str | None = None,
+    ) -> None:
         """Send feedback score to external analytics service."""
         if not _api.is_configured():
             return
@@ -91,6 +99,7 @@ class FeedbackService:
             narrative_id=narrative_id,
             feedback_score=feedback_score,
             content_id=content_id,
+            comment=comment,
         )
 
         if response.status_code >= 400:
