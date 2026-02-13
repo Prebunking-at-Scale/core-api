@@ -2,9 +2,9 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from litestar import Controller, delete, get, patch, post
+from litestar import Controller, Response, delete, get, patch, post
 from litestar.di import Provide
-from litestar.exceptions import NotFoundException
+from litestar.exceptions import NotFoundException, InternalServerException
 
 from core.auth.guards import super_admin
 from core.errors import ConflictError
@@ -19,6 +19,12 @@ from core.narratives.models import (
 )
 from core.narratives.service import NarrativeService
 from core.response import JSON, PaginatedJSON
+from core.services.narratives_api import (
+    delete_narrative_from_external_api,
+    NarrativeNotFoundError,
+    AuthenticationError,
+    NarrativesAPIError,
+)
 from core.uow import ConnectionFactory
 
 
@@ -273,5 +279,26 @@ class NarrativeController(Controller):
         self,
         narrative_service: NarrativeService,
         narrative_id: UUID,
-    ) -> None:
+    ) -> Response[None]:
+        # First, get the narrative to validate it exists and retrieve metadata
+        narrative = await narrative_service.get_narrative(narrative_id)
+        if not narrative:
+            raise NotFoundException(f"Narrative with ID {narrative_id} not found")
+
+        # Check if there's a backend narrative_id in metadata
+        backend_narrative_id = narrative.metadata.get("narrative_id") if narrative.metadata else None
+
+        # If there's a backend ID, try to delete from external API
+        if backend_narrative_id:
+            try:
+                await delete_narrative_from_external_api(backend_narrative_id)
+            except NarrativeNotFoundError:
+                # The narrative doesn't exist in external API, continue with local deletion
+                pass
+            except (AuthenticationError, NarrativesAPIError) as e:
+                print(f"Warning: Failed to delete from external API: {e}")
+                raise InternalServerException(detail=str(e))
+
+        # Delete from local database
         await narrative_service.delete_narrative(narrative_id)
+        return Response(content=None, status_code=204)
