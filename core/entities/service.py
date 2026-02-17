@@ -104,14 +104,16 @@ class EntityService:
         self,
         limit: int = 100,
         offset: int = 0,
-        text: str | None = None
+        text: str | None = None,
+        hours: int | None = None
     ) -> tuple[list[Entity], int]:
         """Get all entities with pagination and optional text search"""
         async with self.repo() as repo:
             entities = await repo.get_all_entities(
                 limit=limit,
                 offset=offset,
-                text=text
+                text=text,
+                hours=hours
             )
-            total = await repo.count_all_entities(text=text)
+            total = await repo.count_all_entities(text=text, hours=hours)
             return entities, total
