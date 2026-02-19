@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from typing import Any, AsyncContextManager
 from uuid import UUID
@@ -14,7 +15,12 @@ from core.narratives.models import (
     ViralNarrativeSummary,
 )
 from core.narratives.repo import NarrativeRepository
+from core.narratives.api import NarrativesApiClient
 from core.uow import ConnectionFactory, uow
+
+logger = logging.getLogger(__name__)
+
+_api = NarrativesApiClient()
 
 
 class NarrativeService:
@@ -238,7 +244,7 @@ class NarrativeService:
                 existing_topic_ids = [topic.id for topic in existing_narrative.topics]
                 merged_topic_ids = list(set(existing_topic_ids + data.topic_ids))
 
-            return await repo.update_narrative(
+            updated = await repo.update_narrative(
                 narrative_id=narrative_id,
                 title=data.title,
                 description=data.description,
@@ -248,9 +254,78 @@ class NarrativeService:
                 metadata=data.metadata,
             )
 
+        # Sync title to external API after successful local update
+        if updated and data.title is not None:
+            external_id = updated.metadata.get("narrative_id")
+            if external_id:
+                await self._sync_external_narrative(
+                    external_narrative_id=external_id,
+                    title=updated.title,
+                )
+
+        return updated
+
     async def delete_narrative(self, narrative_id: UUID) -> None:
         async with self.repo() as repo:
+            narrative = await repo.get_narrative(narrative_id)
+            if narrative and narrative.metadata.get("narrative_id"):
+                await self._delete_external_narrative(
+                    narrative.metadata["narrative_id"]
+                )
+
             await repo.delete_narrative(narrative_id)
+
+    async def _delete_external_narrative(self, external_narrative_id: str) -> None:
+        """Delete a narrative from the external narratives API."""
+        if not _api.is_configured():
+            return
+
+        response = await _api.delete_narrative(external_narrative_id)
+
+        if response.status_code == 404:
+            logger.info(
+                f"Narrative {external_narrative_id} not found on external API, "
+                "continuing with local delete"
+            )
+            return
+
+        if response.status_code >= 400:
+            logger.error(
+                f"External API delete error: status={response.status_code}, "
+                f"response={response.text}"
+            )
+            response.raise_for_status()
+
+        logger.info(f"Deleted narrative {external_narrative_id} from external API")
+
+    async def _sync_external_narrative(
+        self, external_narrative_id: str, title: str
+    ) -> None:
+        """Sync narrative title to the external narratives API.
+
+        Logs a warning on failure but does not raise.
+        """
+        if not _api.is_configured():
+            return
+
+        try:
+            response = await _api.update_narrative_title(
+                external_narrative_id, title
+            )
+
+            if response.status_code >= 400:
+                logger.warning(
+                    f"External API sync error: status={response.status_code}, "
+                    f"response={response.text}"
+                )
+            else:
+                logger.info(
+                    f"Synced narrative {external_narrative_id} to external API"
+                )
+        except Exception as e:
+            logger.warning(
+                f"Failed to sync narrative {external_narrative_id} to external API: {e}"
+            )
 
     async def update_metadata(
         self, narrative_id: UUID, metadata: dict[str, Any]
