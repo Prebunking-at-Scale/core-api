@@ -2,15 +2,16 @@ import logging
 from typing import AsyncContextManager
 from uuid import UUID
 
-import httpx
 from litestar.exceptions import NotFoundException
 
-from core.config import NARRATIVES_API_KEY, NARRATIVES_BASE_URL
 from core.feedback.repo import FeedbackRepository
 from core.models import ClaimNarrativeFeedback, NarrativeFeedback
+from core.narratives.api import NarrativesApiClient
 from core.uow import ConnectionFactory, uow
 
 logger = logging.getLogger(__name__)
+
+_api = NarrativesApiClient()
 
 
 class FeedbackService:
@@ -82,32 +83,18 @@ class FeedbackService:
             return await repo.get_claim_narrative_feedback(user_id, claim_id, narrative_id)
 
     async def send_feedback_score_to_external_narratives_api(self, narrative_id: UUID, feedback_score: float, content_id: UUID | None = None) -> None:
-        """Send feedback score to external analytics service"""
-        payload = {
-            "narrative_id": str(narrative_id),
-            "feedback_score": feedback_score,
-        }
-        
-        if content_id:
-            payload["content_id"] = str(content_id)
-        
-        headers: dict[str, str] = {}
-        if NARRATIVES_API_KEY:
-            headers["X-API-TOKEN"] = NARRATIVES_API_KEY
-        
-        logger.debug(f"Sending feedback to external API: {NARRATIVES_BASE_URL}/feedback, payload={payload}")
-        
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{NARRATIVES_BASE_URL}/feedback",
-                json=payload,
-                headers=headers,
-                timeout=10.0  # Add timeout to prevent hanging
-            )
-            
-            # Log the response for debugging
-            if response.status_code >= 400:
-                logger.error(f"External API error: status={response.status_code}, response={response.text}")
-                response.raise_for_status()
-            else:
-                logger.debug(f"External API success: status={response.status_code}")
+        """Send feedback score to external analytics service."""
+        if not _api.is_configured():
+            return
+
+        response = await _api.send_feedback(
+            narrative_id=narrative_id,
+            feedback_score=feedback_score,
+            content_id=content_id,
+        )
+
+        if response.status_code >= 400:
+            logger.error(f"External API error: status={response.status_code}, response={response.text}")
+            response.raise_for_status()
+        else:
+            logger.debug(f"External API success: status={response.status_code}")
