@@ -9,7 +9,7 @@ from core.config import NARRATIVES_API_KEY, NARRATIVES_BASE_URL
 
 logger = logging.getLogger(__name__)
 
-TIMEOUT = 10.0
+TIMEOUT = 60.0
 
 
 class NarrativesApiClient:
@@ -42,6 +42,30 @@ class NarrativesApiClient:
         async with httpx.AsyncClient() as client:
             return await client.patch(
                 url, json={"title": title}, headers=self._headers(), timeout=TIMEOUT
+            )
+
+    async def add_contents(
+        self, claims: list[dict[str, str | float]]
+    ) -> httpx.Response:
+        url = f"{NARRATIVES_BASE_URL}/add-contents"
+        async with httpx.AsyncClient() as client:
+            return await client.post(
+                url,
+                json={"claims": claims},
+                headers=self._headers(),
+                timeout=TIMEOUT,
+            )
+
+    async def initialize_dashboard(
+        self, payload: dict
+    ) -> httpx.Response:
+        url = f"{NARRATIVES_BASE_URL}/initialize-dashboard"
+        async with httpx.AsyncClient() as client:
+            return await client.post(
+                url,
+                json=payload,
+                headers=self._headers(),
+                timeout=TIMEOUT,
             )
 
     async def send_feedback(

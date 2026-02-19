@@ -3,7 +3,6 @@ import os
 from collections import Counter
 from uuid import UUID
 
-import httpx
 from harmful_claim_finder.transcript_search import get_claims
 from harmful_claim_finder.utils.models import (
     TranscriptSentence as HarmfulClaimFinderSentence,
@@ -18,15 +17,11 @@ from litestar.params import Parameter
 
 from core.analysis import genai
 from core.auth.guards import super_admin
-from core.config import (
-    APP_BASE_URL,
-    NARRATIVES_API_KEY,
-    NARRATIVES_BASE_URL,
-    VIDEO_STORAGE_BUCKET_NAME,
-)
+from core.config import VIDEO_STORAGE_BUCKET_NAME
 from core.errors import ConflictError
 from core.media_feeds.service import MediaFeedsService
 from core.models import Claim, Transcript, TranscriptSentence, Video
+from core.narratives.api import NarrativesApiClient
 from core.narratives.service import NarrativeService
 from core.response import JSON, CursorJSON, PaginatedJSON
 from core.videos.claims.models import VideoClaims
@@ -176,45 +171,35 @@ async def analyze_for_narratives(video: Video, video_claims: list[Claim]) -> Non
         # We don't want to run this during tests
         return
 
-    if not NARRATIVES_BASE_URL or not NARRATIVES_API_KEY:
+    narratives_api = NarrativesApiClient()
+    if not narratives_api.is_configured():
         log.warning("Narratives API configuration missing, skipping narrative analysis")
         return
 
-    if not APP_BASE_URL:
-        log.warning("APP_BASE_URL not configured, skipping narrative analysis")
-        return
+    claims_data = [
+        {
+            "id": str(claim.id),
+            "claim": claim.claim,
+            "score": claim.metadata.get("score", 0),
+            "video_id": str(video.id),
+        }
+        for claim in video_claims
+    ]
 
-    claims_data = []
-    for claim in video_claims:
-        claims_data.append(
-            {
-                "id": str(claim.id),
-                "claim": claim.claim,
-                "score": claim.metadata.get("score", 0),
-                "video_id": str(video.id),
-            }
-        )
+    try:
+        response = await narratives_api.add_contents(claims_data)
 
-    payload = {"claims": claims_data}
-
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        try:
-            url = f"{NARRATIVES_BASE_URL}/add-contents"
-            response = await client.post(
-                url, json=payload, headers={"X-API-TOKEN": NARRATIVES_API_KEY}
+        if response.status_code == 202:
+            log.debug(
+                f"Successfully sent {len(claims_data)} claims to narratives API"
+            )
+        else:
+            log.error(
+                f"Failed to analyze claims: {response.status_code} - {response.text}"
             )
 
-            if response.status_code == 202:
-                log.debug(
-                    f"Successfully sent {len(claims_data)} claims to narratives API"
-                )
-            else:
-                log.error(
-                    f"Failed to analyze claims: {response.status_code} - {response.text}"
-                )
-
-        except Exception as e:
-            log.error(f"Error sending claims to narratives API: {e}", exc_info=True)
+    except Exception as e:
+        log.error(f"Error sending claims to narratives API: {e}", exc_info=True)
 
 
 class VideoController(Controller):
