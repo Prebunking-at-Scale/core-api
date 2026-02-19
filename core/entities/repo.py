@@ -204,7 +204,7 @@ class EntityRepository:
         conditions = []
 
         if hours is not None:
-            conditions.append("updated_at >= NOW() - (%(hours)s || ' hours')::interval")
+            conditions.append("updated_at >= NOW() - %(hours)s * INTERVAL '1 hour'")
 
         if text:
             conditions.append("name ILIKE %(text)s")
@@ -238,12 +238,12 @@ class EntityRepository:
         conditions = []
 
         if hours is not None:
-            conditions.append("updated_at >= NOW() - (%(hours)s || ' hours')::interval")
+            conditions.append("updated_at >= NOW() - %(hours)s * INTERVAL '1 hour'")
 
         if text:
             conditions.append("name ILIKE %(text)s")
             params["text"] = f"%{text}%"
-        
+
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
 
