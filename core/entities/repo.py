@@ -191,18 +191,27 @@ class EntityRepository:
         self,
         limit: int = 100,
         offset: int = 0,
-        text: str | None = None
+        text: str | None = None,
+        hours: int | None = None
     ) -> list[Entity]:
         """Get all entities with pagination and optional text search"""
         query = """
             SELECT id, wikidata_id, name, metadata, created_at, updated_at
             FROM entities
         """
-        params: dict = {"limit": limit, "offset": offset}
+        params: dict = {"limit": limit, "offset": offset, "hours": hours}
+
+        conditions = []
+
+        if hours is not None:
+            conditions.append("updated_at >= NOW() - %(hours)s * INTERVAL '1 hour'")
 
         if text:
-            query += " WHERE name ILIKE %(text)s"
+            conditions.append("name ILIKE %(text)s")
             params["text"] = f"%{text}%"
+
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
 
         query += " ORDER BY created_at DESC LIMIT %(limit)s OFFSET %(offset)s"
 
@@ -221,14 +230,22 @@ class EntityRepository:
             for row in rows
         ]
 
-    async def count_all_entities(self, text: str | None = None) -> int:
+    async def count_all_entities(self, text: str | None = None, hours: int | None = None) -> int:
         """Count total entities with optional text filter"""
         query = "SELECT COUNT(*) FROM entities"
-        params: dict = {}
+        params: dict = {"hours": hours}
+
+        conditions = []
+
+        if hours is not None:
+            conditions.append("updated_at >= NOW() - %(hours)s * INTERVAL '1 hour'")
 
         if text:
-            query += " WHERE name ILIKE %(text)s"
+            conditions.append("name ILIKE %(text)s")
             params["text"] = f"%{text}%"
+
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
 
         await self._session.execute(query, params)
         row = await self._session.fetchone()

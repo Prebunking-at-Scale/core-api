@@ -51,9 +51,10 @@ class EntityController(Controller):
         limit: int = 100,
         offset: int = 0,
         text: str | None = None,
+        hours: int | None = None,
     ) -> PaginatedJSON[list[Entity]]:
         entities, total = await entity_service.get_all_entities(
-            limit=limit, offset=offset, text=text
+            limit=limit, offset=offset, text=text, hours=hours
         )
         page = (offset // limit) + 1 if limit > 0 else 1
         return PaginatedJSON(
