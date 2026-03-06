@@ -18,6 +18,7 @@ DATABASE_PORT=5432
 DATABASE_USER=pas
 DATABASE_PASSWORD=s3cret
 DATABASE_NAME=pas
+VIDEO_STORAGE_BUCKET_NAME=local
 ```
 These values should match those in `compose.yaml`.
 
