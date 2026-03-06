@@ -93,7 +93,10 @@ async def extract_transcript_and_claims(
         log.warning("skipping video without destination path")
         return
 
-    video_path = f"gs://{VIDEO_STORAGE_BUCKET_NAME}/{video.destination_path}"
+    if VIDEO_STORAGE_BUCKET_NAME == "local":
+        video_path = video.source_url
+    else:
+        video_path = f"gs://{VIDEO_STORAGE_BUCKET_NAME}/{video.destination_path}"
     result = await genai.generate_transcript(video_path)
     sentences = [
         TranscriptSentence(**x.model_dump(), metadata={"language": x.language})
@@ -190,9 +193,7 @@ async def analyze_for_narratives(video: Video, video_claims: list[Claim]) -> Non
         response = await narratives_api.add_contents(claims_data)
 
         if response.status_code == 202:
-            log.debug(
-                f"Successfully sent {len(claims_data)} claims to narratives API"
-            )
+            log.debug(f"Successfully sent {len(claims_data)} claims to narratives API")
         else:
             log.error(
                 f"Failed to analyze claims: {response.status_code} - {response.text}"
