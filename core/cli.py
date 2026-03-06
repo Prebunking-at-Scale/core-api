@@ -1,14 +1,14 @@
 import asyncio
-import os
 import sys
 from urllib.parse import urljoin
 
 import click
-import httpx
 from dotenv import load_dotenv
 
 from core.alerts.service import AlertService
 from core.app import pool_factory, postgres_url
+from core.config import APP_BASE_URL
+from core.narratives.api import NarrativesApiClient
 from core.videos.claims.repo import ClaimRepository
 
 load_dotenv()
@@ -30,22 +30,22 @@ async def fetch_claims(limit: int = 400):
 
 async def initialize_dashboard(claims):
     """Send claims to the narratives dashboard API."""
-    narratives_base_endpoint = os.environ.get("NARRATIVES_BASE_ENDPOINT")
-    narratives_api_key = os.environ.get("NARRATIVES_API_KEY")
-    app_base_url = os.environ.get("APP_BASE_URL")
+    narratives_api = NarrativesApiClient()
 
-    if not narratives_base_endpoint or not narratives_api_key or not app_base_url:
+    if not narratives_api.is_configured():
         click.echo(
-            "Error: NARRATIVES_BASE_ENDPOINT, NARRATIVES_API_KEY, and APP_BASE_URL must be set",
+            "Error: NARRATIVES_BASE_ENDPOINT and NARRATIVES_API_KEY must be set",
             err=True,
         )
         sys.exit(1)
 
-    # Generate the absolute API endpoint URLs with placeholders
-    claim_api_url = urljoin(app_base_url, "/api/videos/{video_id}/claims/{claim_id}")
-    narratives_api_url = urljoin(app_base_url, "/api/narratives")
+    if not APP_BASE_URL:
+        click.echo("Error: APP_BASE_URL must be set", err=True)
+        sys.exit(1)
 
-    # Prepare the request payload
+    claim_api_url = urljoin(APP_BASE_URL, "/api/videos/{video_id}/claims/{claim_id}")
+    narratives_api_url = urljoin(APP_BASE_URL, "/api/narratives")
+
     payload = {
         "claims": [
             {
@@ -59,26 +59,14 @@ async def initialize_dashboard(claims):
         "claim_api_url": claim_api_url,
     }
 
-    # Send POST request to initialize-dashboard endpoint
-    url = urljoin(narratives_base_endpoint, "/initialize-dashboard")
-    headers = {"X-API-TOKEN": narratives_api_key, "Content-Type": "application/json"}
-
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.post(
-                url, json=payload, headers=headers, timeout=60.0
-            )
-            response.raise_for_status()
-            click.echo(f"Successfully initialized dashboard with {len(claims)} claims")
-            return response.json()
-        except httpx.HTTPStatusError as e:
-            click.echo(
-                f"Error: HTTP {e.response.status_code} - {e.response.text}", err=True
-            )
-            sys.exit(1)
-        except Exception as e:
-            click.echo(f"Error: {e}", err=True)
-            sys.exit(1)
+    try:
+        response = await narratives_api.initialize_dashboard(payload)
+        response.raise_for_status()
+        click.echo(f"Successfully initialized dashboard with {len(claims)} claims")
+        return response.json()
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
 
 
 @click.command()
