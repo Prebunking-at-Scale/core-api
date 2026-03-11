@@ -50,7 +50,7 @@ DEFAULT_SAFETY_SETTINGS = [
 class Sentence(BaseModel):
     text: str = Field(
         description=(
-            "A complete sentence. " "Do not translate from its original language."
+            "A complete sentence. Do not translate from its original language."
         )
     )
     source: Literal["audio", "video"] = Field(
@@ -98,6 +98,11 @@ Each sentence should be in the same language as it appears or is spoken in the v
                     audio_timestamp=True,
                     response_mime_type="application/json",
                     response_schema=list[Sentence],
+                    labels={
+                        "organisation": "fullfact",
+                        "service": "core-api",
+                        "feature": "transcript",
+                    },
                 ),
                 contents=Content(
                     role="user",
