@@ -120,6 +120,22 @@ async def extract_transcript_and_claims(
         log.warning("could not find organisation list on video")
         return
 
+    # for now the default is just full fact. Could be a more sensible way of doing this
+    default_org = "FULLFACT"  # TODO: update this to be the id for full fact
+    required_topics = [
+        "Climate",
+        "Conflicts",
+        "European Union",
+        "Health",
+        "Migration",
+    ]  # TODO: make these ids as well
+    default_feeds = await media_feeds_service.get_keyword_feeds(default_org)
+    default_keywords = {
+        feed.topic: feed.keywords
+        for feed in default_feeds
+        if feed.topic in required_topics
+    }
+
     all_claims: list[Claim] = []
     for org in orgs:
         try:
@@ -129,6 +145,10 @@ async def extract_transcript_and_claims(
             if not keywords:
                 log.error(f"org {org} not found")
                 continue
+
+            for topic in required_topics:
+                if topic not in keywords or not keywords[topic]:
+                    keywords[topic] = default_keywords[topic]
 
             claims = await get_claims(
                 keywords=keywords,
