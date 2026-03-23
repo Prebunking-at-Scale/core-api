@@ -77,6 +77,7 @@ class Narrative(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     title: str
     description: str
+    evolution_description: str | None = None
     claims: list[Claim] = []
     topics: list[Topic] = []
     entities: list[Entity] = []
