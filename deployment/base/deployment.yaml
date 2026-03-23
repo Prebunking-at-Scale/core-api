@@ -87,6 +87,8 @@ spec:
               value: global
             - name: GEMINI_MODEL
               value: gemini-2.5-flash-lite
+            - name: GENAI_LABEL_SERVICE
+              value: core-api
         - name: cloud-sql-proxy
           image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.17.1
           args:
