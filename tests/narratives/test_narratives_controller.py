@@ -270,6 +270,113 @@ async def test_delete_narrative(
     assert response.status_code == 404
 
 
+async def test_create_narrative_with_evolution_description(
+    api_key_client: AsyncTestClient[Litestar],
+) -> None:
+    narrative_input = NarrativeInput(
+        title="Narrative with evolution",
+        description="A test narrative",
+        evolution_description="Initial classification: grouped by keyword similarity.",
+    )
+
+    response = await api_key_client.post(
+        "/api/narratives/",
+        json=narrative_input.model_dump(mode="json"),
+    )
+
+    assert response.status_code == 201
+    response_data = response.json()["data"]
+    assert response_data["evolution_description"] == "Initial classification: grouped by keyword similarity."
+
+
+async def test_patch_narrative_evolution_description(
+    api_key_client: AsyncTestClient[Litestar],
+    narrative: Narrative,
+) -> None:
+    patch_data = NarrativePatchInput(
+        evolution_description="First update to classification."
+    )
+
+    response = await api_key_client.patch(
+        f"/api/narratives/{narrative.id}",
+        json=patch_data.model_dump(mode="json", exclude_unset=True),
+    )
+
+    assert response.status_code == 200
+    response_data = response.json()["data"]
+    assert "First update to classification." in response_data["evolution_description"]
+
+
+async def test_patch_narrative_evolution_description_concatenates(
+    api_key_client: AsyncTestClient[Litestar],
+) -> None:
+    # Create narrative with initial evolution_description
+    narrative_input = NarrativeInput(
+        title="Concat test narrative",
+        description="Testing concatenation",
+        evolution_description="First entry.",
+    )
+    create_response = await api_key_client.post(
+        "/api/narratives/",
+        json=narrative_input.model_dump(mode="json"),
+    )
+    assert create_response.status_code == 201
+    narrative_id = create_response.json()["data"]["id"]
+
+    # Patch with additional evolution_description
+    patch_data = NarrativePatchInput(evolution_description="Second entry.")
+    patch_response = await api_key_client.patch(
+        f"/api/narratives/{narrative_id}",
+        json=patch_data.model_dump(mode="json", exclude_unset=True),
+    )
+
+    assert patch_response.status_code == 200
+    evolution = patch_response.json()["data"]["evolution_description"]
+    assert "First entry." in evolution
+    assert "Second entry." in evolution
+    assert "--" in evolution  # Timestamp separator
+
+
+async def test_get_narrative_detail_includes_evolution_description(
+    api_key_client: AsyncTestClient[Litestar],
+) -> None:
+    narrative_input = NarrativeInput(
+        title="Detail evolution test",
+        description="Testing detail endpoint",
+        evolution_description="Classification log entry.",
+    )
+    create_response = await api_key_client.post(
+        "/api/narratives/",
+        json=narrative_input.model_dump(mode="json"),
+    )
+    assert create_response.status_code == 201
+    narrative_id = create_response.json()["data"]["id"]
+
+    response = await api_key_client.get(f"/api/narratives/{narrative_id}")
+    assert response.status_code == 200
+    response_data = response.json()["data"]
+    assert response_data["evolution_description"] == "Classification log entry."
+
+
+async def test_get_narrative_list_excludes_evolution_description(
+    api_key_client: AsyncTestClient[Litestar],
+) -> None:
+    narrative_input = NarrativeInput(
+        title="List exclusion test",
+        description="Testing list endpoint",
+        evolution_description="Should not appear in list.",
+    )
+    await api_key_client.post(
+        "/api/narratives/",
+        json=narrative_input.model_dump(mode="json"),
+    )
+
+    response = await api_key_client.get("/api/narratives/")
+    assert response.status_code == 200
+    first_item = response.json()["data"][0]
+    assert "evolution_description" not in first_item
+
+
 async def test_delete_narrative_not_found(
     api_key_client: AsyncTestClient[Litestar]
 ) -> None:
