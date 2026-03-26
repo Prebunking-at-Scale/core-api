@@ -48,6 +48,7 @@ class AlertController(Controller):
             threshold=data.threshold,
             topic_id=data.topic_id,
             keyword=data.keyword,
+            channels=[channel.model_dump() for channel in data.channels],
             metadata=data.metadata,
         )
 
@@ -109,6 +110,7 @@ class AlertController(Controller):
             enabled=data.enabled,
             threshold=data.threshold,
             keyword=data.keyword,
+            channels=[channel.model_dump() for channel in data.channels] if data.channels is not None else None,
         )
 
     @delete(

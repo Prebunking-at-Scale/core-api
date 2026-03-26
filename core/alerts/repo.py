@@ -25,6 +25,7 @@ class AlertRepository:
         threshold: int | None = None,
         topic_id: UUID | None = None,
         keyword: str | None = None,
+        channels: list[dict[str, Any]] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> Alert:
         try:
@@ -32,10 +33,10 @@ class AlertRepository:
                 """
                 INSERT INTO alerts (
                     user_id, organisation_id, name, alert_type, scope,
-                    narrative_id, threshold, topic_id, keyword, metadata
+                    narrative_id, threshold, topic_id, keyword, channels, metadata
                 ) VALUES (
                     %(user_id)s, %(organisation_id)s, %(name)s, %(alert_type)s, %(scope)s,
-                    %(narrative_id)s, %(threshold)s, %(topic_id)s, %(keyword)s, %(metadata)s
+                    %(narrative_id)s, %(threshold)s, %(topic_id)s, %(keyword)s, %(channels)s, %(metadata)s
                 )
                 RETURNING *
                 """,
@@ -49,6 +50,7 @@ class AlertRepository:
                     "threshold": threshold,
                     "topic_id": topic_id,
                     "keyword": keyword,
+                    "channels": Jsonb(channels or [{"channel_type": "email"}]),
                     "metadata": Jsonb(metadata or {}),
                 },
             )
@@ -115,9 +117,10 @@ class AlertRepository:
         enabled: bool | None = None,
         threshold: int | None = None,
         keyword: str | None = None,
+        channels: list[dict[str, Any]] | None = None,
     ) -> Alert | None:
         updates = []
-        params: dict[str, UUID | str | bool | int] = {"alert_id": alert_id}
+        params: dict[str, UUID | str | bool | int | list[dict[str, Any]]] = {"alert_id": alert_id}
 
         if name is not None:
             updates.append("name = %(name)s")
@@ -134,6 +137,10 @@ class AlertRepository:
         if keyword is not None:
             updates.append("keyword = %(keyword)s")
             params["keyword"] = keyword
+
+        if channels is not None:
+            updates.append("channels = %(channels)s")
+            params["channels"] = Jsonb(channels)
 
         if not updates:
             return await self.get_alert(alert_id)
@@ -213,6 +220,37 @@ class AlertRepository:
         )
         return self._session.rowcount > 0
 
+    async def record_channel_delivery(
+        self, 
+        triggered_id: UUID, 
+        channel: str, 
+        status: str
+    ) -> bool:
+        """
+        Record delivery status for a specific notification channel.
+        Updates the notification_status JSONB field with channel-specific status.
+        
+        Args:
+            triggered_id: ID of the triggered alert
+            channel: Channel type (e.g., "email", "slack")
+            status: Delivery status (e.g., "sent", "failed", "skipped")
+            
+        Returns:
+            True if update was successful
+        """
+        await self._session.execute(
+            """
+            UPDATE alerts_triggered
+            SET notification_status = notification_status || %(status_update)s
+            WHERE id = %(triggered_id)s
+            """,
+            {
+                "triggered_id": triggered_id,
+                "status_update": Jsonb({channel: status}),
+            },
+        )
+        return self._session.rowcount > 0
+
     async def get_pending_notifications(
         self, since: datetime | None = None
     ) -> list[AlertTriggered]:
@@ -238,22 +276,22 @@ class AlertRepository:
         self,
         alerts_checked: int,
         alerts_triggered: int,
-        emails_sent: int,
+        notifications_sent: int,
         metadata: dict[str, Any] | None = None,
     ) -> AlertExecution:
         await self._session.execute(
             """
             INSERT INTO alert_executions (
-                alerts_checked, alerts_triggered, emails_sent, metadata
+                alerts_checked, alerts_triggered, notifications_sent, metadata
             ) VALUES (
-                %(alerts_checked)s, %(alerts_triggered)s, %(emails_sent)s, %(metadata)s
+                %(alerts_checked)s, %(alerts_triggered)s, %(notifications_sent)s, %(metadata)s
             )
             RETURNING *
             """,
             {
                 "alerts_checked": alerts_checked,
                 "alerts_triggered": alerts_triggered,
-                "emails_sent": emails_sent,
+                "notifications_sent": notifications_sent,
                 "metadata": Jsonb(metadata or {}),
             },
         )
@@ -319,6 +357,7 @@ class AlertRepository:
                     a.topic_id,
                     a.keyword,
                     a.enabled,
+                    a.channels,
                     a.metadata,
                     a.created_at,
                     a.updated_at
@@ -372,6 +411,7 @@ class AlertRepository:
                 topic_id=row["topic_id"],
                 keyword=row["keyword"],
                 enabled=row["enabled"],
+                channels=row["channels"],
                 metadata=row["metadata"],
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
@@ -389,7 +429,7 @@ class AlertRepository:
         query = """
             SELECT DISTINCT a.id, a.user_id, a.organisation_id, a.name, a.alert_type, 
                    a.scope, a.threshold, a.topic_id, a.keyword, a.enabled, 
-                   a.metadata, a.created_at, a.updated_at, nt.narrative_id
+                   a.channels, a.metadata, a.created_at, a.updated_at, nt.narrative_id
             FROM alerts a
             JOIN narrative_topics nt ON a.topic_id = nt.topic_id
             JOIN narratives n ON nt.narrative_id = n.id
@@ -424,6 +464,7 @@ class AlertRepository:
                 topic_id=row["topic_id"],
                 keyword=row["keyword"],
                 enabled=row["enabled"],
+                channels=row["channels"],
                 metadata=row["metadata"],
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
@@ -454,7 +495,7 @@ class AlertRepository:
             )
             SELECT DISTINCT a.id, a.user_id, a.organisation_id, a.name, a.alert_type,
                    a.scope, a.threshold, a.topic_id, a.keyword, a.enabled,
-                   a.metadata, a.created_at, a.updated_at, n.id as narrative_id
+                   a.channels, a.metadata, a.created_at, a.updated_at, n.id as narrative_id
             FROM alerts a
             JOIN recent_narratives n ON (
                 LOWER(n.title) LIKE LOWER('%%' || a.keyword || '%%')
@@ -482,6 +523,7 @@ class AlertRepository:
                 topic_id=row["topic_id"],
                 keyword=row["keyword"],
                 enabled=row["enabled"],
+                channels=row["channels"],
                 metadata=row["metadata"],
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
