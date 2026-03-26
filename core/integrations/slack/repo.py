@@ -250,6 +250,34 @@ class SlackRepository:
         rows = await self._session.fetchall()
         return [SlackInstallation(**row) for row in rows]
 
+    async def find_installation_by_channel_id(
+        self, channel_id: str
+    ) -> SlackInstallation | None:
+        """
+        Find a Slack installation by channel ID.
+        
+        Args:
+            channel_id: The Slack channel ID (e.g., C0AMLPMBTGR)
+        
+        Returns:
+            The SlackInstallation if found, None otherwise
+        """
+        await self._session.execute(
+            """
+            SELECT * FROM slack_installations
+            WHERE incoming_webhook_channel_id = %(channel_id)s
+            LIMIT 1
+            """,
+            {"channel_id": channel_id},
+        )
+        
+        row = await self._session.fetchone()
+        
+        if not row:
+            return None
+        
+        return SlackInstallation(**row)
+
     async def delete_installation(
         self, organisation_id: UUID, team_id: str
     ) -> None:
