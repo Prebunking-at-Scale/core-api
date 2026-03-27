@@ -89,8 +89,8 @@ class SlackRepository:
     ) -> SlackInstallation:
         """
         Save or update a Slack installation for an organisation.
-        If an installation with the same organisation_id and team_id exists,
-        it will be updated.
+        If an installation with the same organisation_id and incoming_webhook_channel_id exists,
+        it will be updated. This allows multiple installations per organisation (one per channel).
 
         Args:
             installation: The installation to save
@@ -149,8 +149,9 @@ class SlackRepository:
                 %(token_type)s,
                 %(metadata)s
             )
-            ON CONFLICT (organisation_id, team_id)
+            ON CONFLICT (organisation_id, incoming_webhook_channel_id)
             DO UPDATE SET
+                team_id = EXCLUDED.team_id,
                 team_name = EXCLUDED.team_name,
                 enterprise_id = EXCLUDED.enterprise_id,
                 enterprise_name = EXCLUDED.enterprise_name,

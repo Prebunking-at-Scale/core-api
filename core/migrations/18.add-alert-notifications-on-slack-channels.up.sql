@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS slack_installations (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     
-    -- Ensure one installation per organisation and team
+    -- Ensure one installation per organisation per channel
     UNIQUE(organisation_id, incoming_webhook_channel_id)
 );
 
