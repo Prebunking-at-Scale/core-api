@@ -28,8 +28,9 @@ from core.topics.controller import TopicController
 from core.videos.claims.controller import ClaimController, RootClaimController
 from core.videos.controller import VideoController
 from core.videos.transcripts.controller import TranscriptController
+from core.integrations.router import integrations_router
 
-MIGRATION_TARGET_VERSION = 17
+MIGRATION_TARGET_VERSION = 18
 
 postgres_url = f"postgresql://{config.DB_USER}:{config.DB_PASSWORD}@{config.DB_HOST}:{config.DB_PORT}/{config.DB_NAME}"
 
@@ -107,6 +108,7 @@ api_router = Router(
         NarrativeFeedbackController,
         ClaimNarrativeFeedbackController,
         LanguageController,
+        integrations_router
     ],
 )
 

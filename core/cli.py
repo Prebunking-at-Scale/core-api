@@ -108,7 +108,15 @@ def process_alerts():
             click.echo(f"Alerts processed successfully!")
             click.echo(f"  - Alerts checked: {execution.alerts_checked}")
             click.echo(f"  - Alerts triggered: {execution.alerts_triggered}")
-            click.echo(f"  - Emails sent: {execution.emails_sent}")
+            click.echo(f"  - Notifications sent: {execution.notifications_sent}")
+            
+            # Show detailed breakdown if available in metadata
+            if execution.metadata:
+                emails = execution.metadata.get("emails_sent", 0)
+                slack = execution.metadata.get("slack_messages_sent", 0)
+                if emails > 0 or slack > 0:
+                    click.echo(f"    · Emails: {emails}")
+                    click.echo(f"    · Slack messages: {slack}")
             
         except Exception as e:
             click.echo(f"Error processing alerts: {e}", err=True)
