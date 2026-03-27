@@ -120,7 +120,7 @@ class AlertRepository:
         channels: list[dict[str, Any]] | None = None,
     ) -> Alert | None:
         updates = []
-        params: dict[str, UUID | str | bool | int | list[dict[str, Any]]] = {"alert_id": alert_id}
+        params: dict[str, UUID | str | bool | int | list[dict[str, Any]] | Jsonb] = {"alert_id": alert_id}
 
         if name is not None:
             updates.append("name = %(name)s")

@@ -105,6 +105,13 @@ class SlackService:
                 bot_user_id=bot_user_id,
             )
 
+        # Validate required fields from Slack OAuth response
+        team_id = installed_team.get("id")
+        if not isinstance(team_id, str):
+            raise ValueError("Missing required field: team_id")
+        if not isinstance(bot_token, str):
+            raise ValueError("Missing required field: bot_token")
+
         # Create our SlackInstallation model
         installation = SlackInstallation(
             organisation_id=organisation_id,
@@ -112,7 +119,7 @@ class SlackService:
             enterprise_id=installed_enterprise.get("id"),
             enterprise_name=installed_enterprise.get("name"),
             enterprise_url=enterprise_url,
-            team_id=installed_team.get("id"),
+            team_id=team_id,
             team_name=installed_team.get("name"),
             bot_token=bot_token,
             bot_id=bot_id,

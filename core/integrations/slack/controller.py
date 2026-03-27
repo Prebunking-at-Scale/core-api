@@ -5,6 +5,7 @@ from litestar.di import Provide
 from litestar.params import Parameter
 
 from core.auth.models import AuthToken, Identity
+from core.errors import OrganisationIDRequiredError
 from core.integrations.slack.models import SlackInstallationResponse
 from core.integrations.slack.service import SlackService
 from core.response import JSON
@@ -38,9 +39,8 @@ class SlackController(Controller):
         Generate a Slack installation URL for the authenticated user's organisation.
         """
         if not request.user.organisation:
-            return JSON(
-                {"error": "User must be associated with an organisation"},
-                status_code=400,
+            raise OrganisationIDRequiredError(
+                "User must be associated with an organisation"
             )
 
         url = await slack_service.generate_slack_auth_url(
@@ -84,9 +84,8 @@ class SlackController(Controller):
         Returns installation info without sensitive credentials (bot_token excluded).
         """
         if not request.user.organisation:
-            return JSON(
-                {"error": "User must be associated with an organisation"},
-                status_code=400,
+            raise OrganisationIDRequiredError(
+                "User must be associated with an organisation"
             )
 
         installations = await slack_service.get_installations_by_organisation(
