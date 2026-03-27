@@ -23,10 +23,10 @@ logger = logging.getLogger(__name__)
 _api = NarrativesApiClient()
 
 
-def _merge_evolution_description(
+def _merge_narrative_context(
     existing: str | None, new: str | None
 ) -> str | None:
-    """Concatenate evolution descriptions with a timestamped separator."""
+    """Concatenate narrative context entries with a timestamped separator."""
     if not new:
         return existing
     if not existing:
@@ -76,17 +76,17 @@ class NarrativeService:
                 existing_entity_ids = [entity.id for entity in existing_narrative.entities]
                 merged_entity_ids = list(set(existing_entity_ids + entity_ids))
 
-                # Concatenate evolution_description with existing one
-                merged_evolution_description = _merge_evolution_description(
-                    existing_narrative.evolution_description,
-                    narrative.evolution_description,
+                # Concatenate narrative_context with existing one
+                merged_narrative_context = _merge_narrative_context(
+                    existing_narrative.narrative_context,
+                    narrative.narrative_context,
                 )
 
                 updated_narrative = await repo.update_narrative(
                     narrative_id=existing_narrative.id,
                     title=narrative.title,
                     description=narrative.description,
-                    evolution_description=merged_evolution_description,
+                    narrative_context=merged_narrative_context,
                     claim_ids=merged_claim_ids,
                     topic_ids=merged_topic_ids,
                     entity_ids=merged_entity_ids,
@@ -103,7 +103,7 @@ class NarrativeService:
                 topic_ids=narrative.topic_ids,
                 entity_ids=entity_ids,
                 metadata=narrative.metadata,
-                evolution_description=narrative.evolution_description,
+                narrative_context=narrative.narrative_context,
             )
 
     async def get_narrative(self, narrative_id: UUID) -> Narrative | None:
@@ -264,19 +264,19 @@ class NarrativeService:
                 existing_topic_ids = [topic.id for topic in existing_narrative.topics]
                 merged_topic_ids = list(set(existing_topic_ids + data.topic_ids))
 
-            # Concatenate evolution_description with existing one
-            merged_evolution_description = None
-            if data.evolution_description is not None:
-                merged_evolution_description = _merge_evolution_description(
-                    existing_narrative.evolution_description,
-                    data.evolution_description,
+            # Concatenate narrative_context with existing one
+            merged_narrative_context = None
+            if data.narrative_context is not None:
+                merged_narrative_context = _merge_narrative_context(
+                    existing_narrative.narrative_context,
+                    data.narrative_context,
                 )
 
             updated = await repo.update_narrative(
                 narrative_id=narrative_id,
                 title=data.title,
                 description=data.description,
-                evolution_description=merged_evolution_description,
+                narrative_context=merged_narrative_context,
                 claim_ids=merged_claim_ids,
                 topic_ids=merged_topic_ids,
                 entity_ids=merged_entity_ids,
@@ -286,11 +286,11 @@ class NarrativeService:
         # Sync to external API after successful local update
         if updated:
             external_id = updated.metadata.get("narrative_id")
-            if external_id and (data.title is not None or data.evolution_description is not None):
+            if external_id and (data.title is not None or data.narrative_context is not None):
                 await self._sync_external_narrative(
                     external_narrative_id=external_id,
                     title=updated.title,
-                    evolution_description=updated.evolution_description if data.evolution_description is not None else None,
+                    narrative_context=updated.narrative_context if data.narrative_context is not None else None,
                 )
 
         return updated
@@ -332,7 +332,7 @@ class NarrativeService:
         self,
         external_narrative_id: str,
         title: str,
-        evolution_description: str | None = None,
+        narrative_context: str | None = None,
     ) -> None:
         """Sync narrative fields to the external narratives API.
 
@@ -345,7 +345,7 @@ class NarrativeService:
             response = await _api.update_narrative(
                 external_narrative_id,
                 title=title,
-                evolution_description=evolution_description,
+                narrative_context=narrative_context,
             )
 
             if response.status_code >= 400:

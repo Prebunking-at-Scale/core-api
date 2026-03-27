@@ -11,7 +11,7 @@ from core.models import Claim, Entity, Topic, Video
 class NarrativeInput(BaseModel):
     title: str
     description: str
-    evolution_description: str | None = None
+    narrative_context: str | None = None
     claim_ids: list[UUID] = []
     topic_ids: list[UUID] = []
     entities: list[EntityInput] | None = None
@@ -21,7 +21,7 @@ class NarrativeInput(BaseModel):
 class NarrativePatchInput(BaseModel):
     title: str | None = None
     description: str | None = None
-    evolution_description: str | None = None
+    narrative_context: str | None = None
     claim_ids: list[UUID] | None = None
     topic_ids: list[UUID] | None = None
     entities: list[EntityInput] | None = None
@@ -65,7 +65,7 @@ class NarrativeDetail(BaseModel):
     id: UUID
     title: str
     description: str
-    evolution_description: str | None = None
+    narrative_context: str | None = None
     topics: list[Topic] = []
     entities: list[Entity] = []
     claims: list[Claim] = []  # Preview items

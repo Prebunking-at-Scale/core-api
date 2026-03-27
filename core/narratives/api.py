@@ -44,14 +44,14 @@ class NarrativesApiClient:
         self,
         external_narrative_id: str,
         title: str | None = None,
-        evolution_description: str | None = None,
+        narrative_context: str | None = None,
     ) -> httpx.Response:
         url = f"{NARRATIVES_BASE_URL}/narrative/{external_narrative_id}"
         payload: dict[str, str] = {}
         if title is not None:
             payload["title"] = title
-        if evolution_description is not None:
-            payload["evolution_description"] = evolution_description
+        if narrative_context is not None:
+            payload["narrative_context"] = narrative_context
         async with httpx.AsyncClient() as client:
             return await client.patch(
                 url, json=payload, headers=self._headers(), timeout=TIMEOUT
