@@ -38,10 +38,23 @@ class NarrativesApiClient:
     async def update_narrative_title(
         self, external_narrative_id: str, title: str
     ) -> httpx.Response:
+        return await self.update_narrative(external_narrative_id, title=title)
+
+    async def update_narrative(
+        self,
+        external_narrative_id: str,
+        title: str | None = None,
+        narrative_context: str | None = None,
+    ) -> httpx.Response:
         url = f"{NARRATIVES_BASE_URL}/narrative/{external_narrative_id}"
+        payload: dict[str, str] = {}
+        if title is not None:
+            payload["title"] = title
+        if narrative_context is not None:
+            payload["narrative_context"] = narrative_context
         async with httpx.AsyncClient() as client:
             return await client.patch(
-                url, json={"title": title}, headers=self._headers(), timeout=TIMEOUT
+                url, json=payload, headers=self._headers(), timeout=TIMEOUT
             )
 
     async def add_contents(
