@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 from pytest import raises
@@ -84,13 +84,15 @@ async def test_save_installation(
 async def test_update_existing_installation(
     conn_factory, slack_installation: SlackInstallation
 ) -> None:
-    """Test updating an existing installation (same org + team_id)"""
+    """Test updating an existing installation (same org + channel)"""
     original_id = slack_installation.id
 
-    # Create an "updated" installation with same org and team
+    # Create an "updated" installation with same org and channel_id
+    # This simulates reinstalling the app on the same channel
     updated = SlackInstallationFactory.build(
         organisation_id=slack_installation.organisation_id,
-        team_id=slack_installation.team_id,
+        incoming_webhook_channel_id=slack_installation.incoming_webhook_channel_id,
+        team_id=slack_installation.team_id,  # Could be same or different workspace
         team_name="Updated Workspace Name",
         bot_token="xoxb-new-token",
     )
@@ -102,6 +104,36 @@ async def test_update_existing_installation(
     assert saved.id == original_id
     assert saved.team_name == "Updated Workspace Name"
     assert saved.bot_token == "xoxb-new-token"
+
+
+async def test_multiple_installations_per_organisation(
+    conn_factory, slack_organisation: Organisation
+) -> None:
+    """Test that one organisation can have multiple installations (one per channel)"""
+    # Create first installation for channel 1
+    installation1 = SlackInstallationFactory.build(
+        organisation_id=slack_organisation.id,
+        team_id="T11111111",
+        bot_token="xoxb-token-1",
+        incoming_webhook_channel_id="C11111111",
+    )
+
+    # Create second installation for channel 2 (same or different workspace)
+    installation2 = SlackInstallationFactory.build(
+        organisation_id=slack_organisation.id,
+        team_id="T22222222",
+        bot_token="xoxb-token-2",
+        incoming_webhook_channel_id="C22222222",
+    )
+
+    async with uow(SlackRepository, conn_factory) as repo:
+        saved1 = await repo.save_installation(installation1)
+        saved2 = await repo.save_installation(installation2)
+
+    # Both should be saved with different IDs
+    assert saved1.id != saved2.id
+    assert saved1.incoming_webhook_channel_id == "C11111111"
+    assert saved2.incoming_webhook_channel_id == "C22222222"
 
 
 async def test_find_bot_by_team_id(
@@ -126,22 +158,23 @@ async def test_find_bot_not_found(conn_factory) -> None:
 async def test_find_installation_by_organisation(
     conn_factory, slack_installation: SlackInstallation
 ) -> None:
-    """Test finding an installation by organisation_id"""
+    """Test finding installations by organisation_id"""
     async with uow(SlackRepository, conn_factory) as repo:
-        found = await repo.find_installation_by_organisation(
+        found = await repo.find_installations_by_organisation(
             slack_installation.organisation_id
         )
 
     assert found is not None
-    assert found.id == slack_installation.id
-    assert found.organisation_id == slack_installation.organisation_id
+    assert len(found) == 1
+    assert found[0].id == slack_installation.id
+    assert found[0].organisation_id == slack_installation.organisation_id
 
 
 async def test_find_installation_by_organisation_not_found(conn_factory) -> None:
-    """Test that finding by nonexistent organisation returns None"""
+    """Test that finding by nonexistent organisation returns empty list"""
     async with uow(SlackRepository, conn_factory) as repo:
-        found = await repo.find_installation_by_organisation(uuid4())
-    assert found is None
+        found = await repo.find_installations_by_organisation(uuid4())
+    assert found == []
 
 
 async def test_delete_installation(
@@ -155,10 +188,10 @@ async def test_delete_installation(
 
     # Should not be found after deletion
     async with uow(SlackRepository, conn_factory) as repo:
-        found = await repo.find_installation_by_organisation(
+        found = await repo.find_installations_by_organisation(
             slack_installation.organisation_id
         )
-    assert found is None
+    assert found == []
 
 
 async def test_generate_slack_auth_url(
@@ -207,11 +240,17 @@ async def test_process_oauth_callback(
         "bot_id": "B12345",
     }
 
-    with patch("slack_sdk.web.WebClient") as MockWebClient:
+    with patch("core.integrations.slack.service.WebClient") as MockWebClient, \
+         patch("core.integrations.slack.service.AsyncWebClient") as MockAsyncWebClient:
         mock_client = MagicMock()
         mock_client.oauth_v2_access.return_value = mock_oauth_response
         mock_client.auth_test.return_value = mock_auth_test_response
         MockWebClient.return_value = mock_client
+
+        # Mock async client for _ensure_bot_in_channel
+        mock_async_client = MagicMock()
+        mock_async_client.conversations_join = AsyncMock(return_value={"ok": True})
+        MockAsyncWebClient.return_value = mock_async_client
 
         installation = await slack_service.process_oauth_callback(
             code="mock-code", state=state
@@ -239,22 +278,24 @@ async def test_send_message_to_slack(
     slack_service: SlackService, slack_installation: SlackInstallation
 ) -> None:
     """Test sending a message to Slack"""
-    with patch("slack_sdk.web.WebClient") as MockWebClient:
+    with patch("core.integrations.slack.service.AsyncWebClient") as MockAsyncWebClient:
         mock_client = MagicMock()
-        MockWebClient.return_value = mock_client
+        mock_response = {"ok": True}
+        mock_client.chat_postMessage = AsyncMock(return_value=mock_response)
+        MockAsyncWebClient.return_value = mock_client
 
         await slack_service.send_message_to_slack(
             organisation_id=slack_installation.organisation_id,
-            channel="#general",
+            channel=slack_installation.incoming_webhook_channel_id,
             text="Test message",
         )
 
-        # Verify WebClient was called with correct token
-        MockWebClient.assert_called_once_with(token=slack_installation.bot_token)
+        # Verify AsyncWebClient was called with correct token
+        MockAsyncWebClient.assert_called_once_with(token=slack_installation.bot_token)
 
         # Verify chat_postMessage was called
         mock_client.chat_postMessage.assert_called_once_with(
-            channel="#general", text="Test message"
+            channel=slack_installation.incoming_webhook_channel_id, text="Test message"
         )
 
 
@@ -285,8 +326,8 @@ async def test_get_installations_by_organisation_single(
 async def test_get_installations_by_organisation_multiple(
     conn_factory, slack_service: SlackService, slack_organisation: Organisation
 ) -> None:
-    """Test getting multiple installations for the same organisation"""
-    # Create multiple installations for the same organisation (different teams)
+    """Test getting multiple installations for the same organisation (different channels)"""
+    # Create multiple installations for the same organisation with different channels
     from core.integrations.slack.repo import SlackRepository
     from core.uow import uow
 
@@ -295,6 +336,7 @@ async def test_get_installations_by_organisation_multiple(
         team_id="T11111111",
         team_name="Workspace 1",
         bot_token="xoxb-token-1",
+        incoming_webhook_channel_id="C11111111",
     )
 
     installation2 = SlackInstallationFactory.build(
@@ -302,6 +344,7 @@ async def test_get_installations_by_organisation_multiple(
         team_id="T22222222",
         team_name="Workspace 2",
         bot_token="xoxb-token-2",
+        incoming_webhook_channel_id="C22222222",
     )
 
     # Save both installations
@@ -315,8 +358,8 @@ async def test_get_installations_by_organisation_multiple(
     )
 
     assert len(installations) == 2
-    team_ids = {inst.team_id for inst in installations}
-    assert team_ids == {"T11111111", "T22222222"}
+    channel_ids = {inst.incoming_webhook_channel_id for inst in installations}
+    assert channel_ids == {"C11111111", "C22222222"}
 
 
 async def test_get_installations_by_organisation_empty(

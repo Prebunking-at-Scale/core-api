@@ -77,7 +77,7 @@ async def slack_installation(
         bot_token="xoxb-test-token",
         incoming_webhook_url="https://hooks.slack.com/services/TEST/WEBHOOK/URL",
         incoming_webhook_channel="#general",
-        incoming_webhook_channel_id="C12345678",
+        incoming_webhook_channel_id=f"C{uuid4().hex[:10].upper()}",
     )
 
     # Save using the repository through UoW pattern
