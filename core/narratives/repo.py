@@ -32,22 +32,22 @@ class NarrativeRepository:
         topic_ids: list[UUID],
         metadata: dict[str, Any],
         entity_ids: list[UUID] | None = None,
-        evolution_description: str | None = None,
+        narrative_context: str | None = None,
     ) -> Narrative:
         try:
             await self._session.execute(
                 """
                 INSERT INTO narratives (
-                    title, description, evolution_description, metadata
+                    title, description, narrative_context, metadata
                 ) VALUES (
-                    %(title)s, %(description)s, %(evolution_description)s, %(metadata)s
+                    %(title)s, %(description)s, %(narrative_context)s, %(metadata)s
                 )
                 RETURNING *
                 """,
                 {
                     "title": title,
                     "description": description,
-                    "evolution_description": evolution_description,
+                    "narrative_context": narrative_context,
                     "metadata": Jsonb(metadata),
                 },
             )
@@ -681,7 +681,7 @@ class NarrativeRepository:
         narrative_id: UUID,
         title: str | None = None,
         description: str | None = None,
-        evolution_description: str | None = None,
+        narrative_context: str | None = None,
         claim_ids: list[UUID] | None = None,
         topic_ids: list[UUID] | None = None,
         metadata: dict[str, Any] | None = None,
@@ -698,9 +698,9 @@ class NarrativeRepository:
             updates.append("description = %(description)s")
             params["description"] = description
 
-        if evolution_description is not None:
-            updates.append("evolution_description = %(evolution_description)s")
-            params["evolution_description"] = evolution_description
+        if narrative_context is not None:
+            updates.append("narrative_context = %(narrative_context)s")
+            params["narrative_context"] = narrative_context
 
         if metadata is not None:
             updates.append("metadata = metadata || %(metadata)s")
@@ -888,7 +888,7 @@ class NarrativeRepository:
         """
         query = """
             WITH narrative_base AS (
-                SELECT id, title, description, evolution_description, metadata, created_at, updated_at
+                SELECT id, title, description, narrative_context, metadata, created_at, updated_at
                 FROM narratives
                 WHERE id = %(narrative_id)s
             ),
@@ -925,7 +925,7 @@ class NarrativeRepository:
                 nb.id,
                 nb.title,
                 nb.description,
-                nb.evolution_description,
+                nb.narrative_context,
                 nb.metadata,
                 nb.created_at,
                 nb.updated_at,
@@ -965,7 +965,7 @@ class NarrativeRepository:
             id=row["id"],
             title=row["title"],
             description=row["description"] or "",
-            evolution_description=row["evolution_description"],
+            narrative_context=row["narrative_context"],
             topics=topics,
             entities=entities,
             claims=preview_claims,
