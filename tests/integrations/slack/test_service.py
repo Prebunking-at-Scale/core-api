@@ -395,3 +395,89 @@ async def test_slack_installation_response_excludes_sensitive_fields(
     # Verify the installation still has the sensitive fields (unchanged)
     assert slack_installation.bot_token == "xoxb-test-token"
     assert slack_installation.incoming_webhook_url is not None
+
+
+async def test_delete_installation_with_token_revocation(
+    conn_factory, slack_service: SlackService, slack_installation: SlackInstallation
+) -> None:
+    """Test deleting an installation revokes the bot token via Slack API"""
+    
+    # Mock the Slack API client's auth_revoke response
+    mock_revoke_response = {"ok": True, "revoked": True}
+    
+    with patch("core.integrations.slack.service.AsyncWebClient") as mock_client_class:
+        mock_client_instance = AsyncMock()
+        mock_client_instance.auth_revoke = AsyncMock(return_value=mock_revoke_response)
+        mock_client_class.return_value = mock_client_instance
+
+        # Delete the installation
+        await slack_service.delete_installation(
+            organisation_id=slack_installation.organisation_id,
+            installation_id=slack_installation.id,
+        )
+
+        # Verify auth_revoke was called
+        mock_client_instance.auth_revoke.assert_called_once()
+        mock_client_class.assert_called_once_with(token=slack_installation.bot_token)
+
+    # Verify the installation was deleted from database
+    async with uow(SlackRepository, conn_factory) as repo:
+        found = await repo.find_installations_by_organisation(
+            slack_installation.organisation_id
+        )
+    assert found == []
+
+
+async def test_delete_installation_wrong_organisation(
+    slack_service: SlackService, slack_installation: SlackInstallation
+) -> None:
+    """Test that deleting an installation from wrong organisation raises error"""
+    wrong_org_id = uuid4()
+    
+    with raises(ValueError, match="different organisation"):
+        await slack_service.delete_installation(
+            organisation_id=wrong_org_id,
+            installation_id=slack_installation.id,
+        )
+
+
+async def test_delete_installation_not_found(
+    slack_service: SlackService, slack_organisation: Organisation
+) -> None:
+    """Test that deleting non-existent installation raises NotFoundError"""
+    from core.errors import NotFoundError
+    
+    non_existent_id = uuid4()
+    
+    with raises(NotFoundError, match="Installation not found"):
+        await slack_service.delete_installation(
+            organisation_id=slack_organisation.id,
+            installation_id=non_existent_id,
+        )
+
+
+async def test_delete_installation_continues_on_revoke_failure(
+    conn_factory, slack_service: SlackService, slack_installation: SlackInstallation
+) -> None:
+    """Test that installation is deleted even if token revocation fails"""
+    
+    # Mock the Slack API client to raise an error
+    with patch("core.integrations.slack.service.AsyncWebClient") as mock_client_class:
+        mock_client_instance = AsyncMock()
+        mock_client_instance.auth_revoke = AsyncMock(
+            side_effect=Exception("Slack API error")
+        )
+        mock_client_class.return_value = mock_client_instance
+
+        # Delete should still succeed despite revoke error
+        await slack_service.delete_installation(
+            organisation_id=slack_installation.organisation_id,
+            installation_id=slack_installation.id,
+        )
+
+    # Verify the installation was still deleted from database
+    async with uow(SlackRepository, conn_factory) as repo:
+        found = await repo.find_installations_by_organisation(
+            slack_installation.organisation_id
+        )
+    assert found == []

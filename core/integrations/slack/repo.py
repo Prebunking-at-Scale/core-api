@@ -279,6 +279,29 @@ class SlackRepository:
         
         return SlackInstallation(**row)
 
+    async def find_installation_by_id(
+        self, installation_id: UUID
+    ) -> SlackInstallation | None:
+        """
+        Find a Slack installation by its ID.
+
+        Args:
+            installation_id: The installation UUID
+
+        Returns:
+            The installation if found, None otherwise
+        """
+        await self._session.execute(
+            """
+            SELECT * FROM slack_installations
+            WHERE id = %(installation_id)s
+            """,
+            {"installation_id": installation_id},
+        )
+
+        row = await self._session.fetchone()
+        return SlackInstallation(**row) if row else None
+
     async def delete_installation(
         self, organisation_id: UUID, team_id: str
     ) -> None:

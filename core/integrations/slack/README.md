@@ -36,7 +36,7 @@ Persistent storage for Slack workspace installations.
 - Additional fields for enterprise installations, user tokens, etc.
 - `created_at`, `updated_at`: Timestamps
 
-**Constraint**: One installation per (organisation_id, team_id) pair. Reinstalling updates the existing record.
+**Constraint**: One installation per (organisation_id, incoming_webhook_channel_id) pair. Reinstalling updates the existing record.
 
 ## Usage
 
@@ -145,9 +145,45 @@ else:
 
 **Note:** An organisation can have multiple Slack installations, one for each Slack workspace they want to connect. Each installation is identified by the unique combination of `(organisation_id, team_id)`. The installations are returned ordered by creation date (most recent first).
 
+### Deleting an Installation
+
+**Remove a Slack installation:**
+
+```http
+DELETE /api/integrations/slack/installations/{installation_id}
+Authorization: Bearer <token>
+```
+
+Returns: `204 No Content` on success
+
+This endpoint will:
+1. **Revoke the bot token** via Slack API (`auth.revoke`), which:
+   - Deactivates the bot user
+   - Removes the bot from all channels
+   - Invalidates the incoming webhook
+2. **Delete the installation record** from the database
+
+**Note:** After deletion, the bot will no longer have access to any channels and webhooks will stop working. Users will need to reinstall the app to restore functionality.
+
+**Programmatically:**
+
+```python
+# Delete a specific installation
+await slack_service.delete_installation(
+    organisation_id=org.id,
+    installation_id=installation_id
+)
+```
+
+**Error cases:**
+- `404 Not Found`: Installation doesn't exist
+- `400 Bad Request`: Installation belongs to a different organisation
+- `401 Unauthorized`: No authentication token provided
+
+**Graceful failure:** If the Slack API token revocation fails (e.g., token already invalid), the installation will still be deleted from the database. This ensures cleanup even if Slack communication fails.
+
 ## Security Considerations
 
-- **Bot tokens** are stored in plain text. Consider encrypting sensitive fields in production.
 - **OAuth states** expire after 5 minutes to prevent replay attacks.
 - The `/install-url` endpoint requires authentication to prevent unauthorized installations.
 - The `/oauth/callback` endpoint is public (called by Slack) but validates the state token.
@@ -190,13 +226,17 @@ python -m core.migrate
 
 Current Slack app scopes:
 - `incoming-webhook`: Post messages to channels
+- `chat:write`: Send messages as @BOT_NAME
+- `channels:join`: Allow bot to join to private channels
+- `groups:write`: Allow bot to join to public channels
 
 To add more functionality (e.g., read messages, manage channels), update the scopes in `service.py`:
 
 ```python
 authorize_url_generator = AuthorizeUrlGenerator(
     client_id=SLACK_CLIENT_ID,
-    scopes=["incoming-webhook", "chat:write"],
+    scopes=["incoming-webhook", "chat:write", "channels:join", "groups:write"],
+    user_scopes=["channels:write", "groups:write"],  # User scopes needed for inviting bot
     redirect_uri=SLACK_REDIRECT_URI,
 )
 ```
@@ -215,14 +255,3 @@ SLACK_CLIENT_ID=123456789012.123456789012
 SLACK_CLIENT_SECRET=abcdef0123456789abcdef0123456789
 SLACK_REDIRECT_URI=https://api.example.com/integrations/slack/oauth/callback
 ```
-
-## Future Enhancements
-
-Potential improvements:
-
-1. **Background job** to clean up expired OAuth states periodically
-2. **Encryption** for sensitive fields (bot_token, user_token)
-3. **Audit log** for all Slack operations
-4. **Multiple installations** per organisation (different teams/channels)
-5. **Slack Events API** for receiving messages/events
-6. **Slash commands** and interactive components

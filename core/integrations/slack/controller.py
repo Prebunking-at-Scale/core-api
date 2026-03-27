@@ -1,8 +1,10 @@
 from typing import Any
+from uuid import UUID
 
-from litestar import Controller, Request, get
+from litestar import Controller, Request, delete, get
 from litestar.di import Provide
 from litestar.params import Parameter
+from litestar.status_codes import HTTP_204_NO_CONTENT
 
 from core.auth.models import AuthToken, Identity
 from core.errors import OrganisationIDRequiredError
@@ -68,6 +70,8 @@ class SlackController(Controller):
             return "Installation successful! You can close this window."
         except ValueError as e:
             return f"Installation failed: {str(e)}"
+        except Exception as e:
+            return f"An unexpected error occurred. Please, contact support."
 
     @get(
         path="/installations",
@@ -98,3 +102,32 @@ class SlackController(Controller):
             for installation in installations
         ]
         return JSON(response)
+
+    @delete(
+        path="/installations/{installation_id:uuid}",
+        summary="Delete a Slack installation",
+        status_code=HTTP_204_NO_CONTENT,
+    )
+    async def delete_slack_installation(
+        self,
+        request: Request[Identity, AuthToken, Any],
+        slack_service: SlackService,
+        installation_id: UUID,
+    ) -> None:
+        """
+        Delete a Slack installation for the authenticated user's organisation.
+        This will:
+        1. Revoke the bot token via Slack API (deactivates bot, removes channel memberships)
+        2. Delete the installation record from the database
+
+        The bot will lose access to all channels and the incoming webhook will stop working.
+        """
+        if not request.user.organisation:
+            raise OrganisationIDRequiredError(
+                "User must be associated with an organisation"
+            )
+
+        await slack_service.delete_installation(
+            organisation_id=request.user.organisation.id,
+            installation_id=installation_id,
+        )

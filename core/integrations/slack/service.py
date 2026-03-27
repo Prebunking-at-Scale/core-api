@@ -262,3 +262,58 @@ class SlackService:
         """
         async with uow(SlackRepository, self.connection_factory) as repo:
             return await repo.find_installations_by_organisation(organisation_id)
+
+    async def delete_installation(
+        self, organisation_id: UUID, installation_id: UUID
+    ) -> None:
+        """
+        Delete a Slack installation and revoke the bot token.
+        This will:
+        1. Revoke the bot token via Slack API (deactivates bot, removes channel memberships)
+        2. Delete the installation record from the database
+
+        Args:
+            organisation_id: The organisation UUID (for authorization check)
+            installation_id: The installation UUID to delete
+
+        Raises:
+            NotFoundError: If installation not found
+            ValueError: If installation belongs to a different organisation
+            Exception: If token revocation fails (installation will still be deleted)
+        """
+        # Find the installation first (to get bot_token and verify ownership)
+        async with uow(SlackRepository, self.connection_factory) as repo:
+            installation = await repo.find_installation_by_id(installation_id)
+
+        if not installation:
+            from core.errors import NotFoundError
+            raise NotFoundError("Installation not found")
+
+        # Verify the installation belongs to the correct organisation
+        if installation.organisation_id != organisation_id:
+            raise ValueError(
+                "Installation belongs to a different organisation"
+            )
+
+        # Revoke the bot token via Slack API
+        # This deactivates the bot and removes its channel memberships
+        if installation.bot_token:
+            try:
+                bot_client = AsyncWebClient(token=installation.bot_token)
+                response = await bot_client.auth_revoke()
+                
+                if not response.get("ok"):
+                    # Log the error but continue with deletion
+                    error = response.get('error', 'Unknown error')
+                    print(f"Warning: Failed to revoke Slack token: {error}")
+            except Exception as e:
+                # Log the error but continue with deletion
+                # The token might already be invalid or revoked
+                print(f"Warning: Error revoking Slack token: {str(e)}")
+
+        # Delete the installation from the database
+        async with uow(SlackRepository, self.connection_factory) as repo:
+            await repo.delete_installation(
+                organisation_id=organisation_id,
+                team_id=installation.team_id
+            )
