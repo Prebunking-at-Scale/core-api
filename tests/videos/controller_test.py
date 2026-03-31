@@ -1,11 +1,39 @@
 import uuid
 from unittest.mock import ANY
 
+import pytest
 from litestar import Litestar
 from litestar.testing import AsyncTestClient
 
 from core.models import Video
+from core.videos.controller import apply_default_keywords
 from tests.videos.conftest import VideoFactory, create_video
+
+TOPIC_A = uuid.uuid4()
+TOPIC_B = uuid.uuid4()
+TOPIC_C = uuid.uuid4()
+
+DEFAULTS = {TOPIC_A: ["foo", "bar"], TOPIC_B: ["baz"]}
+
+
+@pytest.mark.parametrize(
+    "org_keywords, expected",
+    [
+        ({}, {TOPIC_A: ["foo", "bar"], TOPIC_B: ["baz"]}),
+        ({TOPIC_A: []}, {TOPIC_A: ["foo", "bar"], TOPIC_B: ["baz"]}),
+        ({TOPIC_A: ["custom"]}, {TOPIC_A: ["custom"], TOPIC_B: ["baz"]}),
+        ({TOPIC_C: ["org-only"]}, {TOPIC_A: ["foo", "bar"], TOPIC_B: ["baz"], TOPIC_C: ["org-only"]}),
+    ],
+    ids=["missing topic", "empty topic", "existing keywords kept", "non-default topic preserved"],
+)
+def test_apply_default_keywords(org_keywords, expected):
+    assert apply_default_keywords(org_keywords, DEFAULTS) == expected
+
+
+def test_apply_default_keywords_does_not_mutate_input():
+    org_keywords = {TOPIC_A: []}
+    apply_default_keywords(org_keywords, DEFAULTS)
+    assert org_keywords[TOPIC_A] == []
 
 
 async def test_add_video(
