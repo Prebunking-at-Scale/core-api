@@ -1,6 +1,5 @@
 import logging
 import os
-import core.analysis
 from collections import Counter
 from uuid import UUID
 
@@ -17,6 +16,7 @@ from litestar.exceptions import NotFoundException
 from litestar.params import Parameter
 
 from core.analysis import genai
+from core.analysis.keywords import DEFAULT_KEYWORDS
 from core.auth.guards import super_admin
 from core.config import VIDEO_STORAGE_BUCKET_NAME
 from core.errors import ConflictError
@@ -102,7 +102,7 @@ async def get_default_keywords(topic_service: TopicService) -> dict[str, list[st
     Topic IDs should work for different environments.
     """
     keywords_with_ids: dict[str, list[str]] = {}
-    default_keywords = core.analysis.keywords.DEFAULT_KEYWORDS
+    default_keywords = DEFAULT_KEYWORDS
     for topic_name, keywords in default_keywords.items():
         topic = await topic_service.get_topic_by_name(topic=topic_name)
         if not topic:
