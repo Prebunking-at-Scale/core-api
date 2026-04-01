@@ -230,6 +230,34 @@ async def test_can_re_invite_after_removal(
     assert len(login.organisations) == 1
 
 
+async def test_can_re_invite_after_removal_without_accepting(
+    auth_service: AuthService, organisation: Organisation
+) -> None:
+    email = "unaccepted@fullfact.org"
+
+    token = await auth_service.invite_token(
+        organisation_id=organisation.id,
+        email=email,
+        as_admin=False,
+        auto_accept=False,
+    )
+    assert token
+
+    user = await auth_service.get_user_by_email(email)
+    assert user
+
+    await auth_service.remove_user(user.id, organisation.id)
+
+    new_token = await auth_service.invite_token(
+        organisation_id=organisation.id,
+        email=email,
+        as_admin=False,
+        auto_accept=False,
+    )
+    assert new_token
+    await auth_service.accept_invite(new_token)
+
+
 async def test_resend_invite_token(
     auth_service: AuthService, organisation: Organisation
 ) -> None:

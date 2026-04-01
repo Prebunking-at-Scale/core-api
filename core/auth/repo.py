@@ -222,8 +222,7 @@ class AuthRepository:
                 deactivated = NULL,
                 is_admin = %(is_admin)s
             WHERE
-                organisation_users.accepted IS NOT NULL
-                AND organisation_users.deactivated IS NOT NULL
+                organisation_users.deactivated IS NOT NULL
             """,
             {
                 "organisation_id": organisation_id,
