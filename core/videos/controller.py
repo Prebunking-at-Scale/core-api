@@ -16,6 +16,7 @@ from litestar.exceptions import NotFoundException
 from litestar.params import Parameter
 
 from core.analysis import genai
+from core.analysis.keywords import DEFAULT_KEYWORDS
 from core.auth.guards import super_admin
 from core.config import VIDEO_STORAGE_BUCKET_NAME
 from core.errors import ConflictError
@@ -129,6 +130,8 @@ async def extract_transcript_and_claims(
             if not keywords:
                 log.error(f"org {org} not found")
                 continue
+
+            keywords = DEFAULT_KEYWORDS | keywords
 
             claims = await get_claims(
                 keywords=keywords,
