@@ -338,7 +338,7 @@ class MediaFeedController(Controller):
         return JSON(
             await media_feeds_service.create_keyword_feed(
                 organisation_id=keyword_data.organisation_id,
-                topic=keyword_data.topic,
+                topic_id=keyword_data.topic_id,
                 keywords=keyword_data.keywords,
             )
         )
