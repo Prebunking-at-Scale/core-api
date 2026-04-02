@@ -68,11 +68,13 @@ class MediaFeedRepository:
     ) -> list[KeywordFeed]:
         await self._session.execute(
             """
-            SELECT * FROM keyword_feeds
+            SELECT kf.*, t.topic AS topic_name
+            FROM keyword_feeds kf
+            JOIN topics t ON t.id = kf.topic_id
             WHERE
-                (%(organisation_id)s::uuid IS NULL OR organisation_id = %(organisation_id)s::uuid)
-                AND NOT is_archived
-            ORDER BY organisation_id, created_at DESC
+                (%(organisation_id)s::uuid IS NULL OR kf.organisation_id = %(organisation_id)s::uuid)
+                AND NOT kf.is_archived
+            ORDER BY kf.organisation_id, kf.created_at DESC
         """,
             {"organisation_id": str(organisation_id) if organisation_id else None},
         )
@@ -83,10 +85,12 @@ class MediaFeedRepository:
     ) -> KeywordFeed | None:
         await self._session.execute(
             """
-            SELECT * FROM keyword_feeds
-            WHERE id = %(feed_id)s
-                AND NOT is_archived
-                AND (%(organisation_id)s::uuid IS NULL OR organisation_id = %(organisation_id)s::uuid)
+            SELECT kf.*, t.topic AS topic_name
+            FROM keyword_feeds kf
+            JOIN topics t ON t.id = kf.topic_id
+            WHERE kf.id = %(feed_id)s
+                AND NOT kf.is_archived
+                AND (%(organisation_id)s::uuid IS NULL OR kf.organisation_id = %(organisation_id)s::uuid)
             """,
             {
                 "feed_id": str(feed_id),
@@ -155,27 +159,34 @@ class MediaFeedRepository:
         return created_feeds
 
     async def create_keyword_feed(
-        self, organisation_id: UUID, topic: str, keywords: list[str]
+        self, organisation_id: UUID, topic_id: UUID, keywords: list[str]
     ) -> KeywordFeed:
         try:
             await self._session.execute(
                 """
-                INSERT INTO keyword_feeds (organisation_id, topic, keywords)
-                VALUES (%(organisation_id)s, %(topic)s, %(keywords)s)
-                RETURNING *
+                WITH inserted AS (
+                    INSERT INTO keyword_feeds (organisation_id, topic_id, keywords)
+                    VALUES (%(organisation_id)s, %(topic_id)s, %(keywords)s)
+                    RETURNING *
+                )
+                SELECT inserted.*, t.topic AS topic_name
+                FROM inserted
+                JOIN topics t ON t.id = inserted.topic_id
                 """,
                 {
                     "organisation_id": str(organisation_id),
-                    "topic": topic,
+                    "topic_id": str(topic_id),
                     "keywords": keywords,
                 },
             )
         except psycopg.errors.UniqueViolation:
             raise ConflictError("keyword already exists")
+        except psycopg.errors.ForeignKeyViolation:
+            raise ValueError(f"topic {topic_id} does not exist")
 
         row = await self._session.fetchone()
         if not row:
-            raise ValueError("failed to create topic")
+            raise ValueError("failed to create keyword feed")
 
         return KeywordFeed(**row)
 
@@ -212,26 +223,34 @@ class MediaFeedRepository:
     async def update_keyword_feed(
         self,
         feed_id: UUID,
-        topic: str,
+        topic_id: UUID,
         keywords: list[str],
         organisation_id: UUID | None = None,
     ) -> KeywordFeed:
-        await self._session.execute(
-            """
-            UPDATE keyword_feeds
-            SET topic = %(topic)s, keywords = %(keywords)s, updated_at = NOW()
-            WHERE id = %(feed_id)s
-            AND NOT is_archived
-            AND (%(organisation_id)s::uuid IS NULL OR organisation_id = %(organisation_id)s::uuid)
-            RETURNING *
-            """,
-            {
-                "feed_id": str(feed_id),
-                "topic": topic,
-                "keywords": keywords,
-                "organisation_id": str(organisation_id) if organisation_id else None,
-            },
-        )
+        try:
+            await self._session.execute(
+                """
+                WITH updated AS (
+                    UPDATE keyword_feeds
+                    SET topic_id = %(topic_id)s, keywords = %(keywords)s, updated_at = NOW()
+                    WHERE id = %(feed_id)s
+                    AND NOT is_archived
+                    AND (%(organisation_id)s::uuid IS NULL OR organisation_id = %(organisation_id)s::uuid)
+                    RETURNING *
+                )
+                SELECT updated.*, t.topic AS topic_name
+                FROM updated
+                JOIN topics t ON t.id = updated.topic_id
+                """,
+                {
+                    "feed_id": str(feed_id),
+                    "topic_id": str(topic_id),
+                    "keywords": keywords,
+                    "organisation_id": str(organisation_id) if organisation_id else None,
+                },
+            )
+        except psycopg.errors.ForeignKeyViolation:
+            raise ValueError(f"topic {topic_id} does not exist")
 
         row = await self._session.fetchone()
         if not row:
