@@ -21,7 +21,6 @@ from core.auth.guards import super_admin
 from core.config import VIDEO_STORAGE_BUCKET_NAME
 from core.errors import ConflictError
 from core.media_feeds.service import MediaFeedsService
-from core.topics.service import TopicService
 from core.models import Claim, Transcript, TranscriptSentence, Video
 from core.narratives.api import NarrativesApiClient
 from core.narratives.service import NarrativeService
@@ -59,10 +58,6 @@ async def media_feeds_service(state: State) -> MediaFeedsService:
     return MediaFeedsService(state.connection_factory)
 
 
-async def topic_service(state: State) -> TopicService:
-    return TopicService(state.connection_factory)
-
-
 def find_nearest_sentence(
     claim: Claim, sentences: list[TranscriptSentence]
 ) -> TranscriptSentence:
@@ -80,45 +75,12 @@ def find_nearest_sentence(
     return nearest_sentence
 
 
-def apply_default_keywords(
-    keywords: dict[str, list[str]], default_keywords: dict[str, list[str]]
-) -> dict[str, list[str]]:
-    """
-    Applies default keywords to the given keyword dict.
-    If any of the topics in `default_keywords` are missing from `keywords`,
-    use the default keywords for that topic.
-    For any topics which are defined in `keywords` use those over default.
-    """
-    result = dict(keywords)
-    for topic, default in default_keywords.items():
-        if topic not in result or not result[topic]:
-            result[topic] = default
-    return result
-
-
-async def get_default_keywords(topic_service: TopicService) -> dict[str, list[str]]:
-    """
-    Gets a default set of keywords.
-    Topic IDs should work for different environments.
-    """
-    keywords_with_ids: dict[str, list[str]] = {}
-    default_keywords = DEFAULT_KEYWORDS
-    for topic_name, keywords in default_keywords.items():
-        topic = await topic_service.get_topic_by_name(topic=topic_name)
-        if not topic:
-            raise ValueError(f"No topic named {topic_name}")
-        keywords_with_ids[str(topic.id)] = keywords
-
-    return keywords_with_ids
-
-
 async def extract_transcript_and_claims(
     video: Video,
     video_service: VideoService,
     transcript_service: TranscriptService,
     claims_service: ClaimsService,
     media_feeds_service: MediaFeedsService,
-    topic_service: TopicService,
 ) -> None:
     if "PYTEST_CURRENT_TEST" in os.environ:
         # We don't want to run this during tests
@@ -159,8 +121,6 @@ async def extract_transcript_and_claims(
         log.warning("could not find organisation list on video")
         return
 
-    default_keywords = await get_default_keywords(topic_service)
-
     all_claims: list[Claim] = []
     for org in orgs:
         try:
@@ -171,7 +131,7 @@ async def extract_transcript_and_claims(
                 log.error(f"org {org} not found")
                 continue
 
-            keywords = apply_default_keywords(keywords, default_keywords)
+            keywords = DEFAULT_KEYWORDS | keywords
 
             claims = await get_claims(
                 keywords=keywords,
@@ -256,7 +216,6 @@ class VideoController(Controller):
         "claims_service": Provide(claims_service),
         "narrative_service": Provide(narrative_service),
         "media_feeds_service": Provide(media_feeds_service),
-        "topic_service": Provide(topic_service),
     }
 
     @post(
@@ -271,7 +230,6 @@ class VideoController(Controller):
         transcript_service: TranscriptService,
         claims_service: ClaimsService,
         media_feeds_service: MediaFeedsService,
-        topic_service: TopicService,
         data: Video,
     ) -> Response[JSON[Video]]:
         video = await video_service.add_video(data)
@@ -284,7 +242,6 @@ class VideoController(Controller):
                 transcript_service,
                 claims_service,
                 media_feeds_service,
-                topic_service,
             ),
         )
 
