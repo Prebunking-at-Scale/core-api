@@ -2,14 +2,15 @@ BEGIN;
 
 -- Convert old topic name values to their corresponding UUIDs
 UPDATE keyword_feeds
-SET topic = CASE topic
+SET topic = CASE lower(topic)
     WHEN 'public health' THEN 'bb52f622-b9ee-4d5b-9b70-5fd05046528b'
+    WHEN 'health'        THEN 'bb52f622-b9ee-4d5b-9b70-5fd05046528b'
     WHEN 'eu'            THEN 'ff1bedb9-43e4-49e6-9c3f-27babfb7bfa1'
     WHEN 'climate'       THEN 'db3d996b-e691-4ce5-8c46-e35a82a9b28c'
     WHEN 'migration'     THEN '3cd4a9cd-5906-4b0b-9167-57ff22c2345a'
     WHEN 'conflict'      THEN '0d7aaf8d-5b7e-4c0c-b03a-28457e27ac7d'
 END
-WHERE topic IN ('public health', 'eu', 'climate', 'migration', 'conflict');
+WHERE lower(topic) IN ('health', 'public health', 'eu', 'climate', 'migration', 'conflict');
 
 -- Drop the old unique index
 DROP INDEX IF EXISTS idx_keyword_feeds_unique;
