@@ -66,10 +66,10 @@ class MediaFeedsService:
             return await repo.bulk_create_channel_feeds(organisation_id, channels)
 
     async def create_keyword_feed(
-        self, organisation_id: UUID, topic: str, keywords: list[str]
+        self, organisation_id: UUID, topic_id: UUID, keywords: list[str]
     ) -> KeywordFeed:
         async with self.repo() as repo:
-            return await repo.create_keyword_feed(organisation_id, topic, keywords)
+            return await repo.create_keyword_feed(organisation_id, topic_id, keywords)
 
     async def update_channel_feed(
         self, organisation_id: UUID, feed_id: UUID, data: DTOData[ChannelFeed]
@@ -94,7 +94,7 @@ class MediaFeedsService:
             data.update_instance(feed)
 
             return await repo.update_keyword_feed(
-                feed_id, feed.topic, feed.keywords, organisation_id
+                feed_id, feed.topic_id, feed.keywords, organisation_id
             )
 
     async def archive_channel_feed(self, organisation_id: UUID, feed_id: UUID) -> None:
