@@ -21,7 +21,8 @@ class MediaFeed(BaseModel, abc.ABC):
 
 
 class KeywordFeed(MediaFeed):
-    topic: str
+    topic_id: UUID
+    topic_name: str = ""
     keywords: list[str]
 
 
@@ -66,6 +67,7 @@ class KeywordFeedDTO(PydanticDTO[KeywordFeed]):
             "is_archived",
             "created_at",
             "updated_at",
+            "topic_name",
         },
     )
 

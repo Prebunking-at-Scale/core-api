@@ -9,6 +9,8 @@ from core.auth.service import AuthService
 from core.media_feeds.models import ChannelFeed, KeywordFeed
 from tests.auth.conftest import create_organisation
 from tests.media_feeds.conftest import (
+    CLIMATE_TOPIC_ID,
+    HEALTH_TOPIC_ID,
     ChannelFeedFactory,
     KeywordFeedFactory,
     create_channel_feed,
@@ -252,7 +254,7 @@ async def test_create_keyword_feed(
     api_key_client: AsyncTestClient[Litestar],
     organisation: Organisation,
 ) -> None:
-    keyword_feed = KeywordFeedFactory.build()
+    keyword_feed = KeywordFeedFactory.build(topic_id=CLIMATE_TOPIC_ID)
     keyword_feed_json = keyword_feed.model_dump(
         mode="json", exclude={"id", "created_at", "updated_at"}
     )
@@ -264,7 +266,8 @@ async def test_create_keyword_feed(
     assert response.status_code == 201
     response_data = response.json()["data"]
     assert response_data["organisation_id"] == str(organisation.id)
-    assert response_data["topic"] == keyword_feed.topic
+    assert response_data["topic_id"] == str(CLIMATE_TOPIC_ID)
+    assert response_data["topic_name"] == "Climate"
     assert response_data["keywords"] == keyword_feed.keywords
     assert response_data["is_archived"] is False
 
@@ -274,7 +277,7 @@ async def test_create_keyword_feed_conflict(
     organisation: Organisation,
 ) -> None:
     keyword_feed_data = {
-        "topic": "test_topic",
+        "topic_id": str(CLIMATE_TOPIC_ID),
         "keywords": ["keyword1", "keyword2"],
         "is_archived": False,
     }
@@ -301,9 +304,9 @@ async def test_get_keyword_feeds_by_organisation(
     org1 = await create_organisation(auth_service)
     org2 = await create_organisation(auth_service)
 
-    await create_keyword_feed(api_key_client, organisation=org1)
-    await create_keyword_feed(api_key_client, organisation=org1)
-    await create_keyword_feed(api_key_client, organisation=org2)
+    await create_keyword_feed(api_key_client, organisation=org1, topic_id=CLIMATE_TOPIC_ID)
+    await create_keyword_feed(api_key_client, organisation=org1, topic_id=HEALTH_TOPIC_ID)
+    await create_keyword_feed(api_key_client, organisation=org2, topic_id=CLIMATE_TOPIC_ID)
 
     response = await api_key_client.get(
         "/api/media_feeds/keywords",
@@ -323,9 +326,9 @@ async def test_get_keyword_feeds_without_organisation_filter(
     org1 = await create_organisation(auth_service)
     org2 = await create_organisation(auth_service)
 
-    await create_keyword_feed(api_key_client, organisation=org1)
-    await create_keyword_feed(api_key_client, organisation=org1)
-    await create_keyword_feed(api_key_client, organisation=org2)
+    await create_keyword_feed(api_key_client, organisation=org1, topic_id=CLIMATE_TOPIC_ID)
+    await create_keyword_feed(api_key_client, organisation=org1, topic_id=HEALTH_TOPIC_ID)
+    await create_keyword_feed(api_key_client, organisation=org2, topic_id=CLIMATE_TOPIC_ID)
 
     response = await api_key_client.get("/api/media_feeds/keywords")
     assert response.status_code == 200
@@ -343,7 +346,7 @@ async def test_update_keyword_feed(
     organisation: Organisation,
 ) -> None:
     updated_data = {
-        "topic": "updated_topic",
+        "topic_id": str(HEALTH_TOPIC_ID),
         "keywords": ["new_keyword1", "new_keyword2"],
     }
 
@@ -354,7 +357,8 @@ async def test_update_keyword_feed(
     )
     assert response.status_code == 200
     response_data = response.json()["data"]
-    assert response_data["topic"] == "updated_topic"
+    assert response_data["topic_id"] == str(HEALTH_TOPIC_ID)
+    assert response_data["topic_name"] == "Health"
     assert response_data["keywords"] == ["new_keyword1", "new_keyword2"]
 
 
@@ -364,7 +368,7 @@ async def test_update_keyword_feed_not_found(
 ) -> None:
     non_existent_id = uuid.uuid4()
     updated_data = {
-        "topic": "updated_topic",
+        "topic_id": str(HEALTH_TOPIC_ID),
         "keywords": ["new_keyword1", "new_keyword2"],
     }
 
@@ -408,7 +412,7 @@ async def test_get_organisation_feeds(
     org2 = await create_organisation(auth_service)
 
     await create_channel_feed(api_key_client, organisation=org1)
-    await create_keyword_feed(api_key_client, organisation=org1)
+    await create_keyword_feed(api_key_client, organisation=org1, topic_id=CLIMATE_TOPIC_ID)
     await create_channel_feed(api_key_client, organisation=org2)
 
     response = await api_key_client.get(
@@ -449,9 +453,9 @@ async def test_get_all_feeds(
     org2 = await create_organisation(auth_service)
 
     await create_channel_feed(api_key_client, organisation=org1)
-    await create_keyword_feed(api_key_client, organisation=org1)
+    await create_keyword_feed(api_key_client, organisation=org1, topic_id=CLIMATE_TOPIC_ID)
     await create_channel_feed(api_key_client, organisation=org2)
-    await create_keyword_feed(api_key_client, organisation=org2)
+    await create_keyword_feed(api_key_client, organisation=org2, topic_id=CLIMATE_TOPIC_ID)
 
     response = await api_key_client.get("/api/media_feeds/all")
     assert response.status_code == 200

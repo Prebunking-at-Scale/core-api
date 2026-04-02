@@ -166,7 +166,7 @@ async def extract_transcript_and_claims(
         try:
             org_uuid = UUID(org)
             keyword_feeds = await media_feeds_service.get_keyword_feeds(org_uuid)
-            keywords = {feed.topic: feed.keywords for feed in keyword_feeds}
+            keywords = {str(feed.topic_id): feed.keywords for feed in keyword_feeds}
             if not keywords:
                 log.error(f"org {org} not found")
                 continue
