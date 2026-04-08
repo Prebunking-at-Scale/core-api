@@ -51,6 +51,10 @@ SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 """narrative API settings"""
 NARRATIVES_BASE_URL = os.environ.get("NARRATIVES_BASE_ENDPOINT")
 NARRATIVES_API_KEY = os.environ.get("NARRATIVES_API_KEY")
+"""slack settings"""
+SLACK_CLIENT_ID = os.environ.get("SLACK_CLIENT_ID", "")
+SLACK_CLIENT_SECRET = os.environ.get("SLACK_CLIENT_SECRET", "")
+SLACK_REDIRECT_URI = os.environ.get("SLACK_REDIRECT_URI", "")
 
 """internationalisation"""
 i18n.set("file_format", "json")

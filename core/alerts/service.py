@@ -6,7 +6,7 @@ from uuid import UUID
 from psycopg import AsyncConnection
 from psycopg.rows import DictRow
 
-from core.alerts.models import Alert, AlertExecution, AlertScope, AlertType
+from core.alerts.models import Alert, AlertExecution, AlertScope, AlertType, ChannelType
 from core.alerts.repo import AlertRepository
 from core.auth.models import Identity
 from core.auth.repo import AuthRepository
@@ -14,7 +14,7 @@ from core.email import get_emailer
 from core.email.messages import alerts_message
 from core.errors import NotAuthorizedError, NotFoundError
 from core.narratives.repo import NarrativeRepository
-
+from core.config import APP_BASE_URL
 
 class AlertService:
     def __init__(
@@ -33,6 +33,7 @@ class AlertService:
         threshold: int | None = None,
         topic_id: UUID | None = None,
         keyword: str | None = None,
+        channels: list[dict[str, Any]] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> Alert:
         if not identity.organisation:
@@ -72,6 +73,7 @@ class AlertService:
                     threshold=threshold,
                     topic_id=topic_id,
                     keyword=keyword,
+                    channels=channels,
                     metadata=metadata,
                 )
 
@@ -118,6 +120,7 @@ class AlertService:
         enabled: bool | None = None,
         threshold: int | None = None,
         keyword: str | None = None,
+        channels: list[dict[str, Any]] | None = None,
     ) -> Alert:
         alert = await self.get_alert(alert_id, identity)
 
@@ -130,6 +133,7 @@ class AlertService:
                     enabled=enabled,
                     threshold=threshold,
                     keyword=keyword,
+                    channels=channels,
                 )
                 
         if not updated:
@@ -210,17 +214,21 @@ class AlertService:
                         alerts_triggered += 1
                         triggered_alerts.append((alert, triggered, narrative_id))
 
-                emails_sent = await self._send_alert_notifications(
+                emails_sent, slack_messages_sent = await self._send_alert_notifications(
                     triggered_alerts, alert_repo, auth_repo, narrative_repo
                 )
+                
+                notifications_sent = emails_sent + slack_messages_sent
 
                 execution = await alert_repo.record_execution(
                     alerts_checked=alerts_checked,
                     alerts_triggered=alerts_triggered,
-                    emails_sent=emails_sent,
+                    notifications_sent=notifications_sent,
                     metadata={
                         "since": since.isoformat(),
                         "completed_at": datetime.now(timezone.utc).isoformat(),
+                        "emails_sent": emails_sent,
+                        "slack_messages_sent": slack_messages_sent,
                     },
                 )
 
@@ -232,9 +240,14 @@ class AlertService:
         alert_repo: AlertRepository,
         auth_repo: AuthRepository,
         narrative_repo: NarrativeRepository,
-    ) -> int:
-        """Send email notifications for triggered alerts."""
+    ) -> tuple[int, int]:
+        """Send notifications for triggered alerts via configured channels (email and/or Slack).
         
+        Returns:
+            Tuple of (emails_sent, slack_messages_sent)
+        """
+        
+        # Group alerts by (user_id, org_id)
         user_alerts = defaultdict(list)
         
         for alert, triggered, narrative_id in triggered_alerts:
@@ -242,50 +255,204 @@ class AlertService:
             user_alerts[key].append((alert, triggered, narrative_id))
 
         emails_sent = 0
+        slack_messages_sent = 0
         
         for (user_id, org_id), alerts in user_alerts.items():
-            user = await auth_repo.get_user_by_id(user_id)
-            org = await auth_repo.get_organisation(org_id)
+            # Separate alerts by channel type
+            email_alerts = [a for a in alerts if a[0].has_email_channel]
+            slack_alerts = [a for a in alerts if a[0].has_slack_channel]
             
-            if not user or not org:
-                continue
+            # Send email notifications
+            if email_alerts:
+                sent = await self._send_email_notification(
+                    user_id, org_id, email_alerts, alert_repo, auth_repo, narrative_repo
+                )
+                emails_sent += sent
+            
+            # Send Slack notifications
+            if slack_alerts:
+                sent = await self._send_slack_notification(
+                    org_id, slack_alerts, alert_repo, narrative_repo
+                )
+                slack_messages_sent += sent
 
-            alert_details = []
-            for alert, triggered, narrative_id in alerts:
-                narrative = await narrative_repo.get_narrative(narrative_id)
-                if narrative:
-                    alert_details.append({
-                        "alert_name": alert.name,
-                        "alert_type": alert.alert_type.value,
-                        "narrative_title": narrative.title,
-                        "narrative_id": str(narrative_id),
-                        "trigger_value": triggered.trigger_value,
-                        "threshold": alert.threshold,
-                        "keyword": alert.keyword,
-                        "triggered_at": triggered.triggered_at,
-                    })
+        return emails_sent, slack_messages_sent
+    
+    async def _send_email_notification(
+        self,
+        user_id: UUID,
+        org_id: UUID,
+        alerts: list[tuple[Alert, Any, UUID]],
+        alert_repo: AlertRepository,
+        auth_repo: AuthRepository,
+        narrative_repo: NarrativeRepository,
+    ) -> int:
+        """Send email notification for a group of alerts."""
+        user = await auth_repo.get_user_by_id(user_id)
+        org = await auth_repo.get_organisation(org_id)
+        
+        if not user or not org:
+            return 0
 
-            if alert_details:
-                subject, body = alerts_message(
-                    organisation_name=org.display_name,
-                    alerts=alert_details,
-                    locale=org.language,
+        alert_details = []
+        for alert, triggered, narrative_id in alerts:
+            narrative = await narrative_repo.get_narrative(narrative_id)
+            if narrative:
+                alert_details.append({
+                    "alert_name": alert.name,
+                    "alert_type": alert.alert_type.value,
+                    "narrative_title": narrative.title,
+                    "narrative_id": str(narrative_id),
+                    "trigger_value": triggered.trigger_value,
+                    "threshold": alert.threshold,
+                    "keyword": alert.keyword,
+                    "triggered_at": triggered.triggered_at,
+                })
+
+        if not alert_details:
+            return 0
+
+        subject, body = alerts_message(
+            organisation_name=org.display_name,
+            alerts=alert_details,
+            locale=org.language,
+        )
+        
+        try:
+            emailer = await get_emailer()
+            emailer.send(
+                to=user.email,
+                subject=subject,
+                html=body,
+            )
+            
+            # Mark email delivery as successful
+            for _, triggered, _ in alerts:
+                await alert_repo.record_channel_delivery(
+                    triggered.id, ChannelType.EMAIL.value, "sent"
+                )
+                # Also mark legacy field for backward compatibility
+                await alert_repo.mark_notification_sent(triggered.id)
+            
+            return 1
+        except Exception as e:
+            print(f"Warning: Failed to send email to {user.email}: {e}")
+            
+            # Mark email delivery as failed
+            for _, triggered, _ in alerts:
+                await alert_repo.record_channel_delivery(
+                    triggered.id, ChannelType.EMAIL.value, "failed"
+                )
+            
+            return 0
+    
+    async def _send_slack_notification(
+        self,
+        org_id: UUID,
+        alerts: list[tuple[Alert, Any, UUID]],
+        alert_repo: AlertRepository,
+        narrative_repo: NarrativeRepository,
+    ) -> int:
+        """Send Slack notifications for a group of alerts.
+        
+        Returns:
+            Number of Slack messages successfully sent
+        """
+        from core.integrations.slack.service import SlackService
+        
+        # Get Slack installations for this organization
+        slack_service = SlackService(self._connection_factory)
+        installations = await slack_service.get_installations_by_organisation(org_id)
+        
+        if not installations:
+            # No Slack configured for this organization
+            for alert, triggered, _ in alerts:
+                await alert_repo.record_channel_delivery(
+                    triggered.id, ChannelType.SLACK.value, "skipped"
+                )
+            return 0
+        
+        # Group alerts by slack_channel_id
+        alerts_by_channel = defaultdict(list)
+        for alert, triggered, narrative_id in alerts:
+            for channel_id in alert.slack_channel_ids:
+                alerts_by_channel[channel_id].append((alert, triggered, narrative_id))
+        
+        messages_sent = 0
+        
+        # Send to each configured Slack channel
+        for channel_id, channel_alerts in alerts_by_channel.items():
+            # Format message for this group of alerts
+            message = await self._format_slack_alert_message(
+                channel_alerts, narrative_repo
+            )
+            
+            try:
+                # Send message using channel_id directly
+                await slack_service.send_message_to_slack(
+                    organisation_id=org_id,
+                    channel=channel_id,
+                    text=message
                 )
                 
-                try:
-                    emailer = await get_emailer()
-                    emailer.send(
-                        to=user.email,
-                        subject=subject,
-                        html=body,
+                messages_sent += 1
+                
+                # Mark as sent
+                for _, triggered, _ in channel_alerts:
+                    await alert_repo.record_channel_delivery(
+                        triggered.id, ChannelType.SLACK.value, "sent"
                     )
-                    emails_sent += 1
                     
-                    for _, triggered, _ in alerts:
-                        await alert_repo.mark_notification_sent(triggered.id)
-                except Exception as e:
-                    print(f"Warning: Failed to send email to {user.email}: {e}")
-                    for _, triggered, _ in alerts:
-                        await alert_repo.mark_notification_sent(triggered.id)
-
-        return emails_sent
+            except Exception as e:
+                print(f"Warning: Failed to send Slack notification to channel {channel_id}: {e}")
+                # Mark as failed
+                for _, triggered, _ in channel_alerts:
+                    await alert_repo.record_channel_delivery(
+                        triggered.id, ChannelType.SLACK.value, "failed"
+                    )
+        
+        return messages_sent
+    
+    async def _format_slack_alert_message(
+        self,
+        alerts: list[tuple[Alert, Any, UUID]],
+        narrative_repo: NarrativeRepository,
+    ) -> str:
+        """Format alerts into a Slack-friendly message (Markdown)."""
+        
+        lines = ["🔔 *Alert Notifications*\n"]
+        
+        for alert, triggered, narrative_id in alerts:
+            narrative = await narrative_repo.get_narrative(narrative_id)
+            if not narrative:
+                continue
+            
+            alert_name = alert.name
+            alert_type = alert.alert_type.value
+            narrative_title = narrative.title
+            
+            # Build description based on alert type (similar to email)
+            if alert_type == "narrative_views":
+                description = f"Narrative \"{narrative_title}\" reached {triggered.trigger_value:,} views (threshold: {alert.threshold:,})"
+            elif alert_type == "narrative_claims_count":
+                description = f"Narrative \"{narrative_title}\" reached {triggered.trigger_value} claims (threshold: {alert.threshold})"
+            elif alert_type == "narrative_videos_count":
+                description = f"Narrative \"{narrative_title}\" reached {triggered.trigger_value} videos (threshold: {alert.threshold})"
+            elif alert_type == "narrative_with_topic":
+                description = f"New narrative \"{narrative_title}\" created with tracked topic"
+            elif alert_type == "keyword":
+                description = f"Narrative \"{narrative_title}\" contains keyword \"{alert.keyword}\""
+            else:
+                description = f"Alert triggered for narrative \"{narrative_title}\""
+            
+            # Format alert item
+            lines.append(f"*{alert_name}*")
+            lines.append(f"_{alert_type.replace('_', ' ').title()}_")
+            lines.append(f"{description}")
+            
+            # Add link to narrative
+            narrative_url = f"{APP_BASE_URL}/narratives/{narrative_id}"
+            lines.append(f"<{narrative_url}|View Narrative →>")
+            lines.append("")  # Empty line between alerts
+        
+        return "\n".join(lines)

@@ -28,6 +28,7 @@ from core.topics.controller import TopicController
 from core.videos.claims.controller import ClaimController, RootClaimController
 from core.videos.controller import VideoController
 from core.videos.transcripts.controller import TranscriptController
+from core.integrations.router import integrations_router
 
 MIGRATION_TARGET_VERSION = 18
 
@@ -107,6 +108,7 @@ api_router = Router(
         NarrativeFeedbackController,
         ClaimNarrativeFeedbackController,
         LanguageController,
+        integrations_router
     ],
 )
 
