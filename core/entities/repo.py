@@ -188,48 +188,103 @@ class EntityRepository:
             updated_at=row["updated_at"],
         )
 
-    async def get_all_entities(
-        self,
-        limit: int = 100,
-        offset: int = 0,
-        text: str | None = None,
-        hours: int | None = None
-    ) -> list[Entity]:
-        """Get all entities with pagination and optional text search"""
-        query = """
-            SELECT id, wikidata_id, name, metadata, created_at, updated_at
-            FROM entities
-        """
-        params: dict = {"limit": limit, "offset": offset, "hours": hours}
+    _ENRICHED_CTES = """
+        WITH entity_video_stats AS (
+            SELECT
+                ce.entity_id,
+                COUNT(DISTINCT c.id) AS total_claims,
+                COUNT(DISTINCT v.id) AS total_videos,
+                COALESCE(
+                    array_agg(DISTINCT v.platform) FILTER (WHERE v.platform IS NOT NULL),
+                    ARRAY[]::text[]
+                ) AS platforms,
+                COALESCE(
+                    array_agg(DISTINCT v.metadata->>'language')
+                        FILTER (WHERE v.metadata->>'language' IS NOT NULL),
+                    ARRAY[]::text[]
+                ) AS languages
+            FROM claim_entities ce
+            LEFT JOIN video_claims c ON ce.claim_id = c.id
+            LEFT JOIN videos v ON c.video_id = v.id
+            GROUP BY ce.entity_id
+        ),
+        entity_narrative_stats AS (
+            SELECT entity_id, COUNT(*) AS linked_narratives
+            FROM narrative_entities
+            GROUP BY entity_id
+        )
+    """
 
-        conditions = []
+    _LATERAL_STATS_JOIN = """
+        LEFT JOIN LATERAL (
+            SELECT
+                COUNT(DISTINCT c.id) AS total_claims,
+                COUNT(DISTINCT v.id) AS total_videos,
+                COALESCE(
+                    array_agg(DISTINCT v.platform) FILTER (WHERE v.platform IS NOT NULL),
+                    ARRAY[]::text[]
+                ) AS platforms,
+                COALESCE(
+                    array_agg(DISTINCT v.metadata->>'language')
+                        FILTER (WHERE v.metadata->>'language' IS NOT NULL),
+                    ARRAY[]::text[]
+                ) AS languages
+            FROM claim_entities ce
+            LEFT JOIN video_claims c ON ce.claim_id = c.id
+            LEFT JOIN videos v ON c.video_id = v.id
+            WHERE ce.entity_id = e.id
+        ) evs ON true
+        LEFT JOIN LATERAL (
+            SELECT COUNT(*) AS linked_narratives
+            FROM narrative_entities
+            WHERE entity_id = e.id
+        ) ens ON true
+    """
+
+    @staticmethod
+    def _entity_only_filters(text: str | None, hours: int | None) -> tuple[str, dict]:
+        params: dict = {}
+        where: list[str] = []
+        if hours is not None:
+            where.append("e.updated_at >= NOW() - %(hours)s * INTERVAL '1 hour'")
+            params["hours"] = hours
+        if text:
+            where.append("e.name ILIKE %(text)s")
+            params["text"] = f"%{text}%"
+        clause = " WHERE " + " AND ".join(where) if where else ""
+        return clause, params
+
+    @staticmethod
+    def _build_enriched_filters(
+        text: str | None,
+        hours: int | None,
+        language: str | None,
+        narratives_min: int | None,
+        narratives_max: int | None,
+    ) -> tuple[str, dict]:
+        params: dict = {}
+        where: list[str] = []
 
         if hours is not None:
-            conditions.append("updated_at >= NOW() - %(hours)s * INTERVAL '1 hour'")
-
+            where.append("e.updated_at >= NOW() - %(hours)s * INTERVAL '1 hour'")
+            params["hours"] = hours
         if text:
-            conditions.append("name ILIKE %(text)s")
+            where.append("e.name ILIKE %(text)s")
             params["text"] = f"%{text}%"
+        if language is not None:
+            where.append("%(language)s = ANY(COALESCE(evs.languages, ARRAY[]::text[]))")
+            params["language"] = language
+        if narratives_min is not None:
+            where.append("COALESCE(ens.linked_narratives, 0) >= %(narratives_min)s")
+            params["narratives_min"] = narratives_min
+        if narratives_max is not None:
+            where.append("COALESCE(ens.linked_narratives, 0) <= %(narratives_max)s")
+            params["narratives_max"] = narratives_max
 
-        if conditions:
-            query += " WHERE " + " AND ".join(conditions)
-
-        query += " ORDER BY created_at DESC LIMIT %(limit)s OFFSET %(offset)s"
-
-        await self._session.execute(query, params)
-        rows = await self._session.fetchall()
-
-        return [
-            Entity(
-                id=row["id"],
-                wikidata_id=row["wikidata_id"],
-                name=row["name"],
-                metadata=row["metadata"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-            )
-            for row in rows
-        ]
+        clause = ""
+        if where:
+            clause = " WHERE " + " AND ".join(where)
+        return clause, params
 
     async def count_all_entities(
         self,
@@ -239,57 +294,28 @@ class EntityRepository:
         narratives_min: int | None = None,
         narratives_max: int | None = None,
     ) -> int:
-        """Count total entities with optional text, hours, language, and narratives range filters"""
-        params: dict = {}
-        conditions = []
+        """Count total entities matching the same filters as get_all_enriched_entities."""
+        # Fast path: no aggregate filter, count straight from entities.
+        if language is None and narratives_min is None and narratives_max is None:
+            where_clause, params = self._entity_only_filters(text, hours)
+            query = "SELECT COUNT(*) AS count FROM entities e" + where_clause
+            await self._session.execute(query, params)
+            row = await self._session.fetchone()
+            return row["count"] if row else 0
 
-        needs_having = narratives_min is not None or narratives_max is not None
-        needs_joins = language is not None or needs_having
-
-        if needs_having:
-            query = "SELECT COUNT(*) FROM (\n    SELECT e.id\n    FROM entities e"
-        else:
-            query = "SELECT COUNT(DISTINCT e.id)\nFROM entities e"
-
-        if needs_joins:
-            query += """
-            LEFT JOIN claim_entities ce ON e.id = ce.entity_id
-            LEFT JOIN claim_narratives cn ON ce.claim_id = cn.claim_id
-            LEFT JOIN video_claims c ON cn.claim_id = c.id
-            LEFT JOIN videos v ON c.video_id = v.id
-            LEFT JOIN narrative_entities ne ON e.id = ne.entity_id
-            LEFT JOIN narratives n ON ne.narrative_id = n.id"""
-
-        if hours is not None:
-            conditions.append("e.updated_at >= NOW() - %(hours)s * INTERVAL '1 hour'")
-            params["hours"] = hours
-
-        if text:
-            conditions.append("e.name ILIKE %(text)s")
-            params["text"] = f"%{text}%"
-
-        if language:
-            conditions.append("v.metadata->>'language' = %(language)s")
-            params["language"] = language
-
-        if conditions:
-            query += "\n        WHERE " + " AND ".join(conditions)
-
-        if needs_having:
-            query += "\n        GROUP BY e.id"
-
-            if narratives_min is not None and narratives_max is not None:
-                query += "\n        HAVING COUNT(DISTINCT n.id) BETWEEN %(narratives_min)s AND %(narratives_max)s"
-                params["narratives_min"] = narratives_min
-                params["narratives_max"] = narratives_max
-            elif narratives_min is not None:
-                query += "\n        HAVING COUNT(DISTINCT n.id) >= %(narratives_min)s"
-                params["narratives_min"] = narratives_min
-            elif narratives_max is not None:
-                query += "\n        HAVING COUNT(DISTINCT n.id) <= %(narratives_max)s"
-                params["narratives_max"] = narratives_max
-
-            query += "\n) AS filtered_entities"
+        where_clause, params = self._build_enriched_filters(
+            text, hours, language, narratives_min, narratives_max,
+        )
+        query = (
+            self._ENRICHED_CTES
+            + """
+            SELECT COUNT(*) AS count
+            FROM entities e
+            LEFT JOIN entity_video_stats evs ON e.id = evs.entity_id
+            LEFT JOIN entity_narrative_stats ens ON e.id = ens.entity_id
+            """
+            + where_clause
+        )
 
         await self._session.execute(query, params)
         row = await self._session.fetchone()
@@ -305,72 +331,73 @@ class EntityRepository:
         narratives_min: int | None = None,
         narratives_max: int | None = None,
     ) -> list[EnrichedEntity]:
-        """Get all entities with statistics (claims, videos, platforms, languages, narratives)"""
-        query = """
-            SELECT 
-                e.id, 
-                e.wikidata_id, 
-                e.name, 
-                e.metadata, 
-                e.created_at, 
-                e.updated_at,
-                COUNT(DISTINCT c.id) as total_claims, 
-                COUNT(DISTINCT v.id) as total_videos,
-                COUNT(DISTINCT n.id) as linked_narratives,
-                COALESCE(
-                    array_agg(DISTINCT v.platform) FILTER (WHERE v.platform IS NOT NULL),
-                    ARRAY[]::text[]
-                ) as platforms,
-                COALESCE(
-                    array_agg(DISTINCT v.metadata->>'language') FILTER (WHERE v.metadata->>'language' IS NOT NULL),
-                    ARRAY[]::text[]
-                ) as languages
-            FROM entities e
-            LEFT JOIN claim_entities ce ON e.id = ce.entity_id
-            LEFT JOIN claim_narratives cn ON ce.claim_id = cn.claim_id
-            LEFT JOIN video_claims c ON cn.claim_id = c.id
-            LEFT JOIN videos v ON c.video_id = v.id
-            LEFT JOIN narrative_entities ne ON e.id = ne.entity_id
-            LEFT JOIN narratives n ON ne.narrative_id = n.id
-        """
-        params: dict = {"limit": limit, "offset": offset}
-        conditions = []
-
-        if hours is not None:
-            conditions.append("e.updated_at >= NOW() - %(hours)s * INTERVAL '1 hour'")
-            params["hours"] = hours
-
-        if text:
-            conditions.append("e.name ILIKE %(text)s")
-            params["text"] = f"%{text}%"
-
-        if language:
-            conditions.append("v.metadata->>'language' = %(language)s")
-            params["language"] = language
-
-        if conditions:
-            query += " WHERE " + " AND ".join(conditions)
-
-        query += """
-            GROUP BY e.id, e.wikidata_id, e.name, e.metadata, e.created_at, e.updated_at
-        """
-        
-        # Add HAVING clause for narratives filter
-        if narratives_min is not None and narratives_max is not None:
-            query += " HAVING COUNT(DISTINCT n.id) BETWEEN %(narratives_min)s AND %(narratives_max)s"
-            params["narratives_min"] = narratives_min
-            params["narratives_max"] = narratives_max
-        elif narratives_min is not None:
-            query += " HAVING COUNT(DISTINCT n.id) >= %(narratives_min)s"
-            params["narratives_min"] = narratives_min
-        elif narratives_max is not None:
-            query += " HAVING COUNT(DISTINCT n.id) <= %(narratives_max)s"
-            params["narratives_max"] = narratives_max
-        
-        query += """
-            ORDER BY e.created_at DESC 
-            LIMIT %(limit)s OFFSET %(offset)s
-        """
+        """Get all entities with statistics (claims, videos, platforms, languages, narratives)."""
+        # Fast path: no filter depends on aggregated stats, so page entities first
+        # and compute stats per row via LATERAL — keeps work O(limit) instead of O(N).
+        if language is None and narratives_min is None and narratives_max is None:
+            where_clause, params = self._entity_only_filters(text, hours)
+            params["limit"] = limit
+            params["offset"] = offset
+            query = (
+                """
+                SELECT
+                    e.id,
+                    e.wikidata_id,
+                    e.name,
+                    e.metadata,
+                    e.created_at,
+                    e.updated_at,
+                    COALESCE(evs.total_claims, 0) AS total_claims,
+                    COALESCE(evs.total_videos, 0) AS total_videos,
+                    COALESCE(ens.linked_narratives, 0) AS linked_narratives,
+                    COALESCE(evs.platforms, ARRAY[]::text[]) AS platforms,
+                    COALESCE(evs.languages, ARRAY[]::text[]) AS languages
+                FROM (
+                    SELECT id, wikidata_id, name, metadata, created_at, updated_at
+                    FROM entities e
+                """
+                + where_clause
+                + """
+                    ORDER BY created_at DESC
+                    LIMIT %(limit)s OFFSET %(offset)s
+                ) e
+                """
+                + self._LATERAL_STATS_JOIN
+                + """
+                ORDER BY e.created_at DESC
+                """
+            )
+        else:
+            where_clause, params = self._build_enriched_filters(
+                text, hours, language, narratives_min, narratives_max,
+            )
+            params["limit"] = limit
+            params["offset"] = offset
+            query = (
+                self._ENRICHED_CTES
+                + """
+                SELECT
+                    e.id,
+                    e.wikidata_id,
+                    e.name,
+                    e.metadata,
+                    e.created_at,
+                    e.updated_at,
+                    COALESCE(evs.total_claims, 0) AS total_claims,
+                    COALESCE(evs.total_videos, 0) AS total_videos,
+                    COALESCE(ens.linked_narratives, 0) AS linked_narratives,
+                    COALESCE(evs.platforms, ARRAY[]::text[]) AS platforms,
+                    COALESCE(evs.languages, ARRAY[]::text[]) AS languages
+                FROM entities e
+                LEFT JOIN entity_video_stats evs ON e.id = evs.entity_id
+                LEFT JOIN entity_narrative_stats ens ON e.id = ens.entity_id
+                """
+                + where_clause
+                + """
+                ORDER BY e.created_at DESC
+                LIMIT %(limit)s OFFSET %(offset)s
+                """
+            )
 
         await self._session.execute(query, params)
         rows = await self._session.fetchall()

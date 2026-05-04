@@ -2,7 +2,7 @@ from uuid import UUID
 
 from litestar import Controller, get
 from litestar.di import Provide
-from litestar.exceptions import NotFoundException
+from litestar.exceptions import NotFoundException, ValidationException
 
 from core.entities.models import EnrichedEntity
 from core.entities.service import EntityService
@@ -57,6 +57,17 @@ class EntityController(Controller):
         narratives_min: int | None = None,
         narratives_max: int | None = None,
     ) -> PaginatedJSON[list[EnrichedEntity]]:
+        if narratives_min is not None and narratives_min < 0:
+            raise ValidationException("narratives_min must be >= 0")
+        if narratives_max is not None and narratives_max < 0:
+            raise ValidationException("narratives_max must be >= 0")
+        if (
+            narratives_min is not None
+            and narratives_max is not None
+            and narratives_min > narratives_max
+        ):
+            raise ValidationException("narratives_min must be <= narratives_max")
+
         entities, total = await entity_service.get_all_entities(
             limit=limit,
             offset=offset,

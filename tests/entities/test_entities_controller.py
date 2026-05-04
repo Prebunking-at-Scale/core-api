@@ -4,7 +4,9 @@ from litestar import Litestar
 from litestar.testing import AsyncTestClient
 
 from core.entities.models import EntityInput
+from core.models import Claim, Video
 from core.narratives.models import NarrativeInput, NarrativePatchInput
+from core.videos.claims.models import ClaimUpdate
 from tests.entities.conftest import create_entity
 
 
@@ -345,6 +347,124 @@ async def test_get_narratives_by_entity_with_pagination(
     data = response.json()
     assert len(data["data"]) == 1
     assert data["page"] == 2
+
+
+async def _add_video_claim_with_entities(
+    api_key_client: AsyncTestClient[Litestar],
+    *,
+    platform: str,
+    language: str,
+    source_url: str,
+    entities: list[EntityInput],
+) -> None:
+    """Create a video, attach a claim to it, and associate entities to that claim."""
+    video = Video(
+        title=f"video {source_url}",
+        description="d",
+        platform=platform,
+        source_url=source_url,
+        uploaded_at=None,
+        metadata={"language": language},
+    )
+    response = await api_key_client.post(
+        "/api/videos/", json=video.model_dump(mode="json")
+    )
+    assert response.status_code == 201
+
+    claim = Claim(video_id=video.id, claim=f"c {source_url}", start_time_s=0.0)
+    response = await api_key_client.post(
+        f"/api/videos/{video.id}/claims",
+        json={"video_id": str(video.id), "claims": [claim.model_dump(mode="json")]},
+    )
+    assert response.status_code == 201
+    claim_id = response.json()["data"]["claims"][0]["id"]
+
+    response = await api_key_client.patch(
+        f"/api/videos/{video.id}/claims/{claim_id}",
+        json=ClaimUpdate(entities=entities).model_dump(mode="json", exclude_none=True),
+    )
+    assert response.status_code == 200
+
+
+async def test_get_entities_returns_stats_for_claim_only_entity(
+    api_key_client: AsyncTestClient[Litestar]
+) -> None:
+    """Entities linked only via claims (not narratives) must still report total_claims/videos.
+
+    Regression: an earlier query routed video_claims through claim_narratives, which
+    silently zeroed claim/video counts whenever a claim had no narrative.
+    """
+    entity_input = EntityInput(
+        wikidata_id="Q-claimonly",
+        entity_name="Claim Only",
+        entity_type="concept",
+    )
+    await _add_video_claim_with_entities(
+        api_key_client,
+        platform="youtube",
+        language="en",
+        source_url="https://example.com/claim-only",
+        entities=[entity_input],
+    )
+
+    response = await api_key_client.get("/api/entities/?text=Claim Only")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 1
+    enriched = data["data"][0]
+    assert enriched["total_claims"] == 1
+    assert enriched["total_videos"] == 1
+    assert enriched["linked_narratives"] == 0
+    assert enriched["platforms"] == ["youtube"]
+    assert enriched["languages"] == ["en"]
+
+
+async def test_get_entities_language_filter_preserves_languages_array(
+    api_key_client: AsyncTestClient[Litestar]
+) -> None:
+    """Filtering by language must not collapse the returned languages array to the filter value."""
+    entity_input = EntityInput(
+        wikidata_id="Q-multi",
+        entity_name="Multi Lang Entity",
+        entity_type="concept",
+    )
+
+    for idx, (lang, platform) in enumerate([("en", "platform0"), ("es", "platform1")]):
+        await _add_video_claim_with_entities(
+            api_key_client,
+            platform=platform,
+            language=lang,
+            source_url=f"https://example.com/multi-{idx}",
+            entities=[entity_input],
+        )
+
+    response = await api_key_client.get("/api/entities/?language=en")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 1
+    enriched = data["data"][0]
+    assert set(enriched["languages"]) == {"en", "es"}
+    assert set(enriched["platforms"]) == {"platform0", "platform1"}
+
+    response = await api_key_client.get("/api/entities/?language=de")
+    assert response.status_code == 200
+    assert response.json()["total"] == 0
+
+
+async def test_get_entities_narratives_filter_validation(
+    api_key_client: AsyncTestClient[Litestar]
+) -> None:
+    """narratives_min/max must reject negative or inverted ranges."""
+    response = await api_key_client.get("/api/entities/?narratives_min=-1")
+    assert response.status_code == 400
+
+    response = await api_key_client.get("/api/entities/?narratives_max=-2")
+    assert response.status_code == 400
+
+    response = await api_key_client.get(
+        "/api/entities/?narratives_min=5&narratives_max=2"
+    )
+    assert response.status_code == 400
 
 
 async def test_get_narratives_by_entity_empty(
