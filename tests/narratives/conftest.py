@@ -1,4 +1,6 @@
 from typing import Any
+from unittest.mock import MagicMock
+from uuid import uuid4
 
 from litestar import Litestar
 from litestar.testing import AsyncTestClient
@@ -6,7 +8,8 @@ from polyfactory.factories.pydantic_factory import ModelFactory
 from pytest import fixture
 
 from core.models import Narrative
-from core.narratives.models import NarrativeInput
+from core.narratives.models import NarrativeInput, NarrativeSummary
+from core.narratives.service import NarrativeService
 
 
 class NarrativeInputFactory(ModelFactory[NarrativeInput]):
@@ -51,3 +54,20 @@ async def create_narrative(
 @fixture
 async def narrative(api_key_client: AsyncTestClient[Litestar]) -> Narrative:
     return await create_narrative(api_key_client)
+
+
+class NarrativeSummaryFactory(ModelFactory[NarrativeSummary]):
+    __check_model__ = True
+
+    @classmethod
+    def build(cls, **kwargs):
+        instance = super().build(**kwargs)
+        if "id" not in kwargs:
+            instance.id = uuid4()
+        return instance
+
+
+@fixture
+def narrative_service() -> NarrativeService:
+    """NarrativeService wired with a dummy connection_factory — never touches the DB."""
+    return NarrativeService(connection_factory=MagicMock())

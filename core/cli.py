@@ -9,6 +9,7 @@ from core.alerts.service import AlertService
 from core.app import pool_factory, postgres_url
 from core.config import APP_BASE_URL
 from core.narratives.api import NarrativesApiClient
+from core.narratives.service import NarrativeService
 from core.videos.claims.repo import ClaimRepository
 
 load_dotenv()
@@ -119,6 +120,40 @@ def process_alerts():
     asyncio.run(main())
 
 
+@click.command()
+@click.option("--batch-size", default=100, show_default=True, help="Number of narratives to process per batch.")
+@click.option("--hours", default=24, show_default=True, help="Time window in hours for narrative analysis indicators calculation.")
+def run_narrative_analysis_indicators_pipeline(batch_size: int, hours: int):
+    """Calculate narrative analysis indicators for all narratives."""
+    async def main():
+        pool = pool_factory(postgres_url)
+        await pool.open()
+        try:
+            service = NarrativeService(connection_factory=pool.connection)
+
+            click.echo("Calculating narrative analysis indicators for all narratives...")
+
+            def on_progress(total_processed: int, errors: int) -> None:
+                click.echo(f"  Processed {total_processed} narratives so far (errors: {errors})...")
+
+            total_processed, errors = await service.run_narrative_analysis_indicators_pipeline(
+                batch_size=batch_size,
+                hours=hours,
+                on_progress=on_progress,
+            )
+
+            click.echo(f"Scores calculated: {total_processed}, errors: {errors}.")
+            click.echo("Narrative analysis indicators calculation complete!")
+
+        except Exception as e:
+            click.echo(f"Error: {e}", err=True)
+            sys.exit(1)
+        finally:
+            await pool.close()
+
+    asyncio.run(main())
+
+
 @click.group()
 def cli():
     """PAS Core CLI commands."""
@@ -127,6 +162,7 @@ def cli():
 
 cli.add_command(start_narratives)
 cli.add_command(process_alerts)
+cli.add_command(run_narrative_analysis_indicators_pipeline)
 
 
 if __name__ == "__main__":
