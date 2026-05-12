@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
@@ -10,6 +10,7 @@ from core.auth.guards import super_admin
 from core.errors import ConflictError
 from core.models import Claim, Narrative, Video
 from core.narratives.models import (
+    NarrativeAnalysisIndicatorsResponse,
     NarrativeDetail,
     NarrativeInput,
     NarrativePatchInput,
@@ -275,3 +276,18 @@ class NarrativeController(Controller):
         narrative_id: UUID,
     ) -> None:
         await narrative_service.delete_narrative(narrative_id)
+
+    @get(
+        path="/{narrative_id:uuid}/indicators",
+        summary="Get the latest analysis indicators for a narrative",
+    )
+    async def get_narrative_indicators(
+        self,
+        narrative_service: NarrativeService,
+        narrative_id: UUID,
+        date: date | None = None,
+    ) -> JSON[NarrativeAnalysisIndicatorsResponse]:
+        indicators = await narrative_service.get_narrative_analysis_indicators(narrative_id, date)
+        if indicators is None:
+            raise NotFoundException()
+        return JSON(indicators)

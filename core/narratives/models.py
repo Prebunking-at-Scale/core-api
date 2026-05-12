@@ -1,12 +1,12 @@
-from datetime import datetime
-from typing import Any
+from datetime import date, datetime
+from enum import Enum
+from typing import Any, Generic, TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel
 
 from core.entities.models import EntityInput
-from core.models import Claim, Entity, Topic, Video
-
+from core.models import Claim, Entity, NarrativeAlertLevel, Topic, Video
 
 class NarrativeInput(BaseModel):
     title: str
@@ -80,6 +80,7 @@ class NarrativeDetail(BaseModel):
     metadata: dict[str, Any] = {}
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    alert_level: NarrativeAlertLevel | None = None
 
 
 class NarrativeStatsDataPoint(BaseModel):
@@ -111,3 +112,50 @@ class NarrativeStats(BaseModel):
     narrative_id: UUID
     time_series: list[NarrativeStatsDataPoint] = []
     totals: NarrativeStatsTotals = NarrativeStatsTotals()
+
+
+class NarrativeViralityScoreType(str, Enum):
+    ENGAGEMENT_SCORE = "engagement_score"
+    REACH_SCORE = "reach_score"
+    VELOCITY_SCORE = "velocity_score"
+
+
+class NarrativeAnalysisIndicatorType(str, Enum):
+    COMPOSITE_VIRALITY = "composite_virality"
+    ACCELERATION_RATE = "acceleration_rate"
+
+
+IndicatorMetadata = TypeVar("IndicatorMetadata")
+
+
+class CompositeViralityMetadata(BaseModel):
+    engagement_percentile: float
+    reach_percentile: float
+    velocity_percentile: float
+    engagement_weight: float
+    reach_weight: float
+    velocity_weight: float
+
+
+class AccelerationRateMetadata(BaseModel):
+    change_engagement: float
+    change_video_count: float
+    change_views: float
+    engagement_weight: float
+    video_volume_weight: float
+    views_weight: float
+
+
+class AnalysisIndicator(BaseModel, Generic[IndicatorMetadata]):
+    id: UUID
+    indicator_value: float
+    indicator_type: NarrativeAnalysisIndicatorType
+    calculated_at: datetime
+    metadata: IndicatorMetadata | None = None
+
+
+class NarrativeAnalysisIndicatorsResponse(BaseModel):
+    narrative_id: UUID
+    composite_virality: AnalysisIndicator[CompositeViralityMetadata]
+    acceleration_rate: AnalysisIndicator[AccelerationRateMetadata]
+    date: date
