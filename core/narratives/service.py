@@ -26,13 +26,8 @@ _api = NarrativesApiClient()
 def _merge_narrative_context(
     existing: str | None, new: str | None
 ) -> str | None:
-    """Concatenate narrative context entries with a timestamped separator."""
-    if not new:
-        return existing
-    if not existing:
-        return new
-    timestamp = datetime.now().isoformat()
-    return f"{existing}\n\n--{timestamp}--\n\n{new}"
+    """Return the latest narrative_context, falling back to existing when new is empty."""
+    return new if new else existing
 
 
 class NarrativeService:
@@ -76,7 +71,6 @@ class NarrativeService:
                 existing_entity_ids = [entity.id for entity in existing_narrative.entities]
                 merged_entity_ids = list(set(existing_entity_ids + entity_ids))
 
-                # Concatenate narrative_context with existing one
                 merged_narrative_context = _merge_narrative_context(
                     existing_narrative.narrative_context,
                     narrative.narrative_context,
@@ -264,7 +258,6 @@ class NarrativeService:
                 existing_topic_ids = [topic.id for topic in existing_narrative.topics]
                 merged_topic_ids = list(set(existing_topic_ids + data.topic_ids))
 
-            # Concatenate narrative_context with existing one
             merged_narrative_context = None
             if data.narrative_context is not None:
                 merged_narrative_context = _merge_narrative_context(
