@@ -258,6 +258,20 @@ class NarrativeService:
                     existing_narrative.narrative_context,
                     data.narrative_context,
                 )
+            
+            # If claim_ids are being updated and the new list is shorter than the existing list, it means claims are being removed from the narrative
+            # so we need to call the external API to delete those claims from the narrative on the external service as well to keep them in sync
+            if data.claim_ids is not None and len(existing_narrative.claims) > len(data.claim_ids):
+                logger.info(
+                    f"Claims will be removed from narrative {narrative_id}. Existing claim IDs: {[claim.id for claim in existing_narrative.claims]}, new claim IDs: {data.claim_ids}"
+                )
+                claim_ids_to_remove = set(claim.id for claim in existing_narrative.claims) - set(data.claim_ids)
+                logger.info(f"Removed claim IDs: {claim_ids_to_remove}")
+
+                for claim_id in claim_ids_to_remove:
+                    await self._delete_claim_on_external_narrative(
+                        narrative_id=narrative_id, claim_id=claim_id
+                    )
 
             updated = await repo.update_narrative(
                 narrative_id=narrative_id,
@@ -315,6 +329,29 @@ class NarrativeService:
 
         logger.info(f"Deleted narrative {external_narrative_id} from external API")
 
+    async def _delete_claim_on_external_narrative(self, narrative_id: UUID, claim_id: UUID) -> None:
+        """Delete a claim from a narrative on the external narratives API."""
+        if not _api.is_configured():
+            return
+
+        response = await _api.delete_claim_on_narrative(narrative_id, claim_id)
+
+        if response.status_code == 404:
+            logger.info(
+                f"Claim {claim_id} on narrative {narrative_id} not found on external API, "
+                "continuing with local update"
+            )
+            return
+
+        if response.status_code >= 400:
+            logger.error(
+                f"External API delete claim error: status={response.status_code}, "
+                f"response={response.text}"
+            )
+            response.raise_for_status()
+
+        logger.info(f"Deleted claim {claim_id} from narrative {narrative_id} on external API")
+    
     async def _sync_external_narrative(
         self,
         external_narrative_id: str,

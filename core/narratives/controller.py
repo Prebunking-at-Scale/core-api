@@ -246,6 +246,11 @@ class NarrativeController(Controller):
         narrative_id: UUID,
         data: NarrativePatchInput,
     ) -> JSON[Narrative]:
+        """
+        Update a narrative. 
+        Only fields provided in the request will be updated. For example, if the request only includes a title, then only the title of the narrative will be updated and all other fields (description, narrative_context, claim_ids, topic_ids, entity_ids) will remain unchanged. 
+        This endpoint is used to unlink claims from a narrative by omitting them from the request, so we need to make sure that if they are omitted, we don't set them to empty lists or null values, but rather leave them unchanged in the database.
+        """
         narrative = await narrative_service.update_narrative(narrative_id, data)
         if not narrative:
             raise NotFoundException()
