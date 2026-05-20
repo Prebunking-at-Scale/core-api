@@ -1,7 +1,5 @@
 BEGIN;
 
-DROP TYPE IF EXISTS narrative_alert_level;
-
 -- Drop alert_level column from narratives table
 ALTER TABLE narratives DROP COLUMN IF EXISTS alert_level;
 
