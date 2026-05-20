@@ -246,23 +246,10 @@ class NarrativeService:
             if not existing_narrative:
                 return None
 
-            merged_entity_ids = None
+            entity_ids = None
             if data.entities is not None:
                 entity_service = EntityService(self._connection_factory)
                 entity_ids = await entity_service.process_entities(data.entities)
-
-                existing_entity_ids = [entity.id for entity in existing_narrative.entities]
-                merged_entity_ids = list(set(existing_entity_ids + entity_ids))
-
-            merged_claim_ids = data.claim_ids
-            if data.claim_ids is not None:
-                existing_claim_ids = [claim.id for claim in existing_narrative.claims]
-                merged_claim_ids = list(set(existing_claim_ids + data.claim_ids))
-
-            merged_topic_ids = data.topic_ids
-            if data.topic_ids is not None:
-                existing_topic_ids = [topic.id for topic in existing_narrative.topics]
-                merged_topic_ids = list(set(existing_topic_ids + data.topic_ids))
 
             # Concatenate narrative_context with existing one
             merged_narrative_context = None
@@ -277,9 +264,9 @@ class NarrativeService:
                 title=data.title,
                 description=data.description,
                 narrative_context=merged_narrative_context,
-                claim_ids=merged_claim_ids,
-                topic_ids=merged_topic_ids,
-                entity_ids=merged_entity_ids,
+                claim_ids=data.claim_ids,
+                topic_ids=data.topic_ids,
+                entity_ids=entity_ids,
                 metadata=data.metadata,
             )
 
