@@ -1600,3 +1600,14 @@ class NarrativeRepository:
             )
 
         return summaries
+
+    async def delete_claim_from_narrative(self, narrative_id: UUID, claim_id: UUID) -> bool:
+        """Remove association of a claim from a narrative."""
+        await self._session.execute(
+            """
+            DELETE FROM claim_narratives
+            WHERE narrative_id = %(narrative_id)s AND claim_id = %(claim_id)s
+            """,
+            {"narrative_id": narrative_id, "claim_id": claim_id},
+        )
+        return True

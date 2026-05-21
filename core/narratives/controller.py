@@ -280,3 +280,19 @@ class NarrativeController(Controller):
         narrative_id: UUID,
     ) -> None:
         await narrative_service.delete_narrative(narrative_id)
+
+    @delete(
+        path="/{narrative_id:uuid}/claims/{claim_id:uuid}",
+        summary="Delete a specific claim from a narrative",
+        guards=[super_admin],
+    )
+    async def delete_claim_from_narrative(
+        self,
+        narrative_service: NarrativeService,
+        narrative_id: UUID,
+        claim_id: UUID,
+    ) -> None:
+        try:
+            await narrative_service.delete_claim_from_narrative(narrative_id, claim_id)
+        except ValueError:
+            raise NotFoundException()

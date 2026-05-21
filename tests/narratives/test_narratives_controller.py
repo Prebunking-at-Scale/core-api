@@ -793,3 +793,97 @@ async def test_get_narrative_stats_not_found(
     response = await api_key_client.get(f"/api/narratives/{fake_id}/stats")
 
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Delete claim from narrative
+# ---------------------------------------------------------------------------
+
+async def test_delete_claim_from_narrative(
+    api_key_client: AsyncTestClient[Litestar],
+) -> None:
+    _, claim_ids = await _create_video_with_claims(api_key_client, n=2)
+    claim_id_1, claim_id_2 = claim_ids
+
+    create_resp = await api_key_client.post(
+        "/api/narratives/",
+        json=NarrativeInput(
+            title="Delete Claim Test",
+            description="Testing claim deletion",
+            claim_ids=claim_ids,
+        ).model_dump(mode="json"),
+    )
+    assert create_resp.status_code == 201
+    narrative_id = create_resp.json()["data"]["id"]
+
+    response = await api_key_client.delete(
+        f"/api/narratives/{narrative_id}/claims/{claim_id_1}"
+    )
+
+    assert response.status_code == 204
+
+    # Verify claim_id_1 is no longer associated but claim_id_2 remains
+    get_resp = await api_key_client.get(f"/api/narratives/{narrative_id}")
+    assert get_resp.status_code == 200
+    remaining_claim_ids = {c["id"] for c in get_resp.json()["data"]["claims"]}
+    assert str(claim_id_1) not in remaining_claim_ids
+    assert str(claim_id_2) in remaining_claim_ids
+
+
+async def test_delete_claim_from_narrative_narrative_not_found(
+    api_key_client: AsyncTestClient[Litestar],
+) -> None:
+    fake_narrative_id = uuid4()
+    fake_claim_id = uuid4()
+
+    response = await api_key_client.delete(
+        f"/api/narratives/{fake_narrative_id}/claims/{fake_claim_id}"
+    )
+
+    assert response.status_code == 404
+
+
+async def test_delete_claim_from_narrative_claim_not_associated(
+    api_key_client: AsyncTestClient[Litestar],
+    narrative: Narrative,
+) -> None:
+    # Use a claim that was never linked to this narrative
+    _, claim_ids = await _create_video_with_claims(api_key_client, n=1)
+    unrelated_claim_id = claim_ids[0]
+
+    response = await api_key_client.delete(
+        f"/api/narratives/{narrative.id}/claims/{unrelated_claim_id}"
+    )
+
+    assert response.status_code == 404
+
+
+async def test_delete_claim_from_narrative_idempotent_other_claims_intact(
+    api_key_client: AsyncTestClient[Litestar],
+) -> None:
+    _, claim_ids = await _create_video_with_claims(api_key_client, n=3)
+    claim_id_1, claim_id_2, claim_id_3 = claim_ids
+
+    create_resp = await api_key_client.post(
+        "/api/narratives/",
+        json=NarrativeInput(
+            title="Multi-claim Delete Test",
+            description="Testing that only the target claim is removed",
+            claim_ids=claim_ids,
+        ).model_dump(mode="json"),
+    )
+    assert create_resp.status_code == 201
+    narrative_id = create_resp.json()["data"]["id"]
+
+    # Delete only claim_id_2
+    response = await api_key_client.delete(
+        f"/api/narratives/{narrative_id}/claims/{claim_id_2}"
+    )
+    assert response.status_code == 204
+
+    # claim_id_1 and claim_id_3 must still be associated
+    get_resp = await api_key_client.get(f"/api/narratives/{narrative_id}")
+    remaining_claim_ids = {c["id"] for c in get_resp.json()["data"]["claims"]}
+    assert str(claim_id_1) in remaining_claim_ids
+    assert str(claim_id_2) not in remaining_claim_ids
+    assert str(claim_id_3) in remaining_claim_ids
