@@ -17,6 +17,7 @@ def tables_to_truncate() -> list[str]:
         "narratives",
         "video_claims",
         "claim_narratives",
+        "videos",
     ]
 
 
