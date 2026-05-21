@@ -307,13 +307,12 @@ async def test_patch_narrative_narrative_context(
     assert "First update to classification." in response_data["narrative_context"]
 
 
-async def test_patch_narrative_narrative_context_concatenates(
+async def test_patch_narrative_narrative_context_replaces(
     api_key_client: AsyncTestClient[Litestar],
 ) -> None:
-    # Create narrative with initial narrative_context
     narrative_input = NarrativeInput(
-        title="Concat test narrative",
-        description="Testing concatenation",
+        title="Replace test narrative",
+        description="Testing replacement",
         narrative_context="First entry.",
     )
     create_response = await api_key_client.post(
@@ -323,7 +322,6 @@ async def test_patch_narrative_narrative_context_concatenates(
     assert create_response.status_code == 201
     narrative_id = create_response.json()["data"]["id"]
 
-    # Patch with additional narrative_context
     patch_data = NarrativePatchInput(narrative_context="Second entry.")
     patch_response = await api_key_client.patch(
         f"/api/narratives/{narrative_id}",
@@ -331,10 +329,7 @@ async def test_patch_narrative_narrative_context_concatenates(
     )
 
     assert patch_response.status_code == 200
-    evolution = patch_response.json()["data"]["narrative_context"]
-    assert "First entry." in evolution
-    assert "Second entry." in evolution
-    assert "--" in evolution  # Timestamp separator
+    assert patch_response.json()["data"]["narrative_context"] == "Second entry."
 
 
 async def test_get_narrative_detail_includes_narrative_context(
