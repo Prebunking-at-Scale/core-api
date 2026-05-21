@@ -1,17 +1,47 @@
 from uuid import UUID
 
+import httpx
 from litestar import Controller, get
 from litestar.di import Provide
-from litestar.exceptions import NotFoundException, ValidationException
+from litestar.exceptions import (
+    InternalServerException,
+    NotFoundException,
+    ServiceUnavailableException,
+    ValidationException,
+)
 
+from core.entities.graph_models import EntityGraph, EntitySearchResult
 from core.entities.models import EnrichedEntity
 from core.entities.service import EntityService
 from core.models import Entity, Narrative
+from core.narratives.api import NarrativesApiClient
 from core.narratives.service import NarrativeService
 from core.response import JSON, PaginatedJSON
 from core.uow import ConnectionFactory
 from core.videos.claims.models import EnrichedClaim
 from core.videos.claims.service import ClaimsService
+
+
+def _raise_for_narratives(response: httpx.Response) -> None:
+    """Map a non-2xx narratives response onto the matching Litestar error.
+
+    The narratives /graph/* endpoints return 404 for an unknown entity and
+    503 when Neo4j is not reachable; anything else is treated as an upstream
+    failure.
+    """
+    if response.is_success:
+        return
+    try:
+        detail = response.json().get("detail")
+    except Exception:
+        detail = None
+    if not isinstance(detail, str):
+        detail = f"narratives returned {response.status_code}"
+    if response.status_code == 404:
+        raise NotFoundException(detail=detail)
+    if response.status_code == 503:
+        raise ServiceUnavailableException(detail=detail)
+    raise InternalServerException(detail=f"narratives graph API error: {detail}")
 
 
 async def entity_service(
@@ -131,3 +161,57 @@ class EntityController(Controller):
         return PaginatedJSON(
             data=claims, total=total, page=page, size=len(claims)
         )
+
+    # ── Knowledge-graph proxy ───────────────────────────────────────────
+    # These proxy the prebunking-narratives /graph/* endpoints, which query
+    # the Neo4j entity graph. The frontend never reaches narratives directly,
+    # so the graph explorer goes frontend -> backend -> narratives.
+
+    @get(
+        path="/graph",
+        summary="Entity knowledge-graph ego-network",
+    )
+    async def get_entity_graph(
+        self, entity: str, depth: int = 1
+    ) -> JSON[EntityGraph]:
+        if not entity.strip():
+            raise ValidationException("entity query parameter is required")
+        if not NarrativesApiClient.is_configured():
+            raise ServiceUnavailableException(
+                detail="narratives service is not configured"
+            )
+        try:
+            response = await NarrativesApiClient().get_entity_graph(
+                entity=entity.strip(), depth=depth
+            )
+        except httpx.HTTPError as exc:
+            raise ServiceUnavailableException(
+                detail=f"narratives service unreachable: {exc}"
+            )
+        _raise_for_narratives(response)
+        return JSON(EntityGraph.model_validate(response.json()))
+
+    @get(
+        path="/graph/search",
+        summary="Search entities in the knowledge graph",
+    )
+    async def search_graph_entities(
+        self, q: str = "", limit: int = 20
+    ) -> JSON[list[EntitySearchResult]]:
+        if not NarrativesApiClient.is_configured():
+            raise ServiceUnavailableException(
+                detail="narratives service is not configured"
+            )
+        try:
+            response = await NarrativesApiClient().search_graph_entities(
+                q=q, limit=limit
+            )
+        except httpx.HTTPError as exc:
+            raise ServiceUnavailableException(
+                detail=f"narratives service unreachable: {exc}"
+            )
+        _raise_for_narratives(response)
+        results = [
+            EntitySearchResult.model_validate(item) for item in response.json()
+        ]
+        return JSON(results)

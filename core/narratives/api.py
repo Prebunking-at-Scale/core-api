@@ -99,3 +99,29 @@ class NarrativesApiClient:
             return await client.post(
                 url, json=payload, headers=self._headers(), timeout=TIMEOUT
             )
+
+    async def get_entity_graph(
+        self, entity: str, depth: int = 1
+    ) -> httpx.Response:
+        """Fetch the typed knowledge-graph ego-network around ``entity``."""
+        url = f"{NARRATIVES_BASE_URL}/graph/ego"
+        async with httpx.AsyncClient() as client:
+            return await client.get(
+                url,
+                params={"entity": entity, "depth": depth},
+                headers=self._headers(),
+                timeout=TIMEOUT,
+            )
+
+    async def search_graph_entities(
+        self, q: str = "", limit: int = 20
+    ) -> httpx.Response:
+        """Search knowledge-graph entities by name substring."""
+        url = f"{NARRATIVES_BASE_URL}/graph/entities"
+        async with httpx.AsyncClient() as client:
+            return await client.get(
+                url,
+                params={"q": q, "limit": limit},
+                headers=self._headers(),
+                timeout=TIMEOUT,
+            )
