@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Any, AsyncContextManager
 from uuid import UUID
 
+from core.entities.graph_models import GraphNarrative
 from core.entities.service import EntityService
 from core.models import Claim, Narrative, Video
 from core.narratives.models import (
@@ -109,6 +110,24 @@ class NarrativeService:
     async def get_narrative(self, narrative_id: UUID) -> Narrative | None:
         async with self.repo() as repo:
             return await repo.get_narrative(narrative_id)
+
+    async def get_narrative_summaries(
+        self, narrative_ids: list[UUID]
+    ) -> list[GraphNarrative]:
+        """Resolve a set of narrative ids to lightweight summaries
+        (id, title, created_at), most recent first."""
+        if not narrative_ids:
+            return []
+        async with self.repo() as repo:
+            rows = await repo.get_narrative_summaries(narrative_ids)
+        return [
+            GraphNarrative(
+                id=str(row["id"]),
+                title=row["title"],
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
 
     async def get_narrative_detail(
         self,

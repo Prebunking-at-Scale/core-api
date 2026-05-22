@@ -128,6 +128,21 @@ class NarrativeRepository:
             **row, claims=claims, topics=topics, entities=entities, videos=videos
         )
 
+    async def get_narrative_summaries(
+        self, narrative_ids: list[UUID]
+    ) -> list[DictRow]:
+        """Lightweight id/title/created_at rows for a set of narrative ids,
+        most recent first. Used to resolve graph-node narrative ids."""
+        await self._session.execute(
+            """
+            SELECT id, title, created_at FROM narratives
+            WHERE id = ANY(%(ids)s)
+            ORDER BY created_at DESC NULLS LAST
+            """,
+            {"ids": narrative_ids},
+        )
+        return await self._session.fetchall()
+
     async def get_narratives_by_claim(self, claim_id: UUID) -> list[Narrative]:
         await self._session.execute(
             """

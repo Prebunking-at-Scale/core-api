@@ -10,7 +10,7 @@ from litestar.exceptions import (
     ValidationException,
 )
 
-from core.entities.graph_models import EntityGraph, EntitySearchResult
+from core.entities.graph_models import EntityGraph, EntitySearchResult, GraphNarrative
 from core.entities.models import EnrichedEntity
 from core.entities.service import EntityService
 from core.models import Entity, Narrative
@@ -215,3 +215,18 @@ class EntityController(Controller):
             EntitySearchResult.model_validate(item) for item in response.json()
         ]
         return JSON(results)
+
+    @get(
+        path="/graph/narratives",
+        summary="Resolve graph-node narrative ids to summaries",
+    )
+    async def get_graph_narratives(
+        self,
+        narrative_service: NarrativeService,
+        ids: list[UUID] | None = None,
+    ) -> JSON[list[GraphNarrative]]:
+        """Resolve a graph node's narrative ids to readable summaries
+        (id, title, created_at), most recent first. Queries the backend's
+        own narratives table — these ids come from Neo4j node provenance."""
+        summaries = await narrative_service.get_narrative_summaries(ids or [])
+        return JSON(summaries)
