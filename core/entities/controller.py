@@ -230,3 +230,20 @@ class EntityController(Controller):
         own narratives table — these ids come from Neo4j node provenance."""
         summaries = await narrative_service.get_narrative_summaries(ids or [])
         return JSON(summaries)
+
+    @get(
+        path="/graph/images",
+        summary="Resolve graph-node Wikidata ids to image URLs",
+    )
+    async def get_graph_entity_images(
+        self,
+        entity_service: EntityService,
+        ids: list[str] | None = None,
+    ) -> JSON[dict[str, str | None]]:
+        """Resolve a batch of Wikidata Q-ids to their best avatar URL so the
+        graph explorer can render the entity's photo inside its bubble.
+
+        Returns a mapping `{wikidata_id: url | null}` covering every requested
+        id; missing entities and entities without a usable image claim come
+        back as null."""
+        return JSON(await entity_service.get_entity_images(ids or []))

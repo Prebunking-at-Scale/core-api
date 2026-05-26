@@ -9,6 +9,37 @@ from core.entities.models import EnrichedEntity
 from core.models import Entity
 
 
+# Wikidata "instance of" (P31) values that mark an entity as a country-like
+# thing, for which the flag (P41) is a better avatar than the generic image.
+_COUNTRY_P31_IDS = {"Q3624078", "Q6256", "Q672729"}
+_COUNTRY_LABEL_HINTS = ("country", "state", "republic")
+
+
+def _pick_image_url(wikidata_info: dict | None) -> str | None:
+    """Choose the best image URL from a Wikidata claims blob.
+
+    Mirrors the frontend's getEntityImage() order: for countries prefer the
+    flag (P41) over the image (P18); for everyone else prefer P18 (image)
+    over P41 (flag) over P154 (logo).
+    """
+    if not wikidata_info:
+        return None
+    claims = wikidata_info.get("claims") or {}
+    p31 = claims.get("P31") or []
+    is_country = any(
+        c.get("id") in _COUNTRY_P31_IDS
+        or any(h in (c.get("label") or "").lower() for h in _COUNTRY_LABEL_HINTS)
+        for c in p31
+    )
+    order = ("P41", "P18", "P154") if is_country else ("P18", "P41", "P154")
+    for prop in order:
+        for item in claims.get(prop) or []:
+            url = item.get("url")
+            if url:
+                return url
+    return None
+
+
 class EntityRepository:
     def __init__(self, session: psycopg.AsyncCursor[DictRow]) -> None:
         self._session = session
@@ -73,6 +104,33 @@ class EntityRepository:
             )
             for row in rows
         ]
+
+    async def get_entity_images_by_wikidata_ids(
+        self, wikidata_ids: list[str]
+    ) -> dict[str, str | None]:
+        """Resolve a batch of Wikidata Q-ids to their image URL.
+
+        Used by the entity graph explorer to render each node's Wikidata photo
+        inside its bubble. Returns the best URL we can find — P41 (flag) for
+        countries, P18 (image), P154 (logo) — or None when the entity isn't in
+        the local entities table or has no usable claim.
+        """
+        if not wikidata_ids:
+            return {}
+        await self._session.execute(
+            """
+            SELECT wikidata_id, metadata
+            FROM entities
+            WHERE wikidata_id = ANY(%(ids)s)
+            """,
+            {"ids": wikidata_ids},
+        )
+        rows = await self._session.fetchall()
+        out: dict[str, str | None] = {qid: None for qid in wikidata_ids}
+        for row in rows:
+            info = (row["metadata"] or {}).get("wikidata_info") or {}
+            out[row["wikidata_id"]] = _pick_image_url(info)
+        return out
 
     async def associate_entities_with_claim(
         self, claim_id: UUID, entity_ids: list[UUID]

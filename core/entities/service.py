@@ -95,6 +95,13 @@ class EntityService:
         async with self.repo() as repo:
             return await repo.get_entities_for_narrative(narrative_id)
 
+    async def get_entity_images(
+        self, wikidata_ids: list[str]
+    ) -> dict[str, str | None]:
+        """Resolve Wikidata Q-ids to their best image URL (or None)."""
+        async with self.repo() as repo:
+            return await repo.get_entity_images_by_wikidata_ids(wikidata_ids)
+
     async def get_entity(self, entity_id: UUID) -> Entity | None:
         """Get a single entity by ID"""
         async with self.repo() as repo:
