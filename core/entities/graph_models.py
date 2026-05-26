@@ -34,6 +34,7 @@ class GraphEdge(BaseModel):
     source: str
     target: str
     type: str
+    narrative_ids: list[str] = []
 
 
 class EntityGraph(BaseModel):
