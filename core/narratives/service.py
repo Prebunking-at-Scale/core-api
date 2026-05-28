@@ -1,5 +1,5 @@
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, AsyncContextManager, Callable
 from uuid import UUID
 
@@ -41,6 +41,11 @@ COMPOSITE_VELOCITY_WEIGHT = 0.20
 ACCELERATION_ENGAGEMENT_WEIGHT = 0.40
 ACCELERATION_VIDEO_VOLUME_WEIGHT = 0.35
 ACCELERATION_VIEWS_WEIGHT = 0.25
+
+# Hard cap on individual change_* components inside acceleration_rate.
+# Without it, a single video going from 1 → 10k views (change=9999) drowns
+# the weighted sum and makes the per-dimension weights meaningless.
+ACCELERATION_CHANGE_CAP = 5.0
 
 
 def _merge_narrative_context(
@@ -213,6 +218,7 @@ class NarrativeService:
         first_content_start: datetime | None = None,
         first_content_end: datetime | None = None,
         language: str | None = None,
+        alert_levels: list[str] | None = None,
     ) -> tuple[list[NarrativeListItem], int]:
         async with self.repo() as repo:
             narratives = await repo.get_all_narratives_list(
@@ -225,7 +231,8 @@ class NarrativeService:
                 end_date=end_date,
                 first_content_start=first_content_start,
                 first_content_end=first_content_end,
-                language=language
+                language=language,
+                alert_levels=alert_levels,
             )
             total = await repo.count_all_narratives(
                 topic_id=topic_id,
@@ -235,7 +242,8 @@ class NarrativeService:
                 end_date=end_date,
                 first_content_start=first_content_start,
                 first_content_end=first_content_end,
-                language=language
+                language=language,
+                alert_levels=alert_levels,
             )
             return narratives, total
 
@@ -530,20 +538,28 @@ class NarrativeService:
                     + row["prev_comments"] * VIRALITY_SCORE_COMMENTS_WEIGHT
                 ) / row["prev_views"] if row["prev_views"] > 0 else 0.0
 
-                change_engagement = (
+                # When there is no previous-period baseline the percent-change
+                # is undefined; we treat it as 0 instead of the previous 1.0
+                # fallback, which was conflating "freshly observed" with "100%
+                # growth" and silently inflating accel for new narratives.
+                #
+                # The per-dimension change is capped at ACCELERATION_CHANGE_CAP
+                # so that a single video with a 1-view baseline can't push
+                # change_views into the thousands and drown the weighting.
+                change_engagement = min(
                     (current_engagement - prev_engagement) / prev_engagement
-                    if prev_engagement > 0
-                    else (1.0 if current_engagement > 0 else 0.0)
+                    if prev_engagement > 0 else 0.0,
+                    ACCELERATION_CHANGE_CAP,
                 )
-                change_video_count = (
+                change_video_count = min(
                     (row["current_video_count"] - row["prev_video_count"]) / row["prev_video_count"]
-                    if row["prev_video_count"] > 0
-                    else (1.0 if row["current_video_count"] > 0 else 0.0)
+                    if row["prev_video_count"] > 0 else 0.0,
+                    ACCELERATION_CHANGE_CAP,
                 )
-                change_views = (
+                change_views = min(
                     (row["current_views"] - row["prev_views"]) / row["prev_views"]
-                    if row["prev_views"] > 0
-                    else (1.0 if row["current_views"] > 0 else 0.0)
+                    if row["prev_views"] > 0 else 0.0,
+                    ACCELERATION_CHANGE_CAP,
                 )
 
                 acceleration_rate = (
@@ -587,6 +603,12 @@ class NarrativeService:
                 elif composite > 0.70 and acceleration > 1.5:
                     level = NarrativeAlertLevel.ALERT
                 elif composite > 0.55 and acceleration > 1.2:
+                    level = NarrativeAlertLevel.WATCH
+                elif composite > 0.85:
+                    # Plateaued-but-popular: very high composite (top ~15%)
+                    # without active acceleration. Without this branch these
+                    # narratives slot into NONE alongside truly inactive ones,
+                    # which loses signal for the editorial team.
                     level = NarrativeAlertLevel.WATCH
                 else:
                     level = NarrativeAlertLevel.NONE
@@ -700,3 +722,52 @@ class NarrativeService:
             ),
             date=cv["calculated_at"].date(),
         )
+
+    async def get_narrative_analysis_indicators_history(
+        self, narrative_id: UUID, days: int
+    ) -> list[NarrativeAnalysisIndicatorsResponse]:
+        """
+        Return one NarrativeAnalysisIndicatorsResponse per day (last `days`
+        days, including today), oldest → newest. Days without both indicator
+        rows are omitted entirely — caller maps by .date if alignment matters.
+        """
+        date_to = datetime.combine(date.today(), datetime.max.time())
+        date_from = datetime.combine(date.today() - timedelta(days=days - 1), datetime.min.time())
+        async with self.repo() as repo:
+            rows = await repo.get_narrative_analysis_indicators(narrative_id, date_from, date_to)
+
+        # Group rows by calendar date, keeping the latest row per (date, type).
+        by_date: dict[date, dict[str, dict[str, Any]]] = {}
+        for row in rows:
+            d = row["calculated_at"].date()
+            slot = by_date.setdefault(d, {})
+            existing = slot.get(row["indicator_type"])
+            if existing is None or row["calculated_at"] > existing["calculated_at"]:
+                slot[row["indicator_type"]] = row
+
+        out: list[NarrativeAnalysisIndicatorsResponse] = []
+        for d in sorted(by_date):
+            slot = by_date[d]
+            cv = slot.get(NarrativeAnalysisIndicatorType.COMPOSITE_VIRALITY)
+            ar = slot.get(NarrativeAnalysisIndicatorType.ACCELERATION_RATE)
+            if cv is None or ar is None:
+                continue
+            out.append(NarrativeAnalysisIndicatorsResponse(
+                narrative_id=narrative_id,
+                composite_virality=AnalysisIndicator(
+                    id=cv["id"],
+                    indicator_value=cv["indicator_value"],
+                    indicator_type=NarrativeAnalysisIndicatorType.COMPOSITE_VIRALITY,
+                    calculated_at=cv["calculated_at"],
+                    metadata=cv["metadata"],
+                ),
+                acceleration_rate=AnalysisIndicator(
+                    id=ar["id"],
+                    indicator_value=ar["indicator_value"],
+                    indicator_type=NarrativeAnalysisIndicatorType.ACCELERATION_RATE,
+                    calculated_at=ar["calculated_at"],
+                    metadata=ar["metadata"],
+                ),
+                date=d,
+            ))
+        return out
