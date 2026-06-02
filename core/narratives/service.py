@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime
 from typing import Any, AsyncContextManager
@@ -21,6 +22,14 @@ from core.uow import ConnectionFactory, uow
 logger = logging.getLogger(__name__)
 
 _api = NarrativesApiClient()
+
+# Best-effort entity-extraction trigger: seconds to wait between attempts.
+# len + 1 = total attempts (here: 3 attempts, ~4s worst case before giving up).
+_EXTRACTION_RETRY_BACKOFFS = (1.0, 3.0)
+
+# Keep strong references to in-flight background trigger tasks so the event
+# loop doesn't garbage-collect them mid-flight; the done-callback drops them.
+_background_tasks: set[asyncio.Task] = set()
 
 
 def _merge_narrative_context(
@@ -94,17 +103,92 @@ class NarrativeService:
                 )
                 if updated_narrative is None:
                     raise ValueError(f"Failed to update narrative with ID {existing_narrative.id}")
-                return updated_narrative
+                result = updated_narrative
+                is_new = False
+            else:
+                result = await repo.create_narrative(
+                    title=narrative.title,
+                    description=narrative.description,
+                    claim_ids=narrative.claim_ids,
+                    topic_ids=narrative.topic_ids,
+                    entity_ids=entity_ids,
+                    metadata=narrative.metadata,
+                    narrative_context=narrative.narrative_context,
+                )
+                is_new = True
 
-            return await repo.create_narrative(
-                title=narrative.title,
-                description=narrative.description,
-                claim_ids=narrative.claim_ids,
-                topic_ids=narrative.topic_ids,
-                entity_ids=entity_ids,
-                metadata=narrative.metadata,
-                narrative_context=narrative.narrative_context,
+        # Narrative is committed. Trigger entity extraction best-effort and in
+        # the background, so a slow or unavailable narratives service never
+        # blocks or fails narrative creation (same best-effort contract the
+        # external update/delete sync already uses). Retries run out-of-band;
+        # if they all fail, the periodic backfill sweep recovers the narrative.
+        #
+        # Only fire on NEW narratives: extraction re-sends the enriched narrative
+        # back here (update path), so triggering on updates too would feed back
+        # into itself and re-extract in a loop. Updates/merges don't need
+        # re-extraction via this path.
+        external_id = narrative.metadata.get("narrative_id")
+        if is_new and external_id:
+            # Pass our own PK: the knowledge graph is keyed by the backend
+            # narrative id, and handing it over explicitly avoids the race where
+            # the trigger reaches narratives before it has written backend_id
+            # into its Qdrant payload.
+            self._schedule_entity_extraction(external_id, str(result.id))
+
+        return result
+
+    def _schedule_entity_extraction(
+        self, external_narrative_id: str, backend_id: str
+    ) -> None:
+        """Fire entity extraction in the background; never blocks the caller."""
+        task = asyncio.create_task(
+            self._trigger_entity_extraction(external_narrative_id, backend_id)
+        )
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+
+    async def _trigger_entity_extraction(
+        self, external_narrative_id: str, backend_id: str
+    ) -> None:
+        """Best-effort: ask the external narratives API to extract a narrative's
+        entities, retrying a few times on transient failure.
+
+        Never raises — entity extraction is secondary enrichment and must not
+        affect narrative creation. After exhausting retries it logs an error so
+        the narrative can be recovered later by the periodic backfill sweep.
+        """
+        if not _api.is_configured():
+            return
+
+        attempts = len(_EXTRACTION_RETRY_BACKOFFS) + 1
+        detail = ""
+        for attempt in range(1, attempts + 1):
+            try:
+                response = await _api.extract_entities(
+                    external_narrative_id, backend_id=backend_id
+                )
+                if response.status_code < 400:
+                    logger.info(
+                        f"Queued entity extraction for narrative "
+                        f"{external_narrative_id} (attempt {attempt}/{attempts})"
+                    )
+                    return
+                detail = f"status={response.status_code} body={response.text[:200]}"
+            except Exception as e:
+                detail = repr(e)
+
+            logger.warning(
+                f"Entity extraction trigger for {external_narrative_id} failed "
+                f"(attempt {attempt}/{attempts}): {detail}"
             )
+            if attempt < attempts:
+                await asyncio.sleep(_EXTRACTION_RETRY_BACKOFFS[attempt - 1])
+
+        logger.error(
+            f"Gave up triggering entity extraction for narrative "
+            f"{external_narrative_id} after {attempts} attempts ({detail}); "
+            "periodic backfill must recover it."
+        )
 
     async def get_narrative(self, narrative_id: UUID) -> Narrative | None:
         async with self.repo() as repo:

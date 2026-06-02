@@ -57,6 +57,26 @@ class NarrativesApiClient:
                 url, json=payload, headers=self._headers(), timeout=TIMEOUT
             )
 
+    async def extract_entities(
+        self, external_narrative_id: str, backend_id: str | None = None
+    ) -> httpx.Response:
+        """Trigger entity extraction for a narrative on the external API.
+
+        ``backend_id`` is our narrative PK — the key the knowledge graph is
+        stored under. We pass it so narratives tags Neo4j with the canonical id
+        instead of relying on its Qdrant payload (which may not yet carry it).
+
+        The narratives side resolves the narrative text itself and enqueues the
+        work, returning 202 immediately — so this call is normally fast and only
+        the background trigger in NarrativeService retries it on failure.
+        """
+        url = f"{NARRATIVES_BASE_URL}/narrative/{external_narrative_id}/extract-entities"
+        params = {"backend_id": backend_id} if backend_id else None
+        async with httpx.AsyncClient() as client:
+            return await client.post(
+                url, params=params, headers=self._headers(), timeout=TIMEOUT
+            )
+
     async def add_contents(
         self, claims: list[dict[str, str | float]]
     ) -> httpx.Response:
