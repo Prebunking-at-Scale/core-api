@@ -4,7 +4,7 @@ from uuid import UUID
 
 from litestar import Controller, delete, get, patch, post
 from litestar.di import Provide
-from litestar.exceptions import NotFoundException
+from litestar.exceptions import NotFoundException, ValidationException
 
 from core.auth.guards import super_admin
 from core.errors import ConflictError
@@ -13,6 +13,8 @@ from core.narratives.models import (
     NarrativeAnalysisIndicatorsResponse,
     NarrativeDetail,
     NarrativeInput,
+    NarrativeMergeInput,
+    NarrativeMergeResult,
     NarrativePatchInput,
     NarrativeStats,
     NarrativeSummary,
@@ -276,6 +278,47 @@ class NarrativeController(Controller):
         narrative_id: UUID,
     ) -> None:
         await narrative_service.delete_narrative(narrative_id)
+
+    @post(
+        path="/{target_id:uuid}/merge",
+        summary="Fold a source narrative into this one",
+        guards=[super_admin],
+        status_code=200,
+    )
+    async def merge_narrative(
+        self,
+        narrative_service: NarrativeService,
+        target_id: UUID,
+        data: NarrativeMergeInput,
+    ) -> JSON[NarrativeMergeResult]:
+        """Transfer everything attached to `source_id` onto `target_id`,
+        delete the source, and queue the same change for Neo4j.
+
+        Returns the per-table transfer counts so the caller can show the
+        operator how much actually moved (rather than dropping silently
+        because of unique-constraint collisions on the target side).
+        """
+        try:
+            stats = await narrative_service.merge_narrative(
+                target_id=target_id, source_id=data.source_id
+            )
+        except ValueError as exc:
+            raise ValidationException(str(exc))
+        except LookupError as exc:
+            raise NotFoundException(detail=str(exc))
+
+        return JSON(
+            NarrativeMergeResult(
+                target_id=target_id,
+                source_id=data.source_id,
+                transferred_claims=stats.get("claims", 0),
+                transferred_entities=stats.get("entities", 0),
+                transferred_topics=stats.get("topics", 0),
+                transferred_feedback=(
+                    stats.get("feedback", 0) + stats.get("narrative_feedback", 0)
+                ),
+            )
+        )
 
     @get(
         path="/{narrative_id:uuid}/indicators",

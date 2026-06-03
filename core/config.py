@@ -52,6 +52,28 @@ SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 NARRATIVES_BASE_URL = os.environ.get("NARRATIVES_BASE_ENDPOINT")
 NARRATIVES_API_KEY = os.environ.get("NARRATIVES_API_KEY")
 
+"""graph-events dispatcher settings"""
+# How often the dispatcher polls the outbox when it has work left to do.
+# Kept short so that the lag between a Postgres mutation and Neo4j catching
+# up stays sub-second under normal load.
+GRAPH_EVENTS_POLL_INTERVAL_SEC = float(
+    os.environ.get("GRAPH_EVENTS_POLL_INTERVAL_SEC", "1.5")
+)
+# How many pending events the dispatcher claims per cycle. Bigger batches
+# reduce DB round-trips; smaller ones keep failure blast radius narrow.
+GRAPH_EVENTS_BATCH_SIZE = int(os.environ.get("GRAPH_EVENTS_BATCH_SIZE", "50"))
+# Exponential-backoff base for failed dispatches.
+GRAPH_EVENTS_BACKOFF_BASE_SEC = float(
+    os.environ.get("GRAPH_EVENTS_BACKOFF_BASE_SEC", "5.0")
+)
+GRAPH_EVENTS_BACKOFF_MAX_SEC = float(
+    os.environ.get("GRAPH_EVENTS_BACKOFF_MAX_SEC", "300.0")
+)
+# After this many failed attempts the event stops being retried; it stays
+# in the table with processed_at=NULL so the drift detector / runbook can
+# pick it up.
+GRAPH_EVENTS_MAX_ATTEMPTS = int(os.environ.get("GRAPH_EVENTS_MAX_ATTEMPTS", "12"))
+
 """internationalisation"""
 i18n.set("file_format", "json")
 i18n.set("filename_format", "{locale}.{format}")

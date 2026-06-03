@@ -125,3 +125,30 @@ class NarrativesApiClient:
                 headers=self._headers(),
                 timeout=TIMEOUT,
             )
+
+    async def post_graph_event(
+        self,
+        event_id: str,
+        event_type: str,
+        payload: dict,
+        timeout: float = TIMEOUT,
+    ) -> httpx.Response:
+        """Hand an outbox event to the narratives graph-events receiver.
+
+        The receiver validates and queues; the response should be 202 on
+        successful enqueue, leaving the actual Neo4j work to the Celery
+        worker on the narratives side. The dispatcher treats anything
+        other than 2xx as retryable, except 4xx which is treated as
+        permanently malformed (no retry past max_attempts)."""
+        url = f"{NARRATIVES_BASE_URL}/graph/events"
+        async with httpx.AsyncClient() as client:
+            return await client.post(
+                url,
+                json={
+                    "event_id": event_id,
+                    "event_type": event_type,
+                    "payload": payload,
+                },
+                headers=self._headers(),
+                timeout=timeout,
+            )

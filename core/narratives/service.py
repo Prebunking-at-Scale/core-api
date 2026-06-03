@@ -5,6 +5,8 @@ from uuid import UUID
 
 from core.entities.graph_models import GraphNarrative
 from core.entities.service import EntityService
+from core.graph_events import service as graph_events
+from core.graph_events.models import GraphEventType
 from core.models import Claim, Narrative, NarrativeAlertLevel, Video
 from core.narratives.models import (
     AnalysisIndicator,
@@ -343,6 +345,68 @@ class NarrativeService:
                 )
 
             await repo.delete_narrative(narrative_id)
+
+            # Outbox: queue Neo4j cleanup in the same Postgres transaction.
+            # The dispatcher picks the event up async; if the surrounding
+            # uow rolls back (e.g. delete_narrative raised), the INSERT
+            # rolls back too — Neo4j never gets a cleanup request for a
+            # narrative that didn't actually disappear from Postgres.
+            await graph_events.publish(
+                session=repo._session,
+                event_type=GraphEventType.NARRATIVE_DELETED,
+                payload={"narrative_id": str(narrative_id)},
+            )
+
+    async def merge_narrative(
+        self, target_id: UUID, source_id: UUID
+    ) -> dict[str, int]:
+        """Fold the source narrative into the target.
+
+        Steps, all in one Postgres transaction:
+          1. Validate that both exist and are distinct.
+          2. Re-point every association (claims, entities, topics, feedback)
+             from source to target, deduplicating on collisions.
+          3. Delete the source narrative; cascading FKs drop anything that
+             still pointed at it (the rows we couldn't transfer because of
+             unique-constraint collisions, plus per-narrative side data
+             like virality scores).
+          4. Publish a `narrative.merged` event in the same transaction so
+             Neo4j follows along once the dispatcher delivers it.
+
+        Returns per-table transfer stats so the operator/UI can show what
+        actually moved.
+        """
+        if target_id == source_id:
+            raise ValueError("source_id and target_id must differ")
+
+        async with self.repo() as repo:
+            target = await repo.get_narrative(target_id)
+            source = await repo.get_narrative(source_id)
+            if target is None or source is None:
+                raise LookupError("source or target narrative not found")
+
+            stats = await repo.merge_into(source_id=source_id, target_id=target_id)
+
+            # Best-effort sync of the legacy external (Qdrant) narratives
+            # service: same path the standalone delete uses. If unconfigured
+            # or the row was never registered there, this is a no-op.
+            if source.metadata.get("narrative_id"):
+                await self._delete_external_narrative(
+                    source.metadata["narrative_id"]
+                )
+
+            await repo.delete_narrative(source_id)
+
+            await graph_events.publish(
+                session=repo._session,
+                event_type=GraphEventType.NARRATIVE_MERGED,
+                payload={
+                    "source_id": str(source_id),
+                    "target_id": str(target_id),
+                },
+            )
+
+        return stats
 
     async def _delete_external_narrative(self, external_narrative_id: str) -> None:
         """Delete a narrative from the external narratives API."""

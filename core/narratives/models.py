@@ -28,6 +28,31 @@ class NarrativePatchInput(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
+class NarrativeMergeInput(BaseModel):
+    """Body of POST /api/narratives/{target_id}/merge.
+
+    Semantics: every claim, entity, topic and feedback row that belonged to
+    `source_id` is re-pointed at the target narrative (deduping rows that
+    would otherwise collide on the table's unique constraint). The source
+    row is then deleted, cascading through anything that still referenced
+    it. The target keeps its own title, description, alert level and
+    history — this is a "fold B into A", not a compose-them merge.
+    """
+
+    source_id: UUID
+
+
+class NarrativeMergeResult(BaseModel):
+    """Stats returned by the merge endpoint."""
+
+    target_id: UUID
+    source_id: UUID
+    transferred_claims: int
+    transferred_entities: int
+    transferred_topics: int
+    transferred_feedback: int
+
+
 class TopicSummary(BaseModel):
     id: UUID
     topic: str

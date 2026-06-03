@@ -829,6 +829,67 @@ class NarrativeRepository:
             {"narrative_id": narrative_id},
         )
 
+    async def merge_into(
+        self, source_id: UUID, target_id: UUID
+    ) -> dict[str, int]:
+        """Move every dependent row from `source` to `target`, then delete
+        `source`. The caller owns the transaction.
+
+        Each transferable association table uses a `WHERE NOT EXISTS`
+        guard so collisions on the table's unique constraint don't blow
+        the UPDATE — rows that would duplicate target's existing rows are
+        left attached to source, where the final cascading DELETE picks
+        them up.
+
+        Returns the count of rows actually re-pointed per table so the
+        service can surface the merge stats to the operator. The final
+        DELETE happens via `delete_narrative(source_id)` after this
+        method returns — keeping that step in the service makes it
+        symmetric with the standalone delete path (and lets the event
+        publishing live there too).
+        """
+
+        async def _transfer(table: str, key_cols: tuple[str, ...]) -> int:
+            cols = " AND ".join(f"x.{c} = t.{c}" for c in key_cols)
+            await self._session.execute(
+                f"""
+                UPDATE {table} AS t
+                SET narrative_id = %(target)s
+                WHERE t.narrative_id = %(source)s
+                  AND NOT EXISTS (
+                      SELECT 1 FROM {table} AS x
+                      WHERE x.narrative_id = %(target)s AND {cols}
+                  )
+                """,
+                {"source": source_id, "target": target_id},
+            )
+            return self._session.rowcount or 0
+
+        stats: dict[str, int] = {
+            "claims": await _transfer("claim_narratives", ("claim_id",)),
+            "entities": await _transfer("narrative_entities", ("entity_id",)),
+            "topics": await _transfer("narrative_topics", ("topic_id",)),
+            "feedback": await _transfer(
+                "claim_narratives_feedback", ("user_id", "claim_id")
+            ),
+        }
+        # narrative_feedback collides on (user_id) only; transfer the
+        # rows whose target user has not voted on the target narrative.
+        await self._session.execute(
+            """
+            UPDATE narrative_feedback AS t
+            SET narrative_id = %(target)s
+            WHERE t.narrative_id = %(source)s
+              AND NOT EXISTS (
+                  SELECT 1 FROM narrative_feedback AS x
+                  WHERE x.narrative_id = %(target)s AND x.user_id = t.user_id
+              )
+            """,
+            {"source": source_id, "target": target_id},
+        )
+        stats["narrative_feedback"] = self._session.rowcount or 0
+        return stats
+
     async def _get_narrative_claims(self, narrative_id: UUID) -> list[Claim]:
         await self._session.execute(
             """
