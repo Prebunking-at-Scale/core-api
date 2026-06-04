@@ -86,6 +86,8 @@ class NarrativesApiClient:
         narrative_id: UUID,
         feedback_score: float,
         content_id: UUID | None = None,
+        comment: str | None = None,
+        user_id: UUID | None = None,
     ) -> httpx.Response:
         url = f"{NARRATIVES_BASE_URL}/feedback"
         payload: dict[str, str | float] = {
@@ -94,6 +96,10 @@ class NarrativesApiClient:
         }
         if content_id:
             payload["content_id"] = str(content_id)
+        if comment:
+            payload["comment"] = comment
+        if user_id:
+            payload["user_id"] = str(user_id)
 
         async with httpx.AsyncClient() as client:
             return await client.post(
