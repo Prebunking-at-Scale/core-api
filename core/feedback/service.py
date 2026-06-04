@@ -38,7 +38,7 @@ class FeedbackService:
                 comment=feedback_text,
                 user_id=user_id,
             )
-            logger.info(f"Successfully sent narrative feedback to external API: narrative_id={narrative_id}, score={feedback_score}")
+            logger.info(f"Successfully sent narrative feedback to external API: narrative_id={narrative_id}, score={feedback_score}, user_id={user_id}")
 
             # Only save to database if external API call succeeded
             feedback = await repo.submit_narrative_feedback(user_id, narrative_id, feedback_score, feedback_text)
