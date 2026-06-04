@@ -1,5 +1,5 @@
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Any, AsyncContextManager, Callable
 from uuid import UUID
 
@@ -724,52 +724,3 @@ class NarrativeService:
             ),
             date=cv["calculated_at"].date(),
         )
-
-    async def get_narrative_analysis_indicators_history(
-        self, narrative_id: UUID, days: int
-    ) -> list[NarrativeAnalysisIndicatorsResponse]:
-        """
-        Return one NarrativeAnalysisIndicatorsResponse per day (last `days`
-        days, including today), oldest → newest. Days without both indicator
-        rows are omitted entirely — caller maps by .date if alignment matters.
-        """
-        date_to = datetime.combine(date.today(), datetime.max.time())
-        date_from = datetime.combine(date.today() - timedelta(days=days - 1), datetime.min.time())
-        async with self.repo() as repo:
-            rows = await repo.get_narrative_analysis_indicators(narrative_id, date_from, date_to)
-
-        # Group rows by calendar date, keeping the latest row per (date, type).
-        by_date: dict[date, dict[str, dict[str, Any]]] = {}
-        for row in rows:
-            d = row["calculated_at"].date()
-            slot = by_date.setdefault(d, {})
-            existing = slot.get(row["indicator_type"])
-            if existing is None or row["calculated_at"] > existing["calculated_at"]:
-                slot[row["indicator_type"]] = row
-
-        out: list[NarrativeAnalysisIndicatorsResponse] = []
-        for d in sorted(by_date):
-            slot = by_date[d]
-            cv = slot.get(NarrativeAnalysisIndicatorType.COMPOSITE_VIRALITY)
-            ar = slot.get(NarrativeAnalysisIndicatorType.ACCELERATION_RATE)
-            if cv is None or ar is None:
-                continue
-            out.append(NarrativeAnalysisIndicatorsResponse(
-                narrative_id=narrative_id,
-                composite_virality=AnalysisIndicator(
-                    id=cv["id"],
-                    indicator_value=cv["indicator_value"],
-                    indicator_type=NarrativeAnalysisIndicatorType.COMPOSITE_VIRALITY,
-                    calculated_at=cv["calculated_at"],
-                    metadata=cv["metadata"],
-                ),
-                acceleration_rate=AnalysisIndicator(
-                    id=ar["id"],
-                    indicator_value=ar["indicator_value"],
-                    indicator_type=NarrativeAnalysisIndicatorType.ACCELERATION_RATE,
-                    calculated_at=ar["calculated_at"],
-                    metadata=ar["metadata"],
-                ),
-                date=d,
-            ))
-        return out

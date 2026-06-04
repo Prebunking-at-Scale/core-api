@@ -297,20 +297,3 @@ class NarrativeController(Controller):
         if indicators is None:
             raise NotFoundException()
         return JSON(indicators)
-
-    @get(
-        path="/{narrative_id:uuid}/indicators/history",
-        summary="Get the last N days of analysis indicators for a narrative (one round trip)",
-    )
-    async def get_narrative_indicators_history(
-        self,
-        narrative_service: NarrativeService,
-        narrative_id: UUID,
-        days: int = 7,
-    ) -> JSON[list[NarrativeAnalysisIndicatorsResponse]]:
-        # Returns up to `days` entries ordered oldest → newest. Missing days
-        # are simply absent from the list (no nulls), so the frontend can map
-        # them to a sparkline by date alignment.
-        days = max(1, min(days, 90))
-        history = await narrative_service.get_narrative_analysis_indicators_history(narrative_id, days)
-        return JSON(history)
