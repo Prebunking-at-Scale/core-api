@@ -351,9 +351,13 @@ class NarrativeRepository:
         first_content_end: datetime | None = None,
         language: str | None = None,
         alert_levels: list[str] | None = None,
+        sort: str | None = None,
     ) -> list[NarrativeListItem]:
         """
         Get all narratives with pre-aggregated counts in a single query.
+
+        `sort="composite"` ranks results by each narrative's latest
+        composite_virality score (highest first); otherwise newest first.
         """
         # Build filter conditions
         filter_joins = ""
@@ -434,13 +438,36 @@ class NarrativeRepository:
         if filter_conditions:
             where_clause = "WHERE " + " AND ".join(filter_conditions)
 
+        # Optional ranking by latest composite virality score. Used by the
+        # overview to surface the top-scoring narratives per alert level. The
+        # LATERAL join picks each narrative's most recent composite indicator.
+        composite_select = ""
+        composite_join = ""
+        inner_order = "n.created_at DESC"
+        final_order = "fn.created_at DESC"
+        if sort == "composite":
+            composite_select = ", ci.indicator_value AS composite_score"
+            composite_join = """
+                LEFT JOIN LATERAL (
+                    SELECT i.indicator_value
+                    FROM narrative_analysis_indicators i
+                    WHERE i.narrative_id = n.id
+                      AND i.indicator_type = 'composite_virality'
+                    ORDER BY i.calculated_at DESC
+                    LIMIT 1
+                ) ci ON TRUE
+            """
+            inner_order = "ci.indicator_value DESC NULLS LAST, n.created_at DESC"
+            final_order = "fn.composite_score DESC NULLS LAST, fn.created_at DESC"
+
         query = f"""
             WITH filtered_narratives AS (
-                SELECT DISTINCT n.id, n.title, n.description, n.created_at, n.updated_at, n.alert_level
+                SELECT DISTINCT n.id, n.title, n.description, n.created_at, n.updated_at, n.alert_level{composite_select}
                 FROM narratives n
                 {filter_joins}
+                {composite_join}
                 {where_clause}
-                ORDER BY n.created_at DESC
+                ORDER BY {inner_order}
                 LIMIT %(limit)s OFFSET %(offset)s
             ),
             narrative_claims AS (
@@ -529,7 +556,7 @@ class NarrativeRepository:
             LEFT JOIN narrative_languages nl ON fn.id = nl.narrative_id
             LEFT JOIN narrative_entities nen ON fn.id = nen.narrative_id
             LEFT JOIN narrative_topics_agg nta ON fn.id = nta.narrative_id
-            ORDER BY fn.created_at DESC
+            ORDER BY {final_order}
         """
 
         await self._session.execute(query, params)

@@ -219,6 +219,7 @@ class NarrativeService:
         first_content_end: datetime | None = None,
         language: str | None = None,
         alert_levels: list[str] | None = None,
+        sort: str | None = None,
     ) -> tuple[list[NarrativeListItem], int]:
         async with self.repo() as repo:
             narratives = await repo.get_all_narratives_list(
@@ -233,6 +234,7 @@ class NarrativeService:
                 first_content_end=first_content_end,
                 language=language,
                 alert_levels=alert_levels,
+                sort=sort,
             )
             total = await repo.count_all_narratives(
                 topic_id=topic_id,
