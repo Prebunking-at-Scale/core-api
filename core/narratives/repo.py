@@ -356,8 +356,9 @@ class NarrativeRepository:
         """
         Get all narratives with pre-aggregated counts in a single query.
 
-        `sort="composite"` ranks results by each narrative's latest
-        composite_virality score (highest first); otherwise newest first.
+        `sort="composite"` / `sort="acceleration"` ranks results by each
+        narrative's latest composite_virality / acceleration_rate indicator
+        (highest first); otherwise newest first.
         """
         # Build filter conditions
         filter_joins = ""
@@ -440,32 +441,37 @@ class NarrativeRepository:
 
         # Optional ranking by latest composite virality score. Used by the
         # overview to surface the top-scoring narratives per alert level. The
-        # LATERAL join picks each narrative's most recent composite indicator.
-        composite_select = ""
-        composite_join = ""
+        # LATERAL join picks each narrative's most recent indicator value.
+        sort_indicators = {
+            "composite": "composite_virality",
+            "acceleration": "acceleration_rate",
+        }
+        sort_select = ""
+        sort_join = ""
         inner_order = "n.created_at DESC"
         final_order = "fn.created_at DESC"
-        if sort == "composite":
-            composite_select = ", ci.indicator_value AS composite_score"
-            composite_join = """
+        if sort in sort_indicators:
+            params["sort_indicator"] = sort_indicators[sort]
+            sort_select = ", ci.indicator_value AS sort_score"
+            sort_join = """
                 LEFT JOIN LATERAL (
                     SELECT i.indicator_value
                     FROM narrative_analysis_indicators i
                     WHERE i.narrative_id = n.id
-                      AND i.indicator_type = 'composite_virality'
+                      AND i.indicator_type = %(sort_indicator)s
                     ORDER BY i.calculated_at DESC
                     LIMIT 1
                 ) ci ON TRUE
             """
             inner_order = "ci.indicator_value DESC NULLS LAST, n.created_at DESC"
-            final_order = "fn.composite_score DESC NULLS LAST, fn.created_at DESC"
+            final_order = "fn.sort_score DESC NULLS LAST, fn.created_at DESC"
 
         query = f"""
             WITH filtered_narratives AS (
-                SELECT DISTINCT n.id, n.title, n.description, n.created_at, n.updated_at, n.alert_level{composite_select}
+                SELECT DISTINCT n.id, n.title, n.description, n.created_at, n.updated_at, n.alert_level{sort_select}
                 FROM narratives n
                 {filter_joins}
-                {composite_join}
+                {sort_join}
                 {where_clause}
                 ORDER BY {inner_order}
                 LIMIT %(limit)s OFFSET %(offset)s
