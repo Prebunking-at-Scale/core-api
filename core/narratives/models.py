@@ -48,6 +48,8 @@ class NarrativeSummary(BaseModel):
     video_count: int = 0
     language_count: int = 0
     entity_count: int = 0
+    score_count: int = 0
+    average_score: float | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

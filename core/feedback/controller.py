@@ -10,7 +10,11 @@ from core.feedback.models import (
     NarrativeFeedbackInput,
 )
 from core.feedback.service import FeedbackService
-from core.models import ClaimNarrativeFeedback, NarrativeFeedback
+from core.models import (
+    ClaimNarrativeFeedback,
+    NarrativeFeedback,
+    NarrativeFeedbackSummary,
+)
 from core.response import JSON
 from core.uow import ConnectionFactory
 
@@ -66,6 +70,22 @@ class NarrativeFeedbackController(Controller):
         if feedback is None:
             raise NotFoundException(f"No feedback found for narrative {narrative_id}")
         return JSON(feedback)
+
+    @get(
+        path="/summary",
+        summary="Get aggregate feedback for a narrative",
+        description="Retrieve the number of users who rated the narrative and their average score.",
+    )
+    async def get_narrative_feedback_summary(
+        self,
+        feedback_service: FeedbackService,
+        user: User,
+        narrative_id: UUID,
+    ) -> JSON[NarrativeFeedbackSummary]:
+        summary = await feedback_service.get_narrative_feedback_summary(
+            narrative_id=narrative_id
+        )
+        return JSON(summary)
 
 
 class ClaimNarrativeFeedbackController(Controller):

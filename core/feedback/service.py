@@ -5,7 +5,11 @@ from uuid import UUID
 from litestar.exceptions import NotFoundException
 
 from core.feedback.repo import FeedbackRepository
-from core.models import ClaimNarrativeFeedback, NarrativeFeedback
+from core.models import (
+    ClaimNarrativeFeedback,
+    NarrativeFeedback,
+    NarrativeFeedbackSummary,
+)
 from core.narratives.api import NarrativesApiClient
 from core.uow import ConnectionFactory, uow
 
@@ -52,6 +56,15 @@ class FeedbackService:
         """Get user's feedback for a narrative"""
         async with self.repo() as repo:
             return await repo.get_narrative_feedback(user_id, narrative_id)
+
+    async def get_narrative_feedback_summary(
+        self, narrative_id: UUID
+    ) -> NarrativeFeedbackSummary:
+        """Get aggregate feedback (count + average) for a narrative"""
+        async with self.repo() as repo:
+            if not await repo.narrative_exists(narrative_id):
+                raise NotFoundException(f"Narrative with id {narrative_id} not found")
+            return await repo.get_narrative_feedback_summary(narrative_id)
 
     # Claim-narrative feedback methods
     async def submit_claim_narrative_feedback(
