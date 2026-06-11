@@ -404,12 +404,18 @@ class NarrativeService:
             if not any(claim.id == claim_id for claim in narrative.claims):
                 raise ValueError("claim not associated with narrative")
 
-            if _api.is_configured():
-                response = await _api.delete_claim_on_narrative(narrative_id, claim_id)
+            # The external API identifies narratives by their own id (stored in
+            # metadata.narrative_id), not by our local narrative_id. Resolve it
+            # first, mirroring _delete_external_narrative / _sync_external_narrative.
+            external_narrative_id = narrative.metadata.get("narrative_id")
+            if _api.is_configured() and external_narrative_id:
+                response = await _api.delete_claim_on_narrative(
+                    external_narrative_id, claim_id
+                )
                 if response.status_code == 404:
                     logger.info(
-                        f"Narrative {narrative_id} or claim {claim_id} not found on external API, "
-                        "continuing with local delete"
+                        f"Narrative {external_narrative_id} or claim {claim_id} not found "
+                        "on external API, continuing with local delete"
                     )
                 elif response.status_code >= 400:
                     logger.error(
@@ -418,6 +424,14 @@ class NarrativeService:
                     )
                     response.raise_for_status()
                 else:
-                    logger.info(f"Deleted claim {claim_id} from narrative {narrative_id} on external API")
+                    logger.info(
+                        f"Deleted claim {claim_id} from narrative {external_narrative_id} "
+                        "on external API"
+                    )
+            elif _api.is_configured():
+                logger.warning(
+                    f"Narrative {narrative_id} has no external narrative_id in metadata; "
+                    "skipping external claim delete (local delete only)"
+                )
 
             await repo.delete_claim_from_narrative(narrative_id, claim_id)
