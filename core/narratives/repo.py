@@ -492,6 +492,15 @@ class NarrativeRepository:
                 JOIN topics t ON nt.topic_id = t.id
                 JOIN filtered_narratives fn ON fn.id = nt.narrative_id
                 GROUP BY nt.narrative_id
+            ),
+            narrative_ratings AS (
+                SELECT
+                    nf.narrative_id,
+                    COUNT(*) as score_count,
+                    AVG(nf.feedback_score)::float as average_score
+                FROM narrative_feedback nf
+                JOIN filtered_narratives fn ON fn.id = nf.narrative_id
+                GROUP BY nf.narrative_id
             )
             SELECT
                 fn.id,
@@ -507,13 +516,16 @@ class NarrativeRepository:
                 COALESCE(nv.total_comments, 0) as total_comments,
                 COALESCE(nv.platforms, ARRAY[]::text[]) as platforms,
                 COALESCE(nl.language_count, 0) as language_count,
-                COALESCE(nen.entity_count, 0) as entity_count
+                COALESCE(nen.entity_count, 0) as entity_count,
+                COALESCE(nr.score_count, 0) as score_count,
+                nr.average_score as average_score
             FROM filtered_narratives fn
             LEFT JOIN narrative_claims nc ON fn.id = nc.narrative_id
             LEFT JOIN narrative_videos nv ON fn.id = nv.narrative_id
             LEFT JOIN narrative_languages nl ON fn.id = nl.narrative_id
             LEFT JOIN narrative_entities nen ON fn.id = nen.narrative_id
             LEFT JOIN narrative_topics_agg nta ON fn.id = nta.narrative_id
+            LEFT JOIN narrative_ratings nr ON fn.id = nr.narrative_id
             ORDER BY fn.created_at DESC
         """
 
@@ -540,6 +552,8 @@ class NarrativeRepository:
                     video_count=row["video_count"] or 0,
                     language_count=row["language_count"] or 0,
                     entity_count=row["entity_count"] or 0,
+                    score_count=row["score_count"] or 0,
+                    average_score=row["average_score"],
                     created_at=row["created_at"],
                     updated_at=row["updated_at"],
                 )

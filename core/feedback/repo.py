@@ -3,7 +3,11 @@ from uuid import UUID
 import psycopg
 from psycopg.rows import DictRow
 
-from core.models import ClaimNarrativeFeedback, NarrativeFeedback
+from core.models import (
+    ClaimNarrativeFeedback,
+    NarrativeFeedback,
+    NarrativeFeedbackSummary,
+)
 
 
 class FeedbackRepository:
@@ -51,6 +55,30 @@ class FeedbackRepository:
         )
         row = await self._session.fetchone()
         return NarrativeFeedback(**row) if row else None
+
+    async def get_narrative_feedback_summary(
+        self, narrative_id: UUID
+    ) -> NarrativeFeedbackSummary:
+        """Aggregate feedback for a narrative across all users.
+
+        Each (user_id, narrative_id) pair holds a single upserted row, so the
+        count is the number of distinct users who rated and the average is the
+        mean of their latest scores. Returns count 0 / average None when there
+        is no feedback yet.
+        """
+        await self._session.execute(
+            """
+            SELECT COUNT(*) AS score_count,
+                   AVG(feedback_score)::float AS average_score
+            FROM narrative_feedback
+            WHERE narrative_id = %(narrative_id)s
+            """,
+            {"narrative_id": narrative_id},
+        )
+        row = await self._session.fetchone()
+        if row is None:
+            return NarrativeFeedbackSummary(score_count=0, average_score=None)
+        return NarrativeFeedbackSummary(**row)
 
     # Claim-narrative feedback methods
     async def submit_claim_narrative_feedback(
