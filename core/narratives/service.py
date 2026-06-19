@@ -429,7 +429,7 @@ class NarrativeService:
             return await repo.get_average_views_for_all_narratives()
         
     async def calculate_narrative_virality_scores(
-        self, narrative_id: UUID, average_views: float | None = None
+        self, narrative_id: UUID, average_views: float | None = None, calc_date: date | None = None
     ) -> tuple[float, float, float]:
         """
         Calculate and store virality scores for a single narrative.
@@ -452,6 +452,7 @@ class NarrativeService:
                 narrative_id=narrative_id,
                 score_value=engagement_score,
                 score_type=NarrativeViralityScoreType.ENGAGEMENT_SCORE,
+                calc_date=calc_date,
                 metadata={
                     "likes": narrative_total_stats.likes,
                     "comments": narrative_total_stats.comments,
@@ -467,6 +468,7 @@ class NarrativeService:
                 narrative_id=narrative_id,
                 score_value=reach_score,
                 score_type=NarrativeViralityScoreType.REACH_SCORE,
+                calc_date=calc_date,
                 metadata={
                     "views": narrative_total_stats.views,
                     "average_views_for_all_narratives": average_views_for_all_narratives,
@@ -482,6 +484,7 @@ class NarrativeService:
                 narrative_id=narrative_id,
                 score_value=velocity_score,
                 score_type=NarrativeViralityScoreType.VELOCITY_SCORE,
+                calc_date=calc_date,
                 metadata={
                     "views_last_days": last_days_stats.views,
                     "total_views": narrative_total_stats.views,
@@ -649,7 +652,7 @@ class NarrativeService:
             for narrative in narratives:
                 try:
                     await self.calculate_narrative_virality_scores(
-                        narrative.id, average_views=average_views
+                        narrative.id, average_views=average_views, calc_date=target_date
                     )
                     total_processed += 1
                 except Exception as e:
@@ -685,7 +688,11 @@ class NarrativeService:
         if not rows:
             return None
 
-        by_type = {row["indicator_type"]: row for row in rows}
+        # rows are ordered by calculated_at DESC, so the first row per type is the
+        # most recent; setdefault keeps it and ignores older same-day reruns.
+        by_type: dict[str, Any] = {}
+        for row in rows:
+            by_type.setdefault(row["indicator_type"], row)
         if NarrativeAnalysisIndicatorType.COMPOSITE_VIRALITY not in by_type \
                 or NarrativeAnalysisIndicatorType.ACCELERATION_RATE not in by_type:
             return None

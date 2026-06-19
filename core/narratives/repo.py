@@ -1785,35 +1785,34 @@ class NarrativeRepository:
         )
     
     async def insert_narrative_virality_score(
-        self, narrative_id: UUID, score_value: float, score_type: NarrativeViralityScoreType, metadata: dict | None = None
+        self, narrative_id: UUID, score_value: float, score_type: NarrativeViralityScoreType,
+        metadata: dict | None = None, calc_date: date | None = None
     ) -> None:
         """
         Insert or update virality scores for a narrative.
         This can be used to track which narratives are driving the virality over time.
+
+        When `calc_date` is given the score is bucketed on that date (keeping the
+        wall-clock time so reruns on the same day still order newest-last), so the
+        downstream percentile/indicator queries that filter by `calculated_at::date`
+        see it. Defaults to the current timestamp.
         """
         await self._session.execute(
             """
             INSERT INTO narrative_virality_scores (narrative_id, score_value, score_type, metadata, calculated_at)
-            VALUES (%(narrative_id)s, %(score_value)s, %(score_type)s, %(metadata)s, NOW())
+            VALUES (
+                %(narrative_id)s, %(score_value)s, %(score_type)s, %(metadata)s,
+                COALESCE(%(calc_date)s::date, CURRENT_DATE) + LOCALTIME
+            )
             """,
             {
                 "narrative_id": narrative_id,
                 "score_value": score_value,
                 "score_type": score_type.value,
                 "metadata": Jsonb(metadata) if metadata is not None else None,
+                "calc_date": calc_date,
             },
         )
-
-    async def get_narrative_virality_score_percentiles(
-        self, narrative_id: UUID, calc_date: date
-    ) -> dict[str, float]:
-        """
-        Get the percentile rank of each virality score for a single narrative compared to all
-        others of the same score_type calculated on the same date.
-        Returns a dict keyed by score_type with values in [0.0, 1.0].
-        """
-        all_percentiles = await self.get_all_virality_percentiles_for_date(calc_date)
-        return all_percentiles.get(narrative_id, {})
 
     async def get_all_virality_percentiles_for_date(
         self, calc_date: date
@@ -1951,29 +1950,6 @@ class NarrativeRepository:
             {"calc_date": calc_date, "prev_date": prev_date},
         )
         return await self._session.fetchall()
-
-    async def insert_narrative_analysis_indicators(
-        self, narrative_id: UUID, 
-        indicator_value: float,
-        indicator_type: NarrativeAnalysisIndicatorType,
-        metadata: dict | None = None
-    ) -> None:
-        """
-        Insert analysis indicators for a narrative.
-        This can be used to store various signals that contribute to the virality score, such as composite virality, acceleration rate, etc.
-        """
-        await self._session.execute(
-            """
-            INSERT INTO narrative_analysis_indicators (narrative_id, indicator_value, indicator_type, metadata, calculated_at)
-            VALUES (%(narrative_id)s, %(indicator_value)s, %(indicator_type)s, %(metadata)s, NOW())
-            """,
-            {
-                "narrative_id": narrative_id,
-                "indicator_value": indicator_value,
-                "indicator_type": indicator_type.value,
-                "metadata": Jsonb(metadata) if metadata is not None else None,
-            },
-        )
 
     async def get_bulk_analysis_indicators_for_date(
         self, calc_date: date
