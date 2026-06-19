@@ -50,6 +50,7 @@ class NarrativeSummary(BaseModel):
     entity_count: int = 0
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    alert_level: NarrativeAlertLevel | None = None
 
 
 # Alias for backwards compatibility

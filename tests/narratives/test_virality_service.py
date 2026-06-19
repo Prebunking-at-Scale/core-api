@@ -338,8 +338,9 @@ class TestCalculateAccelerationRateForDate:
 
     async def test_acceleration_rate_no_prev_data(self, narrative_service: NarrativeService):
         """
-        prev all zeros, current > 0 → each change = 1.0
-        acceleration = 1.0*0.40 + 1.0*0.35 + 1.0*0.25 = 1.0
+        prev all zeros → percent-change is undefined and treated as 0 (the old
+        1.0 fallback was dropped to stop conflating "freshly observed" with
+        "100% growth"). Each change = 0.0 → acceleration = 0.0.
         """
         narrative_id = uuid.uuid4()
         row = self._make_stats_row(
@@ -355,7 +356,7 @@ class TestCalculateAccelerationRateForDate:
 
         inserted = mock_repo.bulk_insert_narrative_analysis_indicators.call_args[0][0]
         _, acceleration, _, _ = inserted[0]
-        assert acceleration == pytest.approx(1.0)
+        assert acceleration == pytest.approx(0.0)
 
     async def test_acceleration_rate_all_zeros(self, narrative_service: NarrativeService):
         """All zeros → no change → acceleration = 0.0"""

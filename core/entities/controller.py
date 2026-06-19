@@ -2,8 +2,9 @@ from uuid import UUID
 
 from litestar import Controller, get
 from litestar.di import Provide
-from litestar.exceptions import NotFoundException
+from litestar.exceptions import NotFoundException, ValidationException
 
+from core.entities.models import EnrichedEntity
 from core.entities.service import EntityService
 from core.models import Entity, Narrative
 from core.narratives.service import NarrativeService
@@ -52,9 +53,29 @@ class EntityController(Controller):
         offset: int = 0,
         text: str | None = None,
         hours: int | None = None,
-    ) -> PaginatedJSON[list[Entity]]:
+        language: str | None = None,
+        narratives_min: int | None = None,
+        narratives_max: int | None = None,
+    ) -> PaginatedJSON[list[EnrichedEntity]]:
+        if narratives_min is not None and narratives_min < 0:
+            raise ValidationException("narratives_min must be >= 0")
+        if narratives_max is not None and narratives_max < 0:
+            raise ValidationException("narratives_max must be >= 0")
+        if (
+            narratives_min is not None
+            and narratives_max is not None
+            and narratives_min > narratives_max
+        ):
+            raise ValidationException("narratives_min must be <= narratives_max")
+
         entities, total = await entity_service.get_all_entities(
-            limit=limit, offset=offset, text=text, hours=hours
+            limit=limit,
+            offset=offset,
+            text=text,
+            hours=hours,
+            language=language,
+            narratives_min=narratives_min,
+            narratives_max=narratives_max,
         )
         page = (offset // limit) + 1 if limit > 0 else 1
         return PaginatedJSON(

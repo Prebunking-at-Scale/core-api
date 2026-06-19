@@ -1,7 +1,7 @@
 from typing import AsyncContextManager
 from uuid import UUID
 
-from core.entities.models import EntityInput
+from core.entities.models import EnrichedEntity, EntityInput
 from core.entities.repo import EntityRepository
 from core.models import Entity
 from core.uow import ConnectionFactory, uow
@@ -105,15 +105,27 @@ class EntityService:
         limit: int = 100,
         offset: int = 0,
         text: str | None = None,
-        hours: int | None = None
-    ) -> tuple[list[Entity], int]:
-        """Get all entities with pagination and optional text search"""
+        hours: int | None = None,
+        language: str | None = None,
+        narratives_min: int | None = None,
+        narratives_max: int | None = None,
+    ) -> tuple[list[EnrichedEntity], int]:
+        """Get all enriched entities with pagination and optional filters"""
         async with self.repo() as repo:
-            entities = await repo.get_all_entities(
+            entities = await repo.get_all_enriched_entities(
                 limit=limit,
                 offset=offset,
                 text=text,
-                hours=hours
+                hours=hours,
+                language=language,
+                narratives_min=narratives_min,
+                narratives_max=narratives_max,
             )
-            total = await repo.count_all_entities(text=text, hours=hours)
+            total = await repo.count_all_entities(
+                text=text,
+                hours=hours,
+                language=language,
+                narratives_min=narratives_min,
+                narratives_max=narratives_max,
+            )
             return entities, total

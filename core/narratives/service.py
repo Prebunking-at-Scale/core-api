@@ -42,17 +42,16 @@ ACCELERATION_ENGAGEMENT_WEIGHT = 0.40
 ACCELERATION_VIDEO_VOLUME_WEIGHT = 0.35
 ACCELERATION_VIEWS_WEIGHT = 0.25
 
+# Hard cap on individual change_* components inside acceleration_rate.
+# Without it, a single video going from 1 → 10k views (change=9999) drowns
+# the weighted sum and makes the per-dimension weights meaningless.
+ACCELERATION_CHANGE_CAP = 5.0
 
 def _merge_narrative_context(
     existing: str | None, new: str | None
 ) -> str | None:
-    """Concatenate narrative context entries with a timestamped separator."""
-    if not new:
-        return existing
-    if not existing:
-        return new
-    timestamp = datetime.now().isoformat()
-    return f"{existing}\n\n--{timestamp}--\n\n{new}"
+    """Return the latest narrative_context, falling back to existing when new is empty."""
+    return new if new else existing
 
 
 class NarrativeService:
@@ -96,7 +95,6 @@ class NarrativeService:
                 existing_entity_ids = [entity.id for entity in existing_narrative.entities]
                 merged_entity_ids = list(set(existing_entity_ids + entity_ids))
 
-                # Concatenate narrative_context with existing one
                 merged_narrative_context = _merge_narrative_context(
                     existing_narrative.narrative_context,
                     narrative.narrative_context,
@@ -219,6 +217,8 @@ class NarrativeService:
         first_content_start: datetime | None = None,
         first_content_end: datetime | None = None,
         language: str | None = None,
+        alert_levels: list[str] | None = None,
+        sort: str | None = None,
     ) -> tuple[list[NarrativeListItem], int]:
         async with self.repo() as repo:
             narratives = await repo.get_all_narratives_list(
@@ -231,7 +231,9 @@ class NarrativeService:
                 end_date=end_date,
                 first_content_start=first_content_start,
                 first_content_end=first_content_end,
-                language=language
+                language=language,
+                alert_levels=alert_levels,
+                sort=sort,
             )
             total = await repo.count_all_narratives(
                 topic_id=topic_id,
@@ -241,7 +243,8 @@ class NarrativeService:
                 end_date=end_date,
                 first_content_start=first_content_start,
                 first_content_end=first_content_end,
-                language=language
+                language=language,
+                alert_levels=alert_levels,
             )
             return narratives, total
 
@@ -284,7 +287,6 @@ class NarrativeService:
                 existing_topic_ids = [topic.id for topic in existing_narrative.topics]
                 merged_topic_ids = list(set(existing_topic_ids + data.topic_ids))
 
-            # Concatenate narrative_context with existing one
             merged_narrative_context = None
             if data.narrative_context is not None:
                 merged_narrative_context = _merge_narrative_context(
@@ -537,20 +539,28 @@ class NarrativeService:
                     + row["prev_comments"] * VIRALITY_SCORE_COMMENTS_WEIGHT
                 ) / row["prev_views"] if row["prev_views"] > 0 else 0.0
 
-                change_engagement = (
+                # When there is no previous-period baseline the percent-change
+                # is undefined; we treat it as 0 instead of the previous 1.0
+                # fallback, which was conflating "freshly observed" with "100%
+                # growth" and silently inflating accel for new narratives.
+                #
+                # The per-dimension change is capped at ACCELERATION_CHANGE_CAP
+                # so that a single video with a 1-view baseline can't push
+                # change_views into the thousands and drown the weighting.
+                change_engagement = min(
                     (current_engagement - prev_engagement) / prev_engagement
-                    if prev_engagement > 0
-                    else (1.0 if current_engagement > 0 else 0.0)
+                    if prev_engagement > 0 else 0.0,
+                    ACCELERATION_CHANGE_CAP,
                 )
-                change_video_count = (
+                change_video_count = min(
                     (row["current_video_count"] - row["prev_video_count"]) / row["prev_video_count"]
-                    if row["prev_video_count"] > 0
-                    else (1.0 if row["current_video_count"] > 0 else 0.0)
+                    if row["prev_video_count"] > 0 else 0.0,
+                    ACCELERATION_CHANGE_CAP,
                 )
-                change_views = (
+                change_views = min(
                     (row["current_views"] - row["prev_views"]) / row["prev_views"]
-                    if row["prev_views"] > 0
-                    else (1.0 if row["current_views"] > 0 else 0.0)
+                    if row["prev_views"] > 0 else 0.0,
+                    ACCELERATION_CHANGE_CAP,
                 )
 
                 acceleration_rate = (
@@ -594,6 +604,12 @@ class NarrativeService:
                 elif composite > 0.70 and acceleration > 1.5:
                     level = NarrativeAlertLevel.ALERT
                 elif composite > 0.55 and acceleration > 1.2:
+                    level = NarrativeAlertLevel.WATCH
+                elif composite > 0.85:
+                    # Plateaued-but-popular: very high composite (top ~15%)
+                    # without active acceleration. Without this branch these
+                    # narratives slot into NONE alongside truly inactive ones,
+                    # which loses signal for the editorial team.
                     level = NarrativeAlertLevel.WATCH
                 else:
                     level = NarrativeAlertLevel.NONE
