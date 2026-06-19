@@ -1694,7 +1694,7 @@ class NarrativeRepository:
         await self._session.execute(
             """
             WITH narrative_stats AS (
-                SELECT 
+                SELECT
                     cn.narrative_id,
                     COUNT(*) as video_count,
                     COALESCE(SUM(views), 0) as views,
@@ -1783,7 +1783,7 @@ class NarrativeRepository:
             comments=row["comments"] or 0,
             video_count=row["video_count"] or 0,
         )
-    
+
     async def insert_narrative_virality_score(
         self, narrative_id: UUID, score_value: float, score_type: NarrativeViralityScoreType,
         metadata: dict | None = None, calc_date: date | None = None

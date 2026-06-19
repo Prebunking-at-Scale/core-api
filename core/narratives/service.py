@@ -427,7 +427,7 @@ class NarrativeService:
     async def get_average_views_for_all_narratives(self) -> float:
         async with self.repo() as repo:
             return await repo.get_average_views_for_all_narratives()
-        
+
     async def calculate_narrative_virality_scores(
         self, narrative_id: UUID, average_views: float | None = None, calc_date: date | None = None
     ) -> tuple[float, float, float]:
@@ -514,7 +514,7 @@ class NarrativeService:
                 }
                 records.append((narrative_id, composite, NarrativeAnalysisIndicatorType.COMPOSITE_VIRALITY, metadata))
             await repo.bulk_insert_narrative_analysis_indicators(records)
-    
+
     async def calculate_acceleration_rate_for_date(self, calc_date: date) -> None:
         async with self.repo() as repo:
             stats_rows = await repo.get_bulk_narrative_stats_comparison(calc_date)
@@ -573,7 +573,7 @@ class NarrativeService:
                     },
                 ))
             await repo.bulk_insert_narrative_analysis_indicators(records)
-    
+
     async def update_narrative_alert_levels(self, calc_date: date) -> int:
         """
         Classify each narrative based on today's composite_virality and acceleration_rate
