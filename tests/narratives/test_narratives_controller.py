@@ -233,6 +233,255 @@ async def test_patch_narrative_multiple_fields(
     assert len(response_data["entities"]) >= 1
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+async def _create_video_with_claims(
+    client: AsyncTestClient[Litestar], n: int = 2
+) -> tuple[str, list[UUID]]:
+    """Create a video with *n* claims and return (video_id_str, [claim_id, ...])."""
+    video_resp = await client.post(
+        "/api/videos/",
+        json={
+            "title": f"Claims Test Video {uuid4()}",
+            "description": "Video created for claim_ids patch tests",
+            "platform": "youtube",
+            "source_url": f"https://example.com/{uuid4()}",
+            "destination_path": "",
+            "uploaded_at": None,
+            "metadata": {},
+        },
+    )
+    assert video_resp.status_code == 201
+    video_id = video_resp.json()["data"]["id"]
+
+    claims_resp = await client.post(
+        f"/api/videos/{video_id}/claims",
+        json={
+            "claims": [
+                {
+                    "id": str(uuid4()),
+                    "claim": f"Claim {i}",
+                    "start_time_s": float(i * 10),
+                    "metadata": {},
+                }
+                for i in range(n)
+            ]
+        },
+    )
+    assert claims_resp.status_code == 201
+    claim_ids = [UUID(c["id"]) for c in claims_resp.json()["data"]["claims"]]
+    return video_id, claim_ids
+
+
+# ---------------------------------------------------------------------------
+# Topics: replace and clear
+# ---------------------------------------------------------------------------
+
+async def test_patch_narrative_replaces_topics(
+    api_key_client: AsyncTestClient[Litestar],
+) -> None:
+    climate_id = UUID("db3d996b-e691-4ce5-8c46-e35a82a9b28c")
+    health_id = UUID("bb52f622-b9ee-4d5b-9b70-5fd05046528b")
+
+    create_resp = await api_key_client.post(
+        "/api/narratives/",
+        json=NarrativeInput(
+            title="Topic Replace Test",
+            description="Testing topic replacement",
+            topic_ids=[climate_id, health_id],
+        ).model_dump(mode="json"),
+    )
+    assert create_resp.status_code == 201
+    narrative_id = create_resp.json()["data"]["id"]
+
+    # Patch with only health_id — climate must be removed
+    response = await api_key_client.patch(
+        f"/api/narratives/{narrative_id}",
+        json=NarrativePatchInput(topic_ids=[health_id]).model_dump(
+            mode="json", exclude_unset=True
+        ),
+    )
+
+    assert response.status_code == 200
+    topic_ids_in_response = {t["id"] for t in response.json()["data"]["topics"]}
+    assert len(topic_ids_in_response) == 1
+    assert str(health_id) in topic_ids_in_response
+    assert str(climate_id) not in topic_ids_in_response
+
+
+async def test_patch_narrative_clears_topics(
+    api_key_client: AsyncTestClient[Litestar],
+) -> None:
+    climate_id = UUID("db3d996b-e691-4ce5-8c46-e35a82a9b28c")
+
+    create_resp = await api_key_client.post(
+        "/api/narratives/",
+        json=NarrativeInput(
+            title="Topic Clear Test",
+            description="Testing topic clearing",
+            topic_ids=[climate_id],
+        ).model_dump(mode="json"),
+    )
+    assert create_resp.status_code == 201
+    narrative_id = create_resp.json()["data"]["id"]
+
+    # Patch with empty list — all topics must be removed
+    response = await api_key_client.patch(
+        f"/api/narratives/{narrative_id}",
+        json=NarrativePatchInput(topic_ids=[]).model_dump(
+            mode="json", exclude_unset=True
+        ),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["topics"] == []
+
+
+# ---------------------------------------------------------------------------
+# Entities: replace and clear
+# ---------------------------------------------------------------------------
+
+async def test_patch_narrative_replaces_entities(
+    api_key_client: AsyncTestClient[Litestar],
+) -> None:
+    entity_a = EntityInput(
+        wikidata_id="Q501",
+        entity_name="Entity Alpha",
+        entity_type="person",
+        wikidata_info={"label": "Entity Alpha"},
+    )
+    entity_b = EntityInput(
+        wikidata_id="Q502",
+        entity_name="Entity Beta",
+        entity_type="organization",
+        wikidata_info={"label": "Entity Beta"},
+    )
+
+    create_resp = await api_key_client.post(
+        "/api/narratives/",
+        json=NarrativeInput(
+            title="Entity Replace Test",
+            description="Testing entity replacement",
+            entities=[entity_a, entity_b],
+        ).model_dump(mode="json"),
+    )
+    assert create_resp.status_code == 201
+    assert len(create_resp.json()["data"]["entities"]) == 2
+    narrative_id = create_resp.json()["data"]["id"]
+
+    # Patch with only entity_a — entity_b must be removed
+    response = await api_key_client.patch(
+        f"/api/narratives/{narrative_id}",
+        json=NarrativePatchInput(entities=[entity_a]).model_dump(
+            mode="json", exclude_unset=True
+        ),
+    )
+
+    assert response.status_code == 200
+    entities_in_response = response.json()["data"]["entities"]
+    assert len(entities_in_response) == 1
+    assert entities_in_response[0]["name"] == "Entity Alpha"
+
+
+async def test_patch_narrative_clears_entities(
+    api_key_client: AsyncTestClient[Litestar],
+) -> None:
+    entity = EntityInput(
+        wikidata_id="Q503",
+        entity_name="Removable Entity",
+        entity_type="person",
+        wikidata_info={"label": "Removable Entity"},
+    )
+
+    create_resp = await api_key_client.post(
+        "/api/narratives/",
+        json=NarrativeInput(
+            title="Entity Clear Test",
+            description="Testing entity clearing",
+            entities=[entity],
+        ).model_dump(mode="json"),
+    )
+    assert create_resp.status_code == 201
+    narrative_id = create_resp.json()["data"]["id"]
+
+    # Patch with empty list — all entities must be removed
+    response = await api_key_client.patch(
+        f"/api/narratives/{narrative_id}",
+        json=NarrativePatchInput(entities=[]).model_dump(
+            mode="json", exclude_unset=True
+        ),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["entities"] == []
+
+
+# ---------------------------------------------------------------------------
+# Claim IDs: replace and clear
+# ---------------------------------------------------------------------------
+
+async def test_patch_narrative_replaces_claim_ids(
+    api_key_client: AsyncTestClient[Litestar],
+) -> None:
+    _, claim_ids = await _create_video_with_claims(api_key_client, n=2)
+    claim_id_1, claim_id_2 = claim_ids
+
+    create_resp = await api_key_client.post(
+        "/api/narratives/",
+        json=NarrativeInput(
+            title="Claim Replace Test",
+            description="Testing claim_ids replacement",
+            claim_ids=claim_ids,
+        ).model_dump(mode="json"),
+    )
+    assert create_resp.status_code == 201
+    assert len(create_resp.json()["data"]["claims"]) == 2
+    narrative_id = create_resp.json()["data"]["id"]
+
+    # Patch with only claim_id_1 — claim_id_2 must be removed
+    response = await api_key_client.patch(
+        f"/api/narratives/{narrative_id}",
+        json=NarrativePatchInput(claim_ids=[claim_id_1]).model_dump(
+            mode="json", exclude_unset=True
+        ),
+    )
+
+    assert response.status_code == 200
+    claims_in_response = response.json()["data"]["claims"]
+    assert len(claims_in_response) == 1
+    assert claims_in_response[0]["id"] == str(claim_id_1)
+
+
+async def test_patch_narrative_clears_claim_ids(
+    api_key_client: AsyncTestClient[Litestar],
+) -> None:
+    _, claim_ids = await _create_video_with_claims(api_key_client, n=2)
+
+    create_resp = await api_key_client.post(
+        "/api/narratives/",
+        json=NarrativeInput(
+            title="Claim Clear Test",
+            description="Testing claim_ids clearing",
+            claim_ids=claim_ids,
+        ).model_dump(mode="json"),
+    )
+    assert create_resp.status_code == 201
+    narrative_id = create_resp.json()["data"]["id"]
+
+    # Patch with empty list — all claims must be removed
+    response = await api_key_client.patch(
+        f"/api/narratives/{narrative_id}",
+        json=NarrativePatchInput(claim_ids=[]).model_dump(
+            mode="json", exclude_unset=True
+        ),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["claims"] == []
+
+
 async def test_patch_narrative_metadata(
     api_key_client: AsyncTestClient[Litestar],
     narrative: Narrative
@@ -539,3 +788,97 @@ async def test_get_narrative_stats_not_found(
     response = await api_key_client.get(f"/api/narratives/{fake_id}/stats")
 
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Delete claim from narrative
+# ---------------------------------------------------------------------------
+
+async def test_delete_claim_from_narrative(
+    api_key_client: AsyncTestClient[Litestar],
+) -> None:
+    _, claim_ids = await _create_video_with_claims(api_key_client, n=2)
+    claim_id_1, claim_id_2 = claim_ids
+
+    create_resp = await api_key_client.post(
+        "/api/narratives/",
+        json=NarrativeInput(
+            title="Delete Claim Test",
+            description="Testing claim deletion",
+            claim_ids=claim_ids,
+        ).model_dump(mode="json"),
+    )
+    assert create_resp.status_code == 201
+    narrative_id = create_resp.json()["data"]["id"]
+
+    response = await api_key_client.delete(
+        f"/api/narratives/{narrative_id}/claims/{claim_id_1}"
+    )
+
+    assert response.status_code == 204
+
+    # Verify claim_id_1 is no longer associated but claim_id_2 remains
+    get_resp = await api_key_client.get(f"/api/narratives/{narrative_id}")
+    assert get_resp.status_code == 200
+    remaining_claim_ids = {c["id"] for c in get_resp.json()["data"]["claims"]}
+    assert str(claim_id_1) not in remaining_claim_ids
+    assert str(claim_id_2) in remaining_claim_ids
+
+
+async def test_delete_claim_from_narrative_narrative_not_found(
+    api_key_client: AsyncTestClient[Litestar],
+) -> None:
+    fake_narrative_id = uuid4()
+    fake_claim_id = uuid4()
+
+    response = await api_key_client.delete(
+        f"/api/narratives/{fake_narrative_id}/claims/{fake_claim_id}"
+    )
+
+    assert response.status_code == 404
+
+
+async def test_delete_claim_from_narrative_claim_not_associated(
+    api_key_client: AsyncTestClient[Litestar],
+    narrative: Narrative,
+) -> None:
+    # Use a claim that was never linked to this narrative
+    _, claim_ids = await _create_video_with_claims(api_key_client, n=1)
+    unrelated_claim_id = claim_ids[0]
+
+    response = await api_key_client.delete(
+        f"/api/narratives/{narrative.id}/claims/{unrelated_claim_id}"
+    )
+
+    assert response.status_code == 404
+
+
+async def test_delete_claim_from_narrative_idempotent_other_claims_intact(
+    api_key_client: AsyncTestClient[Litestar],
+) -> None:
+    _, claim_ids = await _create_video_with_claims(api_key_client, n=3)
+    claim_id_1, claim_id_2, claim_id_3 = claim_ids
+
+    create_resp = await api_key_client.post(
+        "/api/narratives/",
+        json=NarrativeInput(
+            title="Multi-claim Delete Test",
+            description="Testing that only the target claim is removed",
+            claim_ids=claim_ids,
+        ).model_dump(mode="json"),
+    )
+    assert create_resp.status_code == 201
+    narrative_id = create_resp.json()["data"]["id"]
+
+    # Delete only claim_id_2
+    response = await api_key_client.delete(
+        f"/api/narratives/{narrative_id}/claims/{claim_id_2}"
+    )
+    assert response.status_code == 204
+
+    # claim_id_1 and claim_id_3 must still be associated
+    get_resp = await api_key_client.get(f"/api/narratives/{narrative_id}")
+    remaining_claim_ids = {c["id"] for c in get_resp.json()["data"]["claims"]}
+    assert str(claim_id_1) in remaining_claim_ids
+    assert str(claim_id_2) not in remaining_claim_ids
+    assert str(claim_id_3) in remaining_claim_ids

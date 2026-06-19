@@ -269,24 +269,12 @@ class NarrativeService:
             if not existing_narrative:
                 return None
 
-            merged_entity_ids = None
+            entity_ids = None
             if data.entities is not None:
                 entity_service = EntityService(self._connection_factory)
                 entity_ids = await entity_service.process_entities(data.entities)
 
-                existing_entity_ids = [entity.id for entity in existing_narrative.entities]
-                merged_entity_ids = list(set(existing_entity_ids + entity_ids))
-
-            merged_claim_ids = data.claim_ids
-            if data.claim_ids is not None:
-                existing_claim_ids = [claim.id for claim in existing_narrative.claims]
-                merged_claim_ids = list(set(existing_claim_ids + data.claim_ids))
-
-            merged_topic_ids = data.topic_ids
-            if data.topic_ids is not None:
-                existing_topic_ids = [topic.id for topic in existing_narrative.topics]
-                merged_topic_ids = list(set(existing_topic_ids + data.topic_ids))
-
+            # Concatenate narrative_context with existing one
             merged_narrative_context = None
             if data.narrative_context is not None:
                 merged_narrative_context = _merge_narrative_context(
@@ -299,9 +287,9 @@ class NarrativeService:
                 title=data.title,
                 description=data.description,
                 narrative_context=merged_narrative_context,
-                claim_ids=merged_claim_ids,
-                topic_ids=merged_topic_ids,
-                entity_ids=merged_entity_ids,
+                claim_ids=data.claim_ids,
+                topic_ids=data.topic_ids,
+                entity_ids=entity_ids,
                 metadata=data.metadata,
             )
 
@@ -349,7 +337,7 @@ class NarrativeService:
             response.raise_for_status()
 
         logger.info(f"Deleted narrative {external_narrative_id} from external API")
-
+    
     async def _sync_external_narrative(
         self,
         external_narrative_id: str,
@@ -435,7 +423,7 @@ class NarrativeService:
             return await repo.get_prevalent_narratives_summary(
                 limit=limit, offset=offset, hours=hours
             )
-    
+
     async def get_average_views_for_all_narratives(self) -> float:
         async with self.repo() as repo:
             return await repo.get_average_views_for_all_narratives()
@@ -723,3 +711,44 @@ class NarrativeService:
             ),
             date=cv["calculated_at"].date(),
         )
+
+    async def delete_claim_from_narrative(self, narrative_id: UUID, claim_id: UUID) -> None:
+        async with self.repo() as repo:
+            narrative = await repo.get_narrative(narrative_id)
+            if not narrative:
+                raise ValueError("narrative not found")
+
+            if not any(claim.id == claim_id for claim in narrative.claims):
+                raise ValueError("claim not associated with narrative")
+
+            # The external API identifies narratives by their own id (stored in
+            # metadata.narrative_id), not by our local narrative_id. Resolve it
+            # first, mirroring _delete_external_narrative / _sync_external_narrative.
+            external_narrative_id = narrative.metadata.get("narrative_id")
+            if _api.is_configured() and external_narrative_id:
+                response = await _api.delete_claim_on_narrative(
+                    external_narrative_id, claim_id
+                )
+                if response.status_code == 404:
+                    logger.info(
+                        f"Narrative {external_narrative_id} or claim {claim_id} not found "
+                        "on external API, continuing with local delete"
+                    )
+                elif response.status_code >= 400:
+                    logger.error(
+                        f"External API delete error: status={response.status_code}, "
+                        f"response={response.text}"
+                    )
+                    response.raise_for_status()
+                else:
+                    logger.info(
+                        f"Deleted claim {claim_id} from narrative {external_narrative_id} "
+                        "on external API"
+                    )
+            elif _api.is_configured():
+                logger.warning(
+                    f"Narrative {narrative_id} has no external narrative_id in metadata; "
+                    "skipping external claim delete (local delete only)"
+                )
+
+            await repo.delete_claim_from_narrative(narrative_id, claim_id)

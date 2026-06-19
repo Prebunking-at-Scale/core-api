@@ -5,7 +5,11 @@ from uuid import UUID
 from litestar.exceptions import NotFoundException
 
 from core.feedback.repo import FeedbackRepository
-from core.models import ClaimNarrativeFeedback, NarrativeFeedback
+from core.models import (
+    ClaimNarrativeFeedback,
+    NarrativeFeedback,
+    NarrativeFeedbackSummary,
+)
 from core.narratives.api import NarrativesApiClient
 from core.uow import ConnectionFactory, uow
 
@@ -35,8 +39,10 @@ class FeedbackService:
             await self.send_feedback_score_to_external_narratives_api(
                 narrative_id=narrative_id,
                 feedback_score=feedback_score,
+                comment=feedback_text,
+                user_id=user_id,
             )
-            logger.info(f"Successfully sent narrative feedback to external API: narrative_id={narrative_id}, score={feedback_score}")
+            logger.info(f"Successfully sent narrative feedback to external API: narrative_id={narrative_id}, score={feedback_score}, user_id={user_id}")
 
             # Only save to database if external API call succeeded
             feedback = await repo.submit_narrative_feedback(user_id, narrative_id, feedback_score, feedback_text)
@@ -50,6 +56,15 @@ class FeedbackService:
         """Get user's feedback for a narrative"""
         async with self.repo() as repo:
             return await repo.get_narrative_feedback(user_id, narrative_id)
+
+    async def get_narrative_feedback_summary(
+        self, narrative_id: UUID
+    ) -> NarrativeFeedbackSummary:
+        """Get aggregate feedback (count + average) for a narrative"""
+        async with self.repo() as repo:
+            if not await repo.narrative_exists(narrative_id):
+                raise NotFoundException(f"Narrative with id {narrative_id} not found")
+            return await repo.get_narrative_feedback_summary(narrative_id)
 
     # Claim-narrative feedback methods
     async def submit_claim_narrative_feedback(
@@ -66,8 +81,10 @@ class FeedbackService:
                 narrative_id=narrative_id,
                 feedback_score=feedback_score,
                 content_id=claim_id,  # Use claim_id as content_id
+                comment=feedback_text,
+                user_id=user_id,
             )
-            logger.info(f"Successfully sent claim-narrative feedback to external API: claim_id={claim_id}, narrative_id={narrative_id}, score={feedback_score}")
+            logger.info(f"Successfully sent claim-narrative feedback to external API: claim_id={claim_id}, narrative_id={narrative_id}, score={feedback_score}, user_id={user_id}")
 
             # Only save to database if external API call succeeded
             feedback = await repo.submit_claim_narrative_feedback(user_id, claim_id, narrative_id, feedback_score, feedback_text)
@@ -82,7 +99,14 @@ class FeedbackService:
         async with self.repo() as repo:
             return await repo.get_claim_narrative_feedback(user_id, claim_id, narrative_id)
 
-    async def send_feedback_score_to_external_narratives_api(self, narrative_id: UUID, feedback_score: float, content_id: UUID | None = None) -> None:
+    async def send_feedback_score_to_external_narratives_api(
+        self,
+        narrative_id: UUID,
+        feedback_score: float,
+        content_id: UUID | None = None,
+        comment: str | None = None,
+        user_id: UUID | None = None,
+    ) -> None:
         """Send feedback score to external analytics service."""
         if not _api.is_configured():
             return
@@ -91,6 +115,8 @@ class FeedbackService:
             narrative_id=narrative_id,
             feedback_score=feedback_score,
             content_id=content_id,
+            comment=comment,
+            user_id=user_id,
         )
 
         if response.status_code >= 400:

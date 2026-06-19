@@ -86,6 +86,8 @@ class NarrativesApiClient:
         narrative_id: UUID,
         feedback_score: float,
         content_id: UUID | None = None,
+        comment: str | None = None,
+        user_id: UUID | None = None,
     ) -> httpx.Response:
         url = f"{NARRATIVES_BASE_URL}/feedback"
         payload: dict[str, str | float] = {
@@ -94,8 +96,27 @@ class NarrativesApiClient:
         }
         if content_id:
             payload["content_id"] = str(content_id)
+        if comment:
+            payload["comment"] = comment
+        if user_id:
+            payload["user_id"] = str(user_id)
 
         async with httpx.AsyncClient() as client:
             return await client.post(
                 url, json=payload, headers=self._headers(), timeout=TIMEOUT
+            )
+    
+    async def delete_claim_on_narrative(
+        self,
+        narrative_id: UUID,
+        claim_id: UUID,
+    ) -> httpx.Response:
+        """
+        Delete a claim from a narrative on the narratives service. 
+        This is used when a claim is unlinked from a narrative in our system, so we need to tell the narratives service to remove it from their system as well to keep things in sync.
+        """
+        url = f"{NARRATIVES_BASE_URL}/narrative/{narrative_id}/claim/{claim_id}"
+        async with httpx.AsyncClient() as client:
+            return await client.delete(
+                url, headers=self._headers(), timeout=TIMEOUT
             )

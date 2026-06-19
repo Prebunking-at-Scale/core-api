@@ -107,6 +107,13 @@ class NarrativeFeedback(BaseModel):
     updated_at: datetime | None = None
 
 
+class NarrativeFeedbackSummary(BaseModel):
+    score_count: int = Field(ge=0, description="Number of users who rated the narrative")
+    average_score: float | None = Field(
+        default=None, description="Average feedback score across users (null when none exist)"
+    )
+
+
 class ClaimNarrativeFeedback(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     user_id: UUID
