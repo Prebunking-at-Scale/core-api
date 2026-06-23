@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -7,14 +7,16 @@ from psycopg.rows import DictRow
 from psycopg.types.json import Jsonb
 
 from core.errors import ConflictError
-from core.models import Claim, Entity, Narrative, Topic, Video
+from core.models import Claim, Entity, Narrative, NarrativeAlertLevel, Topic, Video
 from core.narratives.models import (
+    NarrativeAnalysisIndicatorType,
     NarrativeDetail,
     NarrativeListItem,
     NarrativeStats,
     NarrativeStatsDataPoint,
     NarrativeStatsTotals,
     NarrativeSummary,
+    NarrativeViralityScoreType,
     TopicSummary,
     ViralNarrativeSummary,
 )
@@ -225,6 +227,7 @@ class NarrativeRepository:
         end_date: datetime | None = None,
         first_content_start: datetime | None = None,
         first_content_end: datetime | None = None,
+        alert_levels: list[str] | None = None,
     ) -> int:
         query = """
             SELECT COUNT(DISTINCT n.id) FROM narratives n
@@ -238,6 +241,7 @@ class NarrativeRepository:
             end_date=end_date,
             first_content_start=first_content_start,
             first_content_end=first_content_end,
+            alert_levels=alert_levels,
         )
         query += where_statement
 
@@ -255,10 +259,11 @@ class NarrativeRepository:
         end_date: datetime | None = None,
         first_content_start: datetime | None = None,
         first_content_end: datetime | None = None,
-    ) -> tuple[str, dict[str, int | UUID | str | datetime]]:
+        alert_levels: list[str] | None = None,
+    ) -> tuple[str, dict[str, Any]]:
         query = ""
         where_conditions = []
-        params: dict[str, int | UUID | str | datetime] = {}
+        params: dict[str, Any] = {}
 
         if topic_id:
             query += """
@@ -293,6 +298,10 @@ class NarrativeRepository:
         if end_date:
             where_conditions.append("n.created_at <= %(end_date)s")
             params["end_date"] = end_date
+
+        if alert_levels:
+            where_conditions.append("n.alert_level = ANY(%(alert_levels)s)")
+            params["alert_levels"] = alert_levels
 
         if first_content_start or first_content_end:
             oldest_video_filter = """
@@ -341,9 +350,15 @@ class NarrativeRepository:
         first_content_start: datetime | None = None,
         first_content_end: datetime | None = None,
         language: str | None = None,
+        alert_levels: list[str] | None = None,
+        sort: str | None = None,
     ) -> list[NarrativeListItem]:
         """
         Get all narratives with pre-aggregated counts in a single query.
+
+        `sort="composite"` / `sort="acceleration"` ranks results by each
+        narrative's latest composite_virality / acceleration_rate indicator
+        (highest first); otherwise newest first.
         """
         # Build filter conditions
         filter_joins = ""
@@ -386,6 +401,10 @@ class NarrativeRepository:
             filter_conditions.append("n.created_at <= %(end_date)s")
             params["end_date"] = end_date
 
+        if alert_levels:
+            filter_conditions.append("n.alert_level = ANY(%(alert_levels)s)")
+            params["alert_levels"] = alert_levels
+
         if first_content_start or first_content_end:
             oldest_video_filter = """
                 n.id IN (
@@ -420,13 +439,41 @@ class NarrativeRepository:
         if filter_conditions:
             where_clause = "WHERE " + " AND ".join(filter_conditions)
 
+        # Optional ranking by latest composite virality score. Used by the
+        # overview to surface the top-scoring narratives per alert level. The
+        # LATERAL join picks each narrative's most recent indicator value.
+        sort_indicators = {
+            "composite": "composite_virality",
+            "acceleration": "acceleration_rate",
+        }
+        sort_select = ""
+        sort_join = ""
+        inner_order = "n.created_at DESC"
+        final_order = "fn.created_at DESC"
+        if sort in sort_indicators:
+            params["sort_indicator"] = sort_indicators[sort]
+            sort_select = ", ci.indicator_value AS sort_score"
+            sort_join = """
+                LEFT JOIN LATERAL (
+                    SELECT i.indicator_value
+                    FROM narrative_analysis_indicators i
+                    WHERE i.narrative_id = n.id
+                      AND i.indicator_type = %(sort_indicator)s
+                    ORDER BY i.calculated_at DESC
+                    LIMIT 1
+                ) ci ON TRUE
+            """
+            inner_order = "ci.indicator_value DESC NULLS LAST, n.created_at DESC"
+            final_order = "fn.sort_score DESC NULLS LAST, fn.created_at DESC"
+
         query = f"""
             WITH filtered_narratives AS (
-                SELECT DISTINCT n.id, n.title, n.description, n.created_at, n.updated_at
+                SELECT DISTINCT n.id, n.title, n.description, n.created_at, n.updated_at, n.alert_level{sort_select}
                 FROM narratives n
                 {filter_joins}
+                {sort_join}
                 {where_clause}
-                ORDER BY n.created_at DESC
+                ORDER BY {inner_order}
                 LIMIT %(limit)s OFFSET %(offset)s
             ),
             narrative_claims AS (
@@ -508,6 +555,7 @@ class NarrativeRepository:
                 fn.description,
                 fn.created_at,
                 fn.updated_at,
+                fn.alert_level,
                 COALESCE(nta.topics, '[]'::json) as topics,
                 COALESCE(nc.claim_count, 0) as claim_count,
                 COALESCE(nv.video_count, 0) as video_count,
@@ -526,7 +574,7 @@ class NarrativeRepository:
             LEFT JOIN narrative_entities nen ON fn.id = nen.narrative_id
             LEFT JOIN narrative_topics_agg nta ON fn.id = nta.narrative_id
             LEFT JOIN narrative_ratings nr ON fn.id = nr.narrative_id
-            ORDER BY fn.created_at DESC
+            ORDER BY {final_order}
         """
 
         await self._session.execute(query, params)
@@ -556,6 +604,7 @@ class NarrativeRepository:
                     average_score=row["average_score"],
                     created_at=row["created_at"],
                     updated_at=row["updated_at"],
+                    alert_level=row["alert_level"],
                 )
             )
 
@@ -902,7 +951,7 @@ class NarrativeRepository:
         """
         query = """
             WITH narrative_base AS (
-                SELECT id, title, description, narrative_context, metadata, created_at, updated_at
+                SELECT id, title, description, narrative_context, metadata, created_at, updated_at, alert_level
                 FROM narratives
                 WHERE id = %(narrative_id)s
             ),
@@ -949,7 +998,8 @@ class NarrativeRepository:
                 COALESCE(vs.total_likes, 0) as total_likes,
                 COALESCE(vs.total_comments, 0) as total_comments,
                 COALESCE(vs.platforms, ARRAY[]::text[]) as platforms,
-                COALESCE(ls.language_count, 0) as language_count
+                COALESCE(ls.language_count, 0) as language_count,
+                nb.alert_level
             FROM narrative_base nb
             CROSS JOIN claim_stats cs
             CROSS JOIN video_stats vs
@@ -994,6 +1044,7 @@ class NarrativeRepository:
             metadata=row["metadata"] or {},
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            alert_level=row["alert_level"],
         )
 
     async def _get_narrative_claims_paginated(
@@ -1096,44 +1147,85 @@ class NarrativeRepository:
 
     async def get_narrative_stats(self, narrative_id: UUID) -> NarrativeStats | None:
         """
-        Get time-series stats for a narrative, aggregated by date.
-        Used for evolution charts showing cumulative views/likes/comments over time.
+        Time series of cumulative views/likes/comments for the evolution chart.
+
+        Built from video_stats snapshots (one row per video per day), not from
+        videos.uploaded_at: we want the chart to reflect how engagement *grew*
+        over time, not when each video was first published. A narrative with
+        a single old video that just went viral now shows a recent ramp here,
+        which is what virality scoring sees too.
+
+        For each day in the snapshot history we take the latest snapshot per
+        video and sum across the narrative — that's the cumulative engagement
+        state at end of day. Per-day deltas are derived by LAG so the original
+        response shape (cumulative_* + per-day delta fields) is preserved.
         """
         if not await self.narrative_exists(narrative_id):
             return None
 
         query = """
-            WITH distinct_videos AS (
-                SELECT DISTINCT v.id, v.uploaded_at, v.views, v.likes, v.comments
+            WITH narrative_videos AS (
+                SELECT DISTINCT v.id
                 FROM videos v
                 JOIN video_claims vc ON v.id = vc.video_id
                 JOIN claim_narratives cn ON vc.id = cn.claim_id
                 WHERE cn.narrative_id = %(narrative_id)s
-                  AND v.uploaded_at IS NOT NULL
             ),
-            daily_stats AS (
+            daily_latest AS (
+                -- Latest snapshot per (video, day). DISTINCT ON gives one row
+                -- per video per calendar day, taking the most recent recorded_at.
+                SELECT DISTINCT ON (vs.video_id, vs.recorded_at::date)
+                    vs.video_id,
+                    vs.recorded_at::date AS day,
+                    vs.views, vs.likes, vs.comments
+                FROM video_stats vs
+                JOIN narrative_videos nv ON vs.video_id = nv.id
+                ORDER BY vs.video_id, vs.recorded_at::date, vs.recorded_at DESC
+            ),
+            change_days AS (
+                -- The days on which the narrative's cumulative state actually changed,
+                -- i.e. any video in it got a fresh snapshot. video_stats is scraped
+                -- sparsely, so these are not contiguous calendar days.
+                SELECT DISTINCT day FROM daily_latest
+            ),
+            carried AS (
+                -- For each change-day, carry forward each video's latest snapshot
+                -- recorded on or before that day. This is the real end-of-day state:
+                -- a video keeps contributing its last-known counts on days when it
+                -- wasn't re-snapshotted, instead of dropping to zero.
+                SELECT cd.day, latest.video_id, latest.views, latest.likes, latest.comments
+                FROM change_days cd
+                JOIN LATERAL (
+                    SELECT DISTINCT ON (dl.video_id)
+                        dl.video_id, dl.views, dl.likes, dl.comments
+                    FROM daily_latest dl
+                    WHERE dl.day <= cd.day
+                    ORDER BY dl.video_id, dl.day DESC
+                ) latest ON TRUE
+            ),
+            per_day AS (
+                -- End-of-day cumulative state across all videos in the narrative.
                 SELECT
-                    DATE(uploaded_at) as date,
-                    COUNT(*) as video_count,
-                    COALESCE(SUM(views), 0) as views,
-                    COALESCE(SUM(likes), 0) as likes,
-                    COALESCE(SUM(comments), 0) as comments
-                FROM distinct_videos
-                GROUP BY DATE(uploaded_at)
-                ORDER BY DATE(uploaded_at)
+                    day,
+                    COUNT(DISTINCT video_id) AS videos_with_stats,
+                    COALESCE(SUM(views), 0)    AS cum_views,
+                    COALESCE(SUM(likes), 0)    AS cum_likes,
+                    COALESCE(SUM(comments), 0) AS cum_comments
+                FROM carried
+                GROUP BY day
             )
             SELECT
-                date,
-                video_count,
-                views,
-                likes,
-                comments,
-                SUM(video_count) OVER (ORDER BY date) as cumulative_video_count,
-                SUM(views) OVER (ORDER BY date) as cumulative_views,
-                SUM(likes) OVER (ORDER BY date) as cumulative_likes,
-                SUM(comments) OVER (ORDER BY date) as cumulative_comments
-            FROM daily_stats
-            ORDER BY date
+                day AS date,
+                videos_with_stats AS video_count,
+                GREATEST(cum_views    - LAG(cum_views,    1, 0::bigint) OVER (ORDER BY day), 0) AS views,
+                GREATEST(cum_likes    - LAG(cum_likes,    1, 0::bigint) OVER (ORDER BY day), 0) AS likes,
+                GREATEST(cum_comments - LAG(cum_comments, 1, 0::bigint) OVER (ORDER BY day), 0) AS comments,
+                videos_with_stats AS cumulative_video_count,
+                cum_views    AS cumulative_views,
+                cum_likes    AS cumulative_likes,
+                cum_comments AS cumulative_comments
+            FROM per_day
+            ORDER BY day
         """
 
         await self._session.execute(query, {"narrative_id": narrative_id})
@@ -1614,6 +1706,378 @@ class NarrativeRepository:
             )
 
         return summaries
+
+    async def get_average_views_for_all_narratives(self) -> float:
+        """
+        Get the average number of views across all narratives.
+        This can be used as a benchmark to identify viral narratives that significantly outperform the average.
+        """
+        await self._session.execute(
+            """
+            WITH narrative_stats AS (
+                SELECT
+                    cn.narrative_id,
+                    COUNT(*) as video_count,
+                    COALESCE(SUM(views), 0) as views,
+                    COALESCE(SUM(likes), 0) as likes,
+                    COALESCE(SUM(comments), 0) as comments
+                FROM videos v
+                    JOIN video_claims c ON v.id = c.video_id
+                    JOIN claim_narratives cn ON c.id = cn.claim_id
+                GROUP BY cn.narrative_id
+            )
+            SELECT AVG(views)::float AS avg_views_per_narrative
+            FROM narrative_stats
+            """);
+
+        row = await self._session.fetchone()
+        if row is None:
+            return 0
+
+        return row["avg_views_per_narrative"] or 0
+
+    async def get_narrative_stats_delta_for_period(
+            self,
+            narrative_id: UUID,
+            days_back: int,
+    ) -> NarrativeStatsTotals:
+        """
+        Calculate how much engagement (views, likes, comments) was *gained* over the
+        last `days_back` days for a given narrative.
+
+        video_stats is scraped sparsely, so we cannot assume a video has a snapshot
+        inside the window. Using the first in-window snapshot as the baseline would
+        miss growth that happened between the last pre-window snapshot and that first
+        in-window one, and would report zero for a video scraped only once in the
+        window. Instead, per video we compare:
+          - baseline: the latest snapshot recorded *before* the window started
+            (the carried-forward state entering the window; 0 if the video is new), against
+          - current: the latest known snapshot (carried forward to the end of the window).
+        A video not re-scraped during the window has current == baseline, so its delta
+        is zero rather than being dropped. Negative deltas (platform corrections) are
+        clamped to zero.
+        """
+        await self._session.execute(
+            """
+            WITH narrative_videos AS (
+                SELECT DISTINCT vs.video_id
+                FROM video_stats vs
+                JOIN videos v ON vs.video_id = v.id
+                JOIN video_claims c ON v.id = c.video_id
+                JOIN claim_narratives cn ON c.id = cn.claim_id
+                WHERE cn.narrative_id = %(narrative_id)s
+            ),
+            baseline AS (
+                -- State entering the window: latest snapshot strictly before the window
+                -- start. Missing (video newer than the window) -> treated as 0 below.
+                SELECT DISTINCT ON (vs.video_id)
+                    vs.video_id,
+                    vs.views,
+                    vs.likes,
+                    vs.comments
+                FROM video_stats vs
+                JOIN narrative_videos nv ON vs.video_id = nv.video_id
+                WHERE vs.recorded_at < NOW() - INTERVAL '1 day' * %(days_back)s
+                ORDER BY vs.video_id, vs.recorded_at DESC
+            ),
+            current AS (
+                -- Latest known state, carried forward to the end of the window.
+                SELECT DISTINCT ON (vs.video_id)
+                    vs.video_id,
+                    vs.views,
+                    vs.likes,
+                    vs.comments
+                FROM video_stats vs
+                JOIN narrative_videos nv ON vs.video_id = nv.video_id
+                ORDER BY vs.video_id, vs.recorded_at DESC
+            )
+            SELECT
+                COUNT(DISTINCT c.video_id)::float                                          AS video_count,
+                COALESCE(SUM(GREATEST(c.views    - COALESCE(b.views,    0), 0)), 0)::float AS views,
+                COALESCE(SUM(GREATEST(c.likes    - COALESCE(b.likes,    0), 0)), 0)::float AS likes,
+                COALESCE(SUM(GREATEST(c.comments - COALESCE(b.comments, 0), 0)), 0)::float AS comments
+            FROM current c
+            LEFT JOIN baseline b ON c.video_id = b.video_id
+            """,
+            {"narrative_id": narrative_id, "days_back": days_back},
+        )
+
+        row = await self._session.fetchone()
+        if row is None:
+            return NarrativeStatsTotals()
+
+        return NarrativeStatsTotals(
+            views=row["views"] or 0,
+            likes=row["likes"] or 0,
+            comments=row["comments"] or 0,
+            video_count=row["video_count"] or 0,
+        )
+
+    async def insert_narrative_virality_score(
+        self, narrative_id: UUID, score_value: float, score_type: NarrativeViralityScoreType,
+        metadata: dict | None = None, calc_date: date | None = None
+    ) -> None:
+        """
+        Insert or update virality scores for a narrative.
+        This can be used to track which narratives are driving the virality over time.
+
+        When `calc_date` is given the score is bucketed on that date (keeping the
+        wall-clock time so reruns on the same day still order newest-last), so the
+        downstream percentile/indicator queries that filter by `calculated_at::date`
+        see it. Defaults to the current timestamp.
+        """
+        await self._session.execute(
+            """
+            INSERT INTO narrative_virality_scores (narrative_id, score_value, score_type, metadata, calculated_at)
+            VALUES (
+                %(narrative_id)s, %(score_value)s, %(score_type)s, %(metadata)s,
+                COALESCE(%(calc_date)s::date, CURRENT_DATE) + LOCALTIME
+            )
+            """,
+            {
+                "narrative_id": narrative_id,
+                "score_value": score_value,
+                "score_type": score_type.value,
+                "metadata": Jsonb(metadata) if metadata is not None else None,
+                "calc_date": calc_date,
+            },
+        )
+
+    async def get_all_virality_percentiles_for_date(
+        self, calc_date: date
+    ) -> dict[UUID, dict[str, float]]:
+        """
+        Get the percentile rank of every narrative's virality scores for a given date.
+        Computes all percentiles in a single query.
+        Returns a dict keyed by narrative_id, each value being a dict of score_type → percentile.
+        """
+        await self._session.execute(
+            """
+            WITH day_scores AS (
+                SELECT DISTINCT ON (narrative_id, score_type)
+                    narrative_id,
+                    score_type,
+                    score_value
+                FROM narrative_virality_scores
+                WHERE calculated_at::date = %(calc_date)s
+                ORDER BY narrative_id, score_type, calculated_at DESC
+            ),
+            ranked AS (
+                SELECT
+                    narrative_id,
+                    score_type,
+                    PERCENT_RANK() OVER (
+                        PARTITION BY score_type
+                        ORDER BY score_value
+                    ) AS percentile
+                FROM day_scores
+            )
+            SELECT narrative_id, score_type, percentile
+            FROM ranked
+            """,
+            {"calc_date": calc_date},
+        )
+        rows = await self._session.fetchall()
+        result: dict[UUID, dict[str, float]] = {}
+        for row in rows:
+            result.setdefault(row["narrative_id"], {})[row["score_type"]] = row["percentile"]
+        return result
+
+    async def bulk_insert_narrative_analysis_indicators(
+        self,
+        records: list[tuple[UUID, float, NarrativeAnalysisIndicatorType, dict | None]],
+    ) -> None:
+        """
+        Bulk insert analysis indicators for multiple narratives at once.
+        Each record is a (narrative_id, indicator_value, indicator_type) tuple.
+        """
+        await self._session.executemany(
+            """
+            INSERT INTO narrative_analysis_indicators (narrative_id, indicator_value, indicator_type, metadata, calculated_at)
+            VALUES (%(narrative_id)s, %(indicator_value)s, %(indicator_type)s, %(metadata)s, NOW())
+            """,
+            [
+                {
+                    "narrative_id": narrative_id,
+                    "indicator_value": indicator_value,
+                    "indicator_type": indicator_type.value,
+                    "metadata": Jsonb(metadata) if metadata is not None else None,
+                }
+                for narrative_id, indicator_value, indicator_type, metadata in records
+            ],
+        )
+
+    async def get_bulk_narrative_stats_comparison(self, calc_date: date) -> list[dict]:
+        """
+        Get current and previous day aggregate stats for all narratives in a single query.
+        Returns a list of dicts with current/prev video_count, views, likes, comments per narrative.
+
+        video_stats is scraped sparsely: a video is not guaranteed to have a row on
+        every calendar day (old/low-view videos may go days or weeks between scrapes,
+        and unchanged data is not re-recorded). So we must NOT filter on an exact day
+        (`recorded_at::date = calc_date`) — that would drop every video not scraped on
+        that day and make the narrative look like it lost engagement. Instead we take,
+        per video, the latest snapshot recorded on or before each reference day
+        (`recorded_at::date <= calc_date`): the real end-of-day state, carried forward
+        from the last known snapshot.
+        """
+        prev_date = calc_date - timedelta(days=1)
+        await self._session.execute(
+            """
+            WITH today_videos AS (
+                SELECT DISTINCT ON (cn.narrative_id, vs.video_id)
+                    cn.narrative_id,
+                    vs.video_id,
+                    vs.views,
+                    vs.likes,
+                    vs.comments
+                FROM video_stats vs
+                JOIN videos v ON vs.video_id = v.id
+                JOIN video_claims c ON v.id = c.video_id
+                JOIN claim_narratives cn ON c.id = cn.claim_id
+                WHERE vs.recorded_at::date <= %(calc_date)s
+                ORDER BY cn.narrative_id, vs.video_id, vs.recorded_at DESC
+            ),
+            prev_videos AS (
+                SELECT DISTINCT ON (cn.narrative_id, vs.video_id)
+                    cn.narrative_id,
+                    vs.video_id,
+                    vs.views,
+                    vs.likes,
+                    vs.comments
+                FROM video_stats vs
+                JOIN videos v ON vs.video_id = v.id
+                JOIN video_claims c ON v.id = c.video_id
+                JOIN claim_narratives cn ON c.id = cn.claim_id
+                WHERE vs.recorded_at::date <= %(prev_date)s
+                ORDER BY cn.narrative_id, vs.video_id, vs.recorded_at DESC
+            ),
+            today_stats AS (
+                SELECT
+                    narrative_id,
+                    COUNT(DISTINCT video_id) AS video_count,
+                    COALESCE(SUM(views), 0) AS views,
+                    COALESCE(SUM(likes), 0) AS likes,
+                    COALESCE(SUM(comments), 0) AS comments
+                FROM today_videos
+                GROUP BY narrative_id
+            ),
+            prev_stats AS (
+                SELECT
+                    narrative_id,
+                    COUNT(DISTINCT video_id) AS video_count,
+                    COALESCE(SUM(views), 0) AS views,
+                    COALESCE(SUM(likes), 0) AS likes,
+                    COALESCE(SUM(comments), 0) AS comments
+                FROM prev_videos
+                GROUP BY narrative_id
+            )
+            SELECT
+                COALESCE(t.narrative_id, p.narrative_id) AS narrative_id,
+                COALESCE(t.video_count, 0)::float AS current_video_count,
+                COALESCE(t.views, 0)::float       AS current_views,
+                COALESCE(t.likes, 0)::float       AS current_likes,
+                COALESCE(t.comments, 0)::float    AS current_comments,
+                COALESCE(p.video_count, 0)::float AS prev_video_count,
+                COALESCE(p.views, 0)::float       AS prev_views,
+                COALESCE(p.likes, 0)::float       AS prev_likes,
+                COALESCE(p.comments, 0)::float    AS prev_comments
+            FROM today_stats t
+            FULL OUTER JOIN prev_stats p ON t.narrative_id = p.narrative_id
+            """,
+            {"calc_date": calc_date, "prev_date": prev_date},
+        )
+        return await self._session.fetchall()
+
+    async def get_bulk_analysis_indicators_for_date(
+        self, calc_date: date
+    ) -> dict[UUID, dict[str, float]]:
+        """
+        Get the latest composite_virality and acceleration_rate per narrative for a given date.
+        Returns a dict keyed by narrative_id → {indicator_type: indicator_value}.
+        """
+        await self._session.execute(
+            """
+            SELECT DISTINCT ON (narrative_id, indicator_type)
+                narrative_id,
+                indicator_type,
+                indicator_value
+            FROM narrative_analysis_indicators
+            WHERE calculated_at::date = %(calc_date)s
+              AND indicator_type IN ('composite_virality', 'acceleration_rate')
+            ORDER BY narrative_id, indicator_type, calculated_at DESC
+            """,
+            {"calc_date": calc_date},
+        )
+        rows = await self._session.fetchall()
+        result: dict[UUID, dict[str, float]] = {}
+        for row in rows:
+            result.setdefault(row["narrative_id"], {})[row["indicator_type"]] = row["indicator_value"]
+        return result
+
+    async def bulk_update_narrative_alert_levels(
+        self, records: list[tuple[UUID, NarrativeAlertLevel]]
+    ) -> None:
+        """
+        Bulk update alert_level for multiple narratives.
+        Each record is a (narrative_id, alert_level) tuple.
+        """
+        await self._session.executemany(
+            """
+            UPDATE narratives
+            SET alert_level = %(alert_level)s, updated_at = NOW()
+            WHERE id = %(narrative_id)s
+            """,
+            [
+                {"narrative_id": narrative_id, "alert_level": alert_level.value}
+                for narrative_id, alert_level in records
+            ],
+        )
+
+    async def get_narrative_analysis_indicators(
+        self, narrative_id: UUID, date_from: datetime | None = None, date_to: datetime | None = None
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {"narrative_id": narrative_id}
+
+        if date_from is None and date_to is None:
+            query = """
+                SELECT id, indicator_value, indicator_type, metadata, calculated_at
+                FROM narrative_analysis_indicators
+                WHERE narrative_id = %(narrative_id)s
+                AND calculated_at::date = (
+                    SELECT MAX(calculated_at::date)
+                    FROM narrative_analysis_indicators
+                    WHERE narrative_id = %(narrative_id)s
+                )
+                ORDER BY calculated_at DESC
+            """
+        else:
+            query = """
+                SELECT id, indicator_value, indicator_type, metadata, calculated_at
+                FROM narrative_analysis_indicators
+                WHERE narrative_id = %(narrative_id)s
+            """
+            if date_from:
+                query += " AND calculated_at >= %(date_from)s"
+                params["date_from"] = date_from
+            if date_to:
+                query += " AND calculated_at <= %(date_to)s"
+                params["date_to"] = date_to
+            query += " ORDER BY calculated_at DESC"
+
+        await self._session.execute(query, params)
+        rows = await self._session.fetchall()
+
+        return [
+            {
+                "id": row["id"],
+                "indicator_value": row["indicator_value"],
+                "indicator_type": row["indicator_type"],
+                "metadata": row["metadata"],
+                "calculated_at": row["calculated_at"],
+            }
+            for row in rows
+        ]
 
     async def delete_claim_from_narrative(self, narrative_id: UUID, claim_id: UUID) -> bool:
         """Remove association of a claim from a narrative."""
