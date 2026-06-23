@@ -1182,6 +1182,27 @@ class NarrativeRepository:
                 JOIN narrative_videos nv ON vs.video_id = nv.id
                 ORDER BY vs.video_id, vs.recorded_at::date, vs.recorded_at DESC
             ),
+            change_days AS (
+                -- The days on which the narrative's cumulative state actually changed,
+                -- i.e. any video in it got a fresh snapshot. video_stats is scraped
+                -- sparsely, so these are not contiguous calendar days.
+                SELECT DISTINCT day FROM daily_latest
+            ),
+            carried AS (
+                -- For each change-day, carry forward each video's latest snapshot
+                -- recorded on or before that day. This is the real end-of-day state:
+                -- a video keeps contributing its last-known counts on days when it
+                -- wasn't re-snapshotted, instead of dropping to zero.
+                SELECT cd.day, latest.video_id, latest.views, latest.likes, latest.comments
+                FROM change_days cd
+                JOIN LATERAL (
+                    SELECT DISTINCT ON (dl.video_id)
+                        dl.video_id, dl.views, dl.likes, dl.comments
+                    FROM daily_latest dl
+                    WHERE dl.day <= cd.day
+                    ORDER BY dl.video_id, dl.day DESC
+                ) latest ON TRUE
+            ),
             per_day AS (
                 -- End-of-day cumulative state across all videos in the narrative.
                 SELECT
@@ -1190,7 +1211,7 @@ class NarrativeRepository:
                     COALESCE(SUM(views), 0)    AS cum_views,
                     COALESCE(SUM(likes), 0)    AS cum_likes,
                     COALESCE(SUM(comments), 0) AS cum_comments
-                FROM daily_latest
+                FROM carried
                 GROUP BY day
             )
             SELECT
@@ -1724,51 +1745,59 @@ class NarrativeRepository:
         Calculate how much engagement (views, likes, comments) was *gained* over the
         last `days_back` days for a given narrative.
 
-        For each video linked to the narrative that has snapshots in the window, we
-        compare the earliest snapshot against the latest snapshot and sum those deltas.
-        This avoids double-counting cumulative snapshot values.
-        Negative deltas (e.g. from platform corrections) are clamped to zero.
+        video_stats is scraped sparsely, so we cannot assume a video has a snapshot
+        inside the window. Using the first in-window snapshot as the baseline would
+        miss growth that happened between the last pre-window snapshot and that first
+        in-window one, and would report zero for a video scraped only once in the
+        window. Instead, per video we compare:
+          - baseline: the latest snapshot recorded *before* the window started
+            (the carried-forward state entering the window; 0 if the video is new), against
+          - current: the latest known snapshot (carried forward to the end of the window).
+        A video not re-scraped during the window has current == baseline, so its delta
+        is zero rather than being dropped. Negative deltas (platform corrections) are
+        clamped to zero.
         """
         await self._session.execute(
             """
-            WITH period_videos AS (
+            WITH narrative_videos AS (
                 SELECT DISTINCT vs.video_id
                 FROM video_stats vs
                 JOIN videos v ON vs.video_id = v.id
                 JOIN video_claims c ON v.id = c.video_id
                 JOIN claim_narratives cn ON c.id = cn.claim_id
                 WHERE cn.narrative_id = %(narrative_id)s
-                  AND vs.recorded_at >= NOW() - INTERVAL '1 day' * %(days_back)s
             ),
-            first_snapshot AS (
+            baseline AS (
+                -- State entering the window: latest snapshot strictly before the window
+                -- start. Missing (video newer than the window) -> treated as 0 below.
                 SELECT DISTINCT ON (vs.video_id)
                     vs.video_id,
                     vs.views,
                     vs.likes,
                     vs.comments
                 FROM video_stats vs
-                JOIN period_videos pv ON vs.video_id = pv.video_id
-                WHERE vs.recorded_at >= NOW() - INTERVAL '1 day' * %(days_back)s
-                ORDER BY vs.video_id, vs.recorded_at ASC
+                JOIN narrative_videos nv ON vs.video_id = nv.video_id
+                WHERE vs.recorded_at < NOW() - INTERVAL '1 day' * %(days_back)s
+                ORDER BY vs.video_id, vs.recorded_at DESC
             ),
-            last_snapshot AS (
+            current AS (
+                -- Latest known state, carried forward to the end of the window.
                 SELECT DISTINCT ON (vs.video_id)
                     vs.video_id,
                     vs.views,
                     vs.likes,
                     vs.comments
                 FROM video_stats vs
-                JOIN period_videos pv ON vs.video_id = pv.video_id
-                WHERE vs.recorded_at >= NOW() - INTERVAL '1 day' * %(days_back)s
+                JOIN narrative_videos nv ON vs.video_id = nv.video_id
                 ORDER BY vs.video_id, vs.recorded_at DESC
             )
             SELECT
-                COUNT(DISTINCT f.video_id)::float                              AS video_count,
-                COALESCE(SUM(GREATEST(l.views    - f.views,    0)), 0)::float AS views,
-                COALESCE(SUM(GREATEST(l.likes    - f.likes,    0)), 0)::float AS likes,
-                COALESCE(SUM(GREATEST(l.comments - f.comments, 0)), 0)::float AS comments
-            FROM first_snapshot f
-            JOIN last_snapshot l ON f.video_id = l.video_id
+                COUNT(DISTINCT c.video_id)::float                                          AS video_count,
+                COALESCE(SUM(GREATEST(c.views    - COALESCE(b.views,    0), 0)), 0)::float AS views,
+                COALESCE(SUM(GREATEST(c.likes    - COALESCE(b.likes,    0), 0)), 0)::float AS likes,
+                COALESCE(SUM(GREATEST(c.comments - COALESCE(b.comments, 0), 0)), 0)::float AS comments
+            FROM current c
+            LEFT JOIN baseline b ON c.video_id = b.video_id
             """,
             {"narrative_id": narrative_id, "days_back": days_back},
         )
@@ -1882,6 +1911,15 @@ class NarrativeRepository:
         """
         Get current and previous day aggregate stats for all narratives in a single query.
         Returns a list of dicts with current/prev video_count, views, likes, comments per narrative.
+
+        video_stats is scraped sparsely: a video is not guaranteed to have a row on
+        every calendar day (old/low-view videos may go days or weeks between scrapes,
+        and unchanged data is not re-recorded). So we must NOT filter on an exact day
+        (`recorded_at::date = calc_date`) — that would drop every video not scraped on
+        that day and make the narrative look like it lost engagement. Instead we take,
+        per video, the latest snapshot recorded on or before each reference day
+        (`recorded_at::date <= calc_date`): the real end-of-day state, carried forward
+        from the last known snapshot.
         """
         prev_date = calc_date - timedelta(days=1)
         await self._session.execute(
@@ -1897,7 +1935,7 @@ class NarrativeRepository:
                 JOIN videos v ON vs.video_id = v.id
                 JOIN video_claims c ON v.id = c.video_id
                 JOIN claim_narratives cn ON c.id = cn.claim_id
-                WHERE vs.recorded_at::date = %(calc_date)s
+                WHERE vs.recorded_at::date <= %(calc_date)s
                 ORDER BY cn.narrative_id, vs.video_id, vs.recorded_at DESC
             ),
             prev_videos AS (
@@ -1911,7 +1949,7 @@ class NarrativeRepository:
                 JOIN videos v ON vs.video_id = v.id
                 JOIN video_claims c ON v.id = c.video_id
                 JOIN claim_narratives cn ON c.id = cn.claim_id
-                WHERE vs.recorded_at::date = %(prev_date)s
+                WHERE vs.recorded_at::date <= %(prev_date)s
                 ORDER BY cn.narrative_id, vs.video_id, vs.recorded_at DESC
             ),
             today_stats AS (
