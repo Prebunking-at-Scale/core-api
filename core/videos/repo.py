@@ -122,7 +122,8 @@ class VideoRepository:
                 likes = %(likes)s,
                 comments = %(comments)s,
                 channel_followers = %(channel_followers)s,
-                metadata = metadata || %(metadata)s
+                metadata = metadata || %(metadata)s,
+                updated_at = NOW()
             WHERE id = %(id)s
             RETURNING *
             """,
