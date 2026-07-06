@@ -1,8 +1,17 @@
 from datetime import datetime
+from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
+
+
+class NarrativeAlertLevel(str, Enum):
+    NONE = "none"
+    VIRAL = "viral"
+    EARLY_SURGE = "early_surge"
+    ALERT = "alert"
+    WATCH = "watch"
 
 
 class Video(BaseModel):
@@ -85,6 +94,7 @@ class Narrative(BaseModel):
     metadata: dict[str, Any] = {}
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    alert_level: NarrativeAlertLevel | None = None
 
 
 class NarrativeFeedback(BaseModel):

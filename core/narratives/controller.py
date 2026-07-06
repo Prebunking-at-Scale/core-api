@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
@@ -8,8 +8,9 @@ from litestar.exceptions import NotFoundException
 
 from core.auth.guards import super_admin
 from core.errors import ConflictError
-from core.models import Claim, Narrative, Video
+from core.models import Claim, Narrative, NarrativeAlertLevel, Video
 from core.narratives.models import (
+    NarrativeAnalysisIndicatorsResponse,
     NarrativeDetail,
     NarrativeInput,
     NarrativePatchInput,
@@ -139,7 +140,11 @@ class NarrativeController(Controller):
         first_content_start: datetime | None = None,
         first_content_end: datetime | None = None,
         language: str | None = None,
+        alert_level: list[NarrativeAlertLevel] | None = None,
+        sort: str | None = None,
     ) -> PaginatedJSON[list[NarrativeSummary]]:
+        # `alert_level` is repeatable: ?alert_level=viral&alert_level=alert
+        # `sort=composite` ranks by latest composite virality score (top first).
         narratives, total = await narrative_service.get_all_narratives_list(
             limit=limit,
             offset=offset,
@@ -151,6 +156,8 @@ class NarrativeController(Controller):
             first_content_start=first_content_start,
             first_content_end=first_content_end,
             language=language,
+            alert_levels=[al.value for al in alert_level] if alert_level else None,
+            sort=sort,
         )
         page = (offset // limit) + 1 if limit > 0 else 1
         return PaginatedJSON(
@@ -280,6 +287,21 @@ class NarrativeController(Controller):
         narrative_id: UUID,
     ) -> None:
         await narrative_service.delete_narrative(narrative_id)
+
+    @get(
+        path="/{narrative_id:uuid}/indicators",
+        summary="Get the latest analysis indicators for a narrative",
+    )
+    async def get_narrative_indicators(
+        self,
+        narrative_service: NarrativeService,
+        narrative_id: UUID,
+        date: date | None = None,
+    ) -> JSON[NarrativeAnalysisIndicatorsResponse]:
+        indicators = await narrative_service.get_narrative_analysis_indicators(narrative_id, date)
+        if indicators is None:
+            raise NotFoundException()
+        return JSON(indicators)
 
     @delete(
         path="/{narrative_id:uuid}/claims/{claim_id:uuid}",
