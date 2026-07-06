@@ -72,7 +72,7 @@ async def test_migration_normalizes_language_codes(migration_db):
     await pool.open()
     try:
         # Migrate to the version *before* the backfill, then seed dirty data.
-        await migrate(pool.connection, 19)
+        await migrate(pool.connection, 20)
 
         cases = {
             "eng": "en",  # ISO 639-2/T
@@ -90,16 +90,14 @@ async def test_migration_normalizes_language_codes(migration_db):
         }
 
         async with pool.connection() as conn:
-            video_ids = {
-                stored: await _insert_video(conn, stored) for stored in cases
-            }
+            video_ids = {stored: await _insert_video(conn, stored) for stored in cases}
             no_language_id = await _insert_video(conn, None)
 
             sample_video = video_ids["eng"]
             sentence_id = await _insert_sentence(conn, sample_video, "English")
             claim_id = await _insert_claim(conn, sample_video, "PUNJABI")
 
-        await migrate(pool.connection, 20)
+        await migrate(pool.connection, 21)
 
         async with pool.connection() as conn:
             for stored, expected in cases.items():
