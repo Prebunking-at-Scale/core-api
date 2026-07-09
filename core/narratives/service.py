@@ -1,4 +1,5 @@
 import logging
+from bisect import bisect_left
 from datetime import date, datetime
 from typing import Any, AsyncContextManager, Callable
 from uuid import UUID
@@ -46,6 +47,22 @@ ACCELERATION_VIEWS_WEIGHT = 0.25
 # Without it, a single video going from 1 → 10k views (change=9999) drowns
 # the weighted sum and makes the per-dimension weights meaningless.
 ACCELERATION_CHANGE_CAP = 5.0
+
+# Trailing window, in hours, used for BOTH narrative eligibility (which narratives
+# get scored) and the acceleration comparison. Keeping them on one window is what
+# stops the two from drifting apart depending on the hour the job happens to run.
+INDICATOR_WINDOW_HOURS = 24
+
+# Alert levels compare acceleration by its PERCENT_RANK within the cohort scored on
+# the same run, not by its raw value. The raw rate is a ratio against a prior
+# baseline: it saturates ACCELERATION_CHANGE_CAP for any narrative whose baseline is
+# small, so an absolute cut like "> 1.2" selects the smallest narratives rather than
+# the fastest-growing ones. A rank is immune to that — a saturating value cannot buy
+# a top rank when the whole tail saturates together.
+ACCELERATION_PERCENTILE_VIRAL = 0.90
+ACCELERATION_PERCENTILE_EARLY_SURGE = 0.95
+ACCELERATION_PERCENTILE_ALERT = 0.90
+ACCELERATION_PERCENTILE_WATCH = 0.75
 
 def _merge_narrative_context(
     existing: str | None, new: str | None
@@ -515,9 +532,24 @@ class NarrativeService:
                 records.append((narrative_id, composite, NarrativeAnalysisIndicatorType.COMPOSITE_VIRALITY, metadata))
             await repo.bulk_insert_narrative_analysis_indicators(records)
 
-    async def calculate_acceleration_rate_for_date(self, calc_date: date) -> None:
+    @staticmethod
+    def _percent_ranks(values: list[float]) -> list[float]:
+        """
+        PERCENT_RANK over `values`, matching Postgres: (rank - 1) / (rows - 1), so the
+        minimum scores 0.0 and the maximum 1.0. Ties share the lowest rank. A single
+        row scores 0.0, as it does in SQL.
+        """
+        if len(values) < 2:
+            return [0.0] * len(values)
+        ordered = sorted(values)
+        denominator = len(values) - 1
+        return [bisect_left(ordered, value) / denominator for value in values]
+
+    async def calculate_acceleration_rate_for_date(
+        self, calc_date: date, hours: int = INDICATOR_WINDOW_HOURS
+    ) -> None:
         async with self.repo() as repo:
-            stats_rows = await repo.get_bulk_narrative_stats_comparison(calc_date)
+            stats_rows = await repo.get_bulk_narrative_stats_comparison(hours)
             records: list[tuple[UUID, float, NarrativeAnalysisIndicatorType, dict[str, Any] | None]] = []
             for row in stats_rows:
                 current_engagement = (
@@ -570,37 +602,63 @@ class NarrativeService:
                         "engagement_weight": ACCELERATION_ENGAGEMENT_WEIGHT,
                         "video_volume_weight": ACCELERATION_VIDEO_VOLUME_WEIGHT,
                         "views_weight": ACCELERATION_VIEWS_WEIGHT,
+                        "paired_video_count": row["paired_video_count"],
+                        "window_hours": hours,
                     },
                 ))
+
+            # The percentile is only meaningful relative to the rest of this run's
+            # cohort, so it can only be filled in once every narrative is scored.
+            percentiles = self._percent_ranks([record[1] for record in records])
+            for record, percentile in zip(records, percentiles, strict=True):
+                metadata = record[3]
+                if metadata is not None:
+                    metadata["percentile"] = percentile
+
             await repo.bulk_insert_narrative_analysis_indicators(records)
 
     async def update_narrative_alert_levels(self, calc_date: date) -> int:
         """
-        Classify each narrative based on today's composite_virality and acceleration_rate
-        and persist the result in the alert_level column.
-        Returns the number of narratives updated.
+        Classify each narrative on today's composite_virality and the percentile rank
+        of its acceleration_rate, and persist the result in the alert_level column.
+
+        A narrative is only classified when it has *both* indicators. Previously a
+        missing composite was read as 0.0, which satisfies `composite < 0.65` and made
+        an unscored narrative eligible for EARLY_SURGE on acceleration alone — absence
+        of data masquerading as a signal. Narratives that cannot be scored have their
+        alert_level cleared to NULL rather than left holding a stale badge.
+
+        Returns the number of narratives classified.
         """
 
         async with self.repo() as repo:
             indicators = await repo.get_bulk_analysis_indicators_for_date(calc_date)
-            records: list[tuple] = []
+            records: list[tuple[UUID, NarrativeAlertLevel]] = []
             for narrative_id, values in indicators.items():
-                composite = values.get("composite_virality", 0.0)
-                acceleration = values.get("acceleration_rate", 0.0)
+                composite_indicator = values.get("composite_virality")
+                acceleration_indicator = values.get("acceleration_rate")
+                if composite_indicator is None or acceleration_indicator is None:
+                    continue
 
-                if composite > 0.85 and acceleration > 1.0:
+                acceleration_percentile = acceleration_indicator["metadata"].get("percentile")
+                if acceleration_percentile is None:
+                    continue
+
+                composite = composite_indicator["value"]
+
+                if composite > 0.85 and acceleration_percentile > ACCELERATION_PERCENTILE_VIRAL:
                     level = NarrativeAlertLevel.VIRAL
-                elif composite < 0.65 and acceleration > 2.0:
+                elif composite < 0.65 and acceleration_percentile > ACCELERATION_PERCENTILE_EARLY_SURGE:
                     level = NarrativeAlertLevel.EARLY_SURGE
-                elif composite > 0.70 and acceleration > 1.5:
+                elif composite > 0.70 and acceleration_percentile > ACCELERATION_PERCENTILE_ALERT:
                     level = NarrativeAlertLevel.ALERT
-                elif composite > 0.55 and acceleration > 1.2:
+                elif composite > 0.55 and acceleration_percentile > ACCELERATION_PERCENTILE_WATCH:
                     level = NarrativeAlertLevel.WATCH
                 elif composite > 0.85:
-                    # Plateaued-but-popular: very high composite (top ~15%)
-                    # without active acceleration. Without this branch these
-                    # narratives slot into NONE alongside truly inactive ones,
-                    # which loses signal for the editorial team.
+                    # Plateaued-but-popular: very high composite without active
+                    # acceleration. Without this branch these narratives slot into
+                    # NONE alongside truly inactive ones, which loses signal for the
+                    # editorial team.
                     level = NarrativeAlertLevel.WATCH
                 else:
                     level = NarrativeAlertLevel.NONE
@@ -609,12 +667,13 @@ class NarrativeService:
 
             if records:
                 await repo.bulk_update_narrative_alert_levels(records)
+                await repo.clear_alert_levels_except([narrative_id for narrative_id, _ in records])
             return len(records)
 
     async def run_narrative_analysis_indicators_pipeline(
         self,
         batch_size: int = 100,
-        hours: int = 24,
+        hours: int = INDICATOR_WINDOW_HOURS,
         calc_date: date | None = None,
         on_progress: Callable[[int, int], None] | None = None,
     ) -> tuple[int, int]:
@@ -664,9 +723,10 @@ class NarrativeService:
 
             offset += batch_size
 
-        # Phase 2 — composite indicators
+        # Phase 2 — composite indicators. Both phases share `hours`, so narrative
+        # eligibility and the acceleration comparison always look at the same window.
         await self.calculate_composite_virality_for_date(calc_date=target_date)
-        await self.calculate_acceleration_rate_for_date(calc_date=target_date)
+        await self.calculate_acceleration_rate_for_date(calc_date=target_date, hours=hours)
 
         # Phase 3 — alert level classification
         await self.update_narrative_alert_levels(calc_date=target_date)

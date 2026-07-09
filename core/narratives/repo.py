@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
@@ -1907,24 +1907,31 @@ class NarrativeRepository:
             ],
         )
 
-    async def get_bulk_narrative_stats_comparison(self, calc_date: date) -> list[dict]:
+    async def get_bulk_narrative_stats_comparison(self, hours: int = 24) -> list[dict]:
         """
-        Get current and previous day aggregate stats for all narratives in a single query.
-        Returns a list of dicts with current/prev video_count, views, likes, comments per narrative.
+        Compare each narrative's engagement over the trailing `hours` window against
+        the window immediately before it. Returns one row per narrative that has at
+        least one *comparable* video.
 
-        video_stats is scraped sparsely: a video is not guaranteed to have a row on
-        every calendar day (old/low-view videos may go days or weeks between scrapes,
-        and unchanged data is not re-recorded). So we must NOT filter on an exact day
-        (`recorded_at::date = calc_date`) — that would drop every video not scraped on
-        that day and make the narrative look like it lost engagement. Instead we take,
-        per video, the latest snapshot recorded on or before each reference day
-        (`recorded_at::date <= calc_date`): the real end-of-day state, carried forward
-        from the last known snapshot.
+        Both windows are anchored to NOW(), never to a calendar date. Anchoring the
+        comparison to `calc_date` while narrative eligibility was anchored to NOW()
+        meant the two never overlapped when the job ran shortly after midnight: at
+        00:04 the calendar day held almost no snapshots, so `current` and `previous`
+        resolved to the same carried-forward row and every delta was exactly 0.
+
+        A video contributes engagement figures only if it has a snapshot in *both*
+        windows — otherwise the two sides are not comparable and carrying the last
+        known value forward would report growth of exactly 0 for a video nobody
+        looked at. Carry-forward is correct for cumulative totals; it is wrong for a
+        rate. A narrative with no such video is omitted entirely, so its acceleration
+        is absent rather than a confident zero.
+
+        Video *counts* are taken per window rather than from the paired set, so that
+        a narrative gaining videos still registers volume growth.
         """
-        prev_date = calc_date - timedelta(days=1)
         await self._session.execute(
             """
-            WITH today_videos AS (
+            WITH current_videos AS (
                 SELECT DISTINCT ON (cn.narrative_id, vs.video_id)
                     cn.narrative_id,
                     vs.video_id,
@@ -1935,10 +1942,10 @@ class NarrativeRepository:
                 JOIN videos v ON vs.video_id = v.id
                 JOIN video_claims c ON v.id = c.video_id
                 JOIN claim_narratives cn ON c.id = cn.claim_id
-                WHERE vs.recorded_at::date <= %(calc_date)s
+                WHERE vs.recorded_at > NOW() - make_interval(hours => %(hours)s)
                 ORDER BY cn.narrative_id, vs.video_id, vs.recorded_at DESC
             ),
-            prev_videos AS (
+            previous_videos AS (
                 SELECT DISTINCT ON (cn.narrative_id, vs.video_id)
                     cn.narrative_id,
                     vs.video_id,
@@ -1949,59 +1956,80 @@ class NarrativeRepository:
                 JOIN videos v ON vs.video_id = v.id
                 JOIN video_claims c ON v.id = c.video_id
                 JOIN claim_narratives cn ON c.id = cn.claim_id
-                WHERE vs.recorded_at::date <= %(prev_date)s
+                WHERE vs.recorded_at >  NOW() - make_interval(hours => %(prev_hours)s)
+                  AND vs.recorded_at <= NOW() - make_interval(hours => %(hours)s)
                 ORDER BY cn.narrative_id, vs.video_id, vs.recorded_at DESC
             ),
-            today_stats AS (
+            paired AS (
+                SELECT
+                    c.narrative_id,
+                    c.video_id,
+                    c.views    AS current_views,
+                    c.likes    AS current_likes,
+                    c.comments AS current_comments,
+                    p.views    AS prev_views,
+                    p.likes    AS prev_likes,
+                    p.comments AS prev_comments
+                FROM current_videos c
+                JOIN previous_videos p USING (narrative_id, video_id)
+            ),
+            paired_stats AS (
                 SELECT
                     narrative_id,
-                    COUNT(DISTINCT video_id) AS video_count,
-                    COALESCE(SUM(views), 0) AS views,
-                    COALESCE(SUM(likes), 0) AS likes,
-                    COALESCE(SUM(comments), 0) AS comments
-                FROM today_videos
+                    COUNT(*)::float                        AS paired_video_count,
+                    COALESCE(SUM(current_views), 0)::float    AS current_views,
+                    COALESCE(SUM(current_likes), 0)::float    AS current_likes,
+                    COALESCE(SUM(current_comments), 0)::float AS current_comments,
+                    COALESCE(SUM(prev_views), 0)::float       AS prev_views,
+                    COALESCE(SUM(prev_likes), 0)::float       AS prev_likes,
+                    COALESCE(SUM(prev_comments), 0)::float    AS prev_comments
+                FROM paired
                 GROUP BY narrative_id
             ),
-            prev_stats AS (
-                SELECT
-                    narrative_id,
-                    COUNT(DISTINCT video_id) AS video_count,
-                    COALESCE(SUM(views), 0) AS views,
-                    COALESCE(SUM(likes), 0) AS likes,
-                    COALESCE(SUM(comments), 0) AS comments
-                FROM prev_videos
-                GROUP BY narrative_id
+            current_counts AS (
+                SELECT narrative_id, COUNT(*)::float AS video_count
+                FROM current_videos GROUP BY narrative_id
+            ),
+            previous_counts AS (
+                SELECT narrative_id, COUNT(*)::float AS video_count
+                FROM previous_videos GROUP BY narrative_id
             )
             SELECT
-                COALESCE(t.narrative_id, p.narrative_id) AS narrative_id,
-                COALESCE(t.video_count, 0)::float AS current_video_count,
-                COALESCE(t.views, 0)::float       AS current_views,
-                COALESCE(t.likes, 0)::float       AS current_likes,
-                COALESCE(t.comments, 0)::float    AS current_comments,
-                COALESCE(p.video_count, 0)::float AS prev_video_count,
-                COALESCE(p.views, 0)::float       AS prev_views,
-                COALESCE(p.likes, 0)::float       AS prev_likes,
-                COALESCE(p.comments, 0)::float    AS prev_comments
-            FROM today_stats t
-            FULL OUTER JOIN prev_stats p ON t.narrative_id = p.narrative_id
+                ps.narrative_id,
+                ps.paired_video_count,
+                COALESCE(cc.video_count, 0)::float AS current_video_count,
+                ps.current_views,
+                ps.current_likes,
+                ps.current_comments,
+                COALESCE(pc.video_count, 0)::float AS prev_video_count,
+                ps.prev_views,
+                ps.prev_likes,
+                ps.prev_comments
+            FROM paired_stats ps
+            LEFT JOIN current_counts  cc ON cc.narrative_id = ps.narrative_id
+            LEFT JOIN previous_counts pc ON pc.narrative_id = ps.narrative_id
             """,
-            {"calc_date": calc_date, "prev_date": prev_date},
+            {"hours": hours, "prev_hours": 2 * hours},
         )
         return await self._session.fetchall()
 
     async def get_bulk_analysis_indicators_for_date(
         self, calc_date: date
-    ) -> dict[UUID, dict[str, float]]:
+    ) -> dict[UUID, dict[str, dict[str, Any]]]:
         """
         Get the latest composite_virality and acceleration_rate per narrative for a given date.
-        Returns a dict keyed by narrative_id → {indicator_type: indicator_value}.
+        Returns narrative_id → {indicator_type: {"value": float, "metadata": dict}}.
+
+        The metadata is carried because acceleration is classified on its percentile
+        rank within the run's cohort, which lives there rather than in indicator_value.
         """
         await self._session.execute(
             """
             SELECT DISTINCT ON (narrative_id, indicator_type)
                 narrative_id,
                 indicator_type,
-                indicator_value
+                indicator_value,
+                metadata
             FROM narrative_analysis_indicators
             WHERE calculated_at::date = %(calc_date)s
               AND indicator_type IN ('composite_virality', 'acceleration_rate')
@@ -2010,10 +2038,35 @@ class NarrativeRepository:
             {"calc_date": calc_date},
         )
         rows = await self._session.fetchall()
-        result: dict[UUID, dict[str, float]] = {}
+        result: dict[UUID, dict[str, dict[str, Any]]] = {}
         for row in rows:
-            result.setdefault(row["narrative_id"], {})[row["indicator_type"]] = row["indicator_value"]
+            result.setdefault(row["narrative_id"], {})[row["indicator_type"]] = {
+                "value": row["indicator_value"],
+                "metadata": row["metadata"] or {},
+            }
         return result
+
+    async def clear_alert_levels_except(self, narrative_ids: list[UUID]) -> None:
+        """
+        Null out alert_level for every narrative outside `narrative_ids`.
+
+        A narrative that could not be scored this run (no composite, or no comparable
+        video for acceleration) must not keep yesterday's badge. NULL means "not
+        scoreable", which is distinct from the NONE level meaning "scored, nothing
+        notable". Callers must not pass an empty list — that would clear every badge
+        in the table, which is what a failed run looks like.
+        """
+        if not narrative_ids:
+            return
+        await self._session.execute(
+            """
+            UPDATE narratives
+            SET alert_level = NULL, updated_at = NOW()
+            WHERE alert_level IS NOT NULL
+              AND NOT (id = ANY(%(narrative_ids)s))
+            """,
+            {"narrative_ids": narrative_ids},
+        )
 
     async def bulk_update_narrative_alert_levels(
         self, records: list[tuple[UUID, NarrativeAlertLevel]]

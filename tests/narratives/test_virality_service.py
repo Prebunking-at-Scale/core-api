@@ -29,7 +29,7 @@ from core.narratives.models import (
     NarrativeSummary,
     NarrativeViralityScoreType,
 )
-from core.narratives.service import NarrativeService
+from core.narratives.service import INDICATOR_WINDOW_HOURS, NarrativeService
 from tests.narratives.conftest import NarrativeSummaryFactory
 
 
@@ -294,6 +294,7 @@ class TestCalculateAccelerationRateForDate:
         narrative_id,
         current_views, current_likes, current_comments, current_video_count,
         prev_views, prev_likes, prev_comments, prev_video_count,
+        paired_video_count=1.0,
     ) -> dict:
         return {
             "narrative_id": narrative_id,
@@ -305,6 +306,7 @@ class TestCalculateAccelerationRateForDate:
             "prev_likes": float(prev_likes),
             "prev_comments": float(prev_comments),
             "prev_video_count": float(prev_video_count),
+            "paired_video_count": float(paired_video_count),
         }
 
     async def test_acceleration_rate_normal_growth(self, narrative_service: NarrativeService):
@@ -376,6 +378,51 @@ class TestCalculateAccelerationRateForDate:
         _, acceleration, _, _ = inserted[0]
         assert acceleration == pytest.approx(0.0)
 
+    async def test_comparison_uses_trailing_window_not_calc_date(
+        self, narrative_service: NarrativeService
+    ):
+        """
+        The comparison must be anchored to a trailing window, never to calc_date —
+        that mismatch is what zeroed acceleration on the just-after-midnight run.
+        """
+        mock_repo = AsyncMock()
+        mock_repo.get_bulk_narrative_stats_comparison.return_value = []
+
+        with patch.object(narrative_service, "repo", return_value=_make_repo_cm(mock_repo)):
+            await narrative_service.calculate_acceleration_rate_for_date(date.today(), hours=48)
+
+        mock_repo.get_bulk_narrative_stats_comparison.assert_awaited_once_with(48)
+
+    async def test_percentile_is_stored_in_metadata(self, narrative_service: NarrativeService):
+        """
+        Acceleration is classified on its rank within the cohort, so every record
+        carries its PERCENT_RANK. Postgres semantics: min → 0.0, max → 1.0.
+        """
+        rows = [
+            # change_views drives each: 0.0, 1.0, 3.0 → accel 0.0, 0.25, 0.75
+            self._make_stats_row(uuid.uuid4(), 100, 0, 0, 1, 100, 0, 0, 1),
+            self._make_stats_row(uuid.uuid4(), 200, 0, 0, 1, 100, 0, 0, 1),
+            self._make_stats_row(uuid.uuid4(), 400, 0, 0, 1, 100, 0, 0, 1),
+        ]
+        mock_repo = AsyncMock()
+        mock_repo.get_bulk_narrative_stats_comparison.return_value = rows
+
+        with patch.object(narrative_service, "repo", return_value=_make_repo_cm(mock_repo)):
+            await narrative_service.calculate_acceleration_rate_for_date(date.today())
+
+        inserted = mock_repo.bulk_insert_narrative_analysis_indicators.call_args[0][0]
+        percentiles = [metadata["percentile"] for _, _, _, metadata in inserted]
+        assert percentiles == pytest.approx([0.0, 0.5, 1.0])
+
+    async def test_percentile_ties_share_lowest_rank(self, narrative_service: NarrativeService):
+        """Ties get the same rank, as PERCENT_RANK does in SQL."""
+        assert narrative_service._percent_ranks([5.0, 1.0, 1.0]) == pytest.approx([1.0, 0.0, 0.0])
+
+    async def test_percentile_single_narrative_is_zero(self, narrative_service: NarrativeService):
+        """A lone row scores 0.0 in Postgres, not 1.0. Mirror that."""
+        assert narrative_service._percent_ranks([7.3]) == [0.0]
+        assert narrative_service._percent_ranks([]) == []
+
 
 # ---------------------------------------------------------------------------
 # Section 4 — update_narrative_alert_levels
@@ -383,67 +430,116 @@ class TestCalculateAccelerationRateForDate:
 
 class TestUpdateNarrativeAlertLevels:
     """
-    Thresholds (from service.py):
-        composite > 0.85 AND acceleration > 1.0   → VIRAL
-        composite < 0.65 AND acceleration > 2.0   → EARLY_SURGE
-        composite > 0.70 AND acceleration > 1.5   → ALERT
-        composite > 0.55 AND acceleration > 1.2   → WATCH
-        else                                       → NONE
+    Acceleration is compared by PERCENT_RANK within the run's cohort, not by its raw
+    value. Thresholds (from service.py):
+        composite > 0.85 AND accel_pct > 0.90   → VIRAL
+        composite < 0.65 AND accel_pct > 0.95   → EARLY_SURGE
+        composite > 0.70 AND accel_pct > 0.90   → ALERT
+        composite > 0.55 AND accel_pct > 0.75   → WATCH
+        composite > 0.85                        → WATCH (plateaued-but-popular)
+        else                                    → NONE
     Note: conditions are evaluated top-to-bottom (if/elif chain).
     """
 
-    async def _run(self, narrative_service, indicators: dict) -> list[tuple]:
+    @staticmethod
+    def _indicators(composite: float | None, accel_pct: float | None) -> dict:
+        """Build one narrative's indicator payload as the repo now returns it."""
+        values: dict = {}
+        if composite is not None:
+            values["composite_virality"] = {"value": composite, "metadata": {}}
+        if accel_pct is not None:
+            values["acceleration_rate"] = {"value": 0.42, "metadata": {"percentile": accel_pct}}
+        return values
+
+    async def _run(self, narrative_service, indicators: dict):
         mock_repo = AsyncMock()
         mock_repo.get_bulk_analysis_indicators_for_date.return_value = indicators
 
         with patch.object(narrative_service, "repo", return_value=_make_repo_cm(mock_repo)):
             count = await narrative_service.update_narrative_alert_levels(date.today())
 
-        assert mock_repo.bulk_update_narrative_alert_levels.called
+        if not mock_repo.bulk_update_narrative_alert_levels.called:
+            return [], count
         return mock_repo.bulk_update_narrative_alert_levels.call_args[0][0], count
 
     async def test_alert_level_viral(self, narrative_service: NarrativeService):
         nid = uuid.uuid4()
-        records, _ = await self._run(
-            narrative_service,
-            {nid: {"composite_virality": 0.90, "acceleration_rate": 1.5}},
-        )
+        records, _ = await self._run(narrative_service, {nid: self._indicators(0.90, 0.95)})
         assert records[0] == (nid, NarrativeAlertLevel.VIRAL)
 
     async def test_alert_level_early_surge(self, narrative_service: NarrativeService):
         nid = uuid.uuid4()
-        records, _ = await self._run(
-            narrative_service,
-            {nid: {"composite_virality": 0.60, "acceleration_rate": 2.5}},
-        )
+        records, _ = await self._run(narrative_service, {nid: self._indicators(0.60, 0.97)})
         assert records[0] == (nid, NarrativeAlertLevel.EARLY_SURGE)
 
     async def test_alert_level_alert(self, narrative_service: NarrativeService):
         nid = uuid.uuid4()
-        records, _ = await self._run(
-            narrative_service,
-            {nid: {"composite_virality": 0.75, "acceleration_rate": 1.6}},
-        )
+        records, _ = await self._run(narrative_service, {nid: self._indicators(0.75, 0.93)})
         assert records[0] == (nid, NarrativeAlertLevel.ALERT)
 
     async def test_alert_level_watch(self, narrative_service: NarrativeService):
         nid = uuid.uuid4()
-        records, _ = await self._run(
-            narrative_service,
-            {nid: {"composite_virality": 0.60, "acceleration_rate": 1.3}},
-        )
+        records, _ = await self._run(narrative_service, {nid: self._indicators(0.60, 0.80)})
+        assert records[0] == (nid, NarrativeAlertLevel.WATCH)
+
+    async def test_alert_level_watch_plateaued(self, narrative_service: NarrativeService):
+        """High composite, no acceleration: still surfaced rather than lost in NONE."""
+        nid = uuid.uuid4()
+        records, _ = await self._run(narrative_service, {nid: self._indicators(0.90, 0.10)})
         assert records[0] == (nid, NarrativeAlertLevel.WATCH)
 
     async def test_alert_level_none(self, narrative_service: NarrativeService):
         nid = uuid.uuid4()
-        records, _ = await self._run(
-            narrative_service,
-            {nid: {"composite_virality": 0.40, "acceleration_rate": 0.5}},
-        )
+        records, _ = await self._run(narrative_service, {nid: self._indicators(0.40, 0.50)})
         assert records[0] == (nid, NarrativeAlertLevel.NONE)
 
+    async def test_missing_composite_is_not_classified(self, narrative_service: NarrativeService):
+        """
+        A narrative with no composite used to be read as composite=0.0, which
+        satisfies `composite < 0.65` and made it EARLY_SURGE on acceleration alone.
+        Absence of data must not be a signal — it is skipped entirely.
+        """
+        nid = uuid.uuid4()
+        records, count = await self._run(narrative_service, {nid: self._indicators(None, 0.99)})
+        assert records == []
+        assert count == 0
+
+    async def test_missing_acceleration_is_not_classified(self, narrative_service: NarrativeService):
+        nid = uuid.uuid4()
+        records, count = await self._run(narrative_service, {nid: self._indicators(0.90, None)})
+        assert records == []
+        assert count == 0
+
+    async def test_acceleration_without_percentile_is_not_classified(
+        self, narrative_service: NarrativeService
+    ):
+        """An acceleration row written before this change has no percentile."""
+        nid = uuid.uuid4()
+        indicators = {nid: {
+            "composite_virality": {"value": 0.90, "metadata": {}},
+            "acceleration_rate": {"value": 1.5, "metadata": {}},
+        }}
+        records, count = await self._run(narrative_service, indicators)
+        assert records == []
+        assert count == 0
+
+    async def test_unscoreable_narratives_have_their_badge_cleared(
+        self, narrative_service: NarrativeService
+    ):
+        """Narratives outside the scored cohort must not keep yesterday's badge."""
+        nid = uuid.uuid4()
+        mock_repo = AsyncMock()
+        mock_repo.get_bulk_analysis_indicators_for_date.return_value = {
+            nid: self._indicators(0.40, 0.50)
+        }
+
+        with patch.object(narrative_service, "repo", return_value=_make_repo_cm(mock_repo)):
+            await narrative_service.update_narrative_alert_levels(date.today())
+
+        mock_repo.clear_alert_levels_except.assert_awaited_once_with([nid])
+
     async def test_returns_count_of_updated_narratives(self, narrative_service: NarrativeService):
-        indicators = {uuid.uuid4(): {"composite_virality": 0.3, "acceleration_rate": 0.2} for _ in range(5)}
+        indicators = {uuid.uuid4(): self._indicators(0.3, 0.2) for _ in range(5)}
         _, count = await self._run(narrative_service, indicators)
         assert count == 5
 
@@ -455,6 +551,8 @@ class TestUpdateNarrativeAlertLevels:
             count = await narrative_service.update_narrative_alert_levels(date.today())
 
         mock_repo.bulk_update_narrative_alert_levels.assert_not_called()
+        # An empty cohort means the run found nothing, not that every badge is stale.
+        mock_repo.clear_alert_levels_except.assert_not_called()
         assert count == 0
 
 
@@ -571,7 +669,9 @@ class TestRunNarrativeAnalysisIndicatorsPipeline:
             await narrative_service.run_narrative_analysis_indicators_pipeline(calc_date=calc_date)
 
         mocks["calculate_composite_virality_for_date"].assert_called_once_with(calc_date=calc_date)
-        mocks["calculate_acceleration_rate_for_date"].assert_called_once_with(calc_date=calc_date)
+        mocks["calculate_acceleration_rate_for_date"].assert_called_once_with(
+            calc_date=calc_date, hours=INDICATOR_WINDOW_HOURS
+        )
         mocks["update_narrative_alert_levels"].assert_called_once_with(calc_date=calc_date)
 
     async def test_pipeline_uses_provided_calc_date(self, narrative_service: NarrativeService):
@@ -582,7 +682,9 @@ class TestRunNarrativeAnalysisIndicatorsPipeline:
             await narrative_service.run_narrative_analysis_indicators_pipeline(calc_date=calc_date)
 
         mocks["calculate_composite_virality_for_date"].assert_called_once_with(calc_date=calc_date)
-        mocks["calculate_acceleration_rate_for_date"].assert_called_once_with(calc_date=calc_date)
+        mocks["calculate_acceleration_rate_for_date"].assert_called_once_with(
+            calc_date=calc_date, hours=INDICATOR_WINDOW_HOURS
+        )
         mocks["update_narrative_alert_levels"].assert_called_once_with(calc_date=calc_date)
 
     async def test_pipeline_uses_today_when_no_calc_date(self, narrative_service: NarrativeService):
