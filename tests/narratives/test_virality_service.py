@@ -299,6 +299,7 @@ class TestCalculateAccelerationRateForDate:
         current_views, current_likes, current_comments, current_video_count,
         prev_views, prev_likes, prev_comments, prev_video_count,
         growth_views=0.0, mean_gap_days=1.0, max_gap_days=1.0, paired_video_count=1.0,
+        new_video_count=0.0,
     ) -> dict:
         return {
             "narrative_id": narrative_id,
@@ -314,6 +315,7 @@ class TestCalculateAccelerationRateForDate:
             "mean_gap_days": float(mean_gap_days),
             "max_gap_days": float(max_gap_days),
             "paired_video_count": float(paired_video_count),
+            "new_video_count": float(new_video_count),
         }
 
     async def _insert(self, narrative_service, rows):
@@ -370,6 +372,16 @@ class TestCalculateAccelerationRateForDate:
         growth_10d = inserted[1][3]["growth_engagement"]
         assert growth_10d == pytest.approx(growth_1d / 10.0, rel=1e-6)
         assert accel_10d < accel_1d
+
+    async def test_new_video_count_is_recorded(self, narrative_service: NarrativeService):
+        """A narrative that gained a video says so, so its rate can be interpreted."""
+        rows = [self._make_stats_row(
+            uuid.uuid4(), 6100, 61, 6, 2, 1000, 10, 1, 1,
+            growth_views=1.2758, new_video_count=1.0,
+        )]
+        inserted, _ = await self._insert(narrative_service, rows)
+        assert inserted[0][3]["new_video_count"] == 1.0
+        assert inserted[0][3]["paired_video_count"] == 1.0
 
     async def test_no_cap_on_extreme_growth(self, narrative_service: NarrativeService):
         """

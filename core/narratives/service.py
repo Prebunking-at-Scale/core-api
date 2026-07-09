@@ -610,7 +610,9 @@ class NarrativeService:
                     (row["current_video_count"] + 1.0) / (row["prev_video_count"] + 1.0)
                 )
 
-                # Already a per-day log rate, weighted per video by its baseline views.
+                # Already a per-day log rate. Summed at the narrative level, so a
+                # video's influence is proportional to the views it carries, and a
+                # newly-added video's views count as growth against a baseline of 0.
                 growth_views = row["growth_views"]
 
                 acceleration_rate = (
@@ -630,6 +632,7 @@ class NarrativeService:
                         "video_volume_weight": ACCELERATION_VIDEO_VOLUME_WEIGHT,
                         "views_weight": ACCELERATION_VIEWS_WEIGHT,
                         "paired_video_count": row["paired_video_count"],
+                        "new_video_count": row["new_video_count"],
                         "baseline_views": row["prev_views"],
                         "mean_gap_days": row["mean_gap_days"],
                         "max_gap_days": row["max_gap_days"],
