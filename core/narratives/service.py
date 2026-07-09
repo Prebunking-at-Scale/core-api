@@ -59,10 +59,16 @@ INDICATOR_WINDOW_HOURS = 24
 # small, so an absolute cut like "> 1.2" selects the smallest narratives rather than
 # the fastest-growing ones. A rank is immune to that — a saturating value cannot buy
 # a top rank when the whole tail saturates together.
-ACCELERATION_PERCENTILE_VIRAL = 0.90
 ACCELERATION_PERCENTILE_EARLY_SURGE = 0.95
 ACCELERATION_PERCENTILE_ALERT = 0.90
 ACCELERATION_PERCENTILE_WATCH = 0.75
+
+# VIRAL is the top of the composite axis alone — a narrative that large is viral
+# whether or not it is still climbing. Every other level is bounded below it, so
+# the levels partition the composite axis rather than relying on the order of an
+# if/elif chain. This also absorbs the old "plateaued-but-popular" branch, which
+# tested exactly this condition and emitted WATCH.
+COMPOSITE_VIRAL = 0.85
 
 def _merge_narrative_context(
     existing: str | None, new: str | None
@@ -622,6 +628,17 @@ class NarrativeService:
         Classify each narrative on today's composite_virality and the percentile rank
         of its acceleration_rate, and persist the result in the alert_level column.
 
+            VIRAL        composite > 0.85                            (any acceleration)
+            EARLY_SURGE  composite < 0.65  and accel_pct > 0.95
+            ALERT        0.70 < composite <= 0.85 and accel_pct > 0.90
+            WATCH        0.55 < composite <= 0.85 and accel_pct > 0.75
+            NONE         otherwise
+
+        VIRAL reads the composite axis alone: a narrative that large is viral whether
+        or not it is still climbing. The other levels are bounded above by 0.85 so
+        none of them can claim a narrative VIRAL owns — the exclusion is in the
+        conditions, not in the order they happen to be evaluated.
+
         A narrative is only classified when it has *both* indicators. Previously a
         missing composite was read as 0.0, which satisfies `composite < 0.65` and made
         an unscored narrative eligible for EARLY_SURGE on acceleration alone — absence
@@ -646,19 +663,19 @@ class NarrativeService:
 
                 composite = composite_indicator["value"]
 
-                if composite > 0.85 and acceleration_percentile > ACCELERATION_PERCENTILE_VIRAL:
+                if composite > COMPOSITE_VIRAL:
                     level = NarrativeAlertLevel.VIRAL
                 elif composite < 0.65 and acceleration_percentile > ACCELERATION_PERCENTILE_EARLY_SURGE:
                     level = NarrativeAlertLevel.EARLY_SURGE
-                elif composite > 0.70 and acceleration_percentile > ACCELERATION_PERCENTILE_ALERT:
+                elif (
+                    0.70 < composite <= COMPOSITE_VIRAL
+                    and acceleration_percentile > ACCELERATION_PERCENTILE_ALERT
+                ):
                     level = NarrativeAlertLevel.ALERT
-                elif composite > 0.55 and acceleration_percentile > ACCELERATION_PERCENTILE_WATCH:
-                    level = NarrativeAlertLevel.WATCH
-                elif composite > 0.85:
-                    # Plateaued-but-popular: very high composite without active
-                    # acceleration. Without this branch these narratives slot into
-                    # NONE alongside truly inactive ones, which loses signal for the
-                    # editorial team.
+                elif (
+                    0.55 < composite <= COMPOSITE_VIRAL
+                    and acceleration_percentile > ACCELERATION_PERCENTILE_WATCH
+                ):
                     level = NarrativeAlertLevel.WATCH
                 else:
                     level = NarrativeAlertLevel.NONE

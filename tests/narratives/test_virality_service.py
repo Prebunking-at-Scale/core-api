@@ -432,13 +432,14 @@ class TestUpdateNarrativeAlertLevels:
     """
     Acceleration is compared by PERCENT_RANK within the run's cohort, not by its raw
     value. Thresholds (from service.py):
-        composite > 0.85 AND accel_pct > 0.90   → VIRAL
-        composite < 0.65 AND accel_pct > 0.95   → EARLY_SURGE
-        composite > 0.70 AND accel_pct > 0.90   → ALERT
-        composite > 0.55 AND accel_pct > 0.75   → WATCH
-        composite > 0.85                        → WATCH (plateaued-but-popular)
-        else                                    → NONE
-    Note: conditions are evaluated top-to-bottom (if/elif chain).
+        composite > 0.85                                  → VIRAL (any acceleration)
+        composite < 0.65 AND accel_pct > 0.95             → EARLY_SURGE
+        0.70 < composite <= 0.85 AND accel_pct > 0.90     → ALERT
+        0.55 < composite <= 0.85 AND accel_pct > 0.75     → WATCH
+        else                                              → NONE
+
+    VIRAL owns the top of the composite axis outright; the other levels are bounded
+    above by 0.85 so none of them can overlap it.
     """
 
     @staticmethod
@@ -467,6 +468,30 @@ class TestUpdateNarrativeAlertLevels:
         records, _ = await self._run(narrative_service, {nid: self._indicators(0.90, 0.95)})
         assert records[0] == (nid, NarrativeAlertLevel.VIRAL)
 
+    async def test_alert_level_viral_ignores_acceleration(self, narrative_service: NarrativeService):
+        """A narrative that large is viral whether or not it is still climbing."""
+        nid = uuid.uuid4()
+        records, _ = await self._run(narrative_service, {nid: self._indicators(0.90, 0.01)})
+        assert records[0] == (nid, NarrativeAlertLevel.VIRAL)
+
+    async def test_viral_does_not_overlap_alert_or_watch(self, narrative_service: NarrativeService):
+        """
+        composite 0.90 also satisfies ALERT's `> 0.70` and WATCH's `> 0.55` floors.
+        The upper bounds must keep those levels from claiming it, independently of
+        the order the branches are evaluated in.
+        """
+        nid = uuid.uuid4()
+        records, _ = await self._run(narrative_service, {nid: self._indicators(0.90, 0.92)})
+        assert records[0] == (nid, NarrativeAlertLevel.VIRAL)
+
+    async def test_alert_level_at_viral_boundary_is_not_viral(
+        self, narrative_service: NarrativeService
+    ):
+        """The cut is strict: composite == 0.85 is not viral, and ALERT may claim it."""
+        nid = uuid.uuid4()
+        records, _ = await self._run(narrative_service, {nid: self._indicators(0.85, 0.92)})
+        assert records[0] == (nid, NarrativeAlertLevel.ALERT)
+
     async def test_alert_level_early_surge(self, narrative_service: NarrativeService):
         nid = uuid.uuid4()
         records, _ = await self._run(narrative_service, {nid: self._indicators(0.60, 0.97)})
@@ -482,11 +507,17 @@ class TestUpdateNarrativeAlertLevels:
         records, _ = await self._run(narrative_service, {nid: self._indicators(0.60, 0.80)})
         assert records[0] == (nid, NarrativeAlertLevel.WATCH)
 
-    async def test_alert_level_watch_plateaued(self, narrative_service: NarrativeService):
-        """High composite, no acceleration: still surfaced rather than lost in NONE."""
+    async def test_declining_but_huge_narrative_is_viral_not_watch(
+        self, narrative_service: NarrativeService
+    ):
+        """
+        The old plateau branch emitted WATCH for `composite > 0.85` with no
+        acceleration — the same condition VIRAL now tests. It was surfacing the
+        corpus's biggest narratives under its weakest label.
+        """
         nid = uuid.uuid4()
-        records, _ = await self._run(narrative_service, {nid: self._indicators(0.90, 0.10)})
-        assert records[0] == (nid, NarrativeAlertLevel.WATCH)
+        records, _ = await self._run(narrative_service, {nid: self._indicators(0.86, 0.0)})
+        assert records[0] == (nid, NarrativeAlertLevel.VIRAL)
 
     async def test_alert_level_none(self, narrative_service: NarrativeService):
         nid = uuid.uuid4()
