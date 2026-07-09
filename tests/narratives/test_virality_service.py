@@ -287,17 +287,19 @@ class TestCalculateAccelerationRateForDate:
     """
     Weights: engagement=0.40, video_count=0.35, views=0.25.
 
+    Weights: engagement=0.40, video_count=0.10, views=0.50.
+
     Acceleration is a per-day log growth rate, not a percent change:
         growth_engagement  = ln((E_cur + eps) / (E_prev + eps)) / mean_gap_days
-        growth_video_count = ln((n_cur + 1) / (n_prev + 1))          [adjacent windows]
-        growth_views       = supplied by the repo, already per-day and view-weighted
+        growth_video_count = ln(1 + new_videos / videos_known_before)
+        growth_views       = supplied by the repo, already a per-day log rate
     """
 
     def _make_stats_row(
         self,
         narrative_id,
         current_views, current_likes, current_comments, current_video_count,
-        prev_views, prev_likes, prev_comments, prev_video_count,
+        prev_views, prev_likes, prev_comments, videos_known_before,
         growth_views=0.0, mean_gap_days=1.0, max_gap_days=1.0, paired_video_count=1.0,
         new_video_count=0.0,
     ) -> dict:
@@ -310,7 +312,7 @@ class TestCalculateAccelerationRateForDate:
             "prev_views": float(prev_views),
             "prev_likes": float(prev_likes),
             "prev_comments": float(prev_comments),
-            "prev_video_count": float(prev_video_count),
+            "videos_known_before": float(videos_known_before),
             "growth_views": float(growth_views),
             "mean_gap_days": float(mean_gap_days),
             "max_gap_days": float(max_gap_days),
@@ -339,13 +341,13 @@ class TestCalculateAccelerationRateForDate:
         rows = [self._make_stats_row(
             uuid.uuid4(),
             current_views=200, current_likes=20, current_comments=4, current_video_count=3,
-            prev_views=100, prev_likes=10, prev_comments=2, prev_video_count=2,
-            growth_views=math.log(2.0),
+            prev_views=100, prev_likes=10, prev_comments=2, videos_known_before=2,
+            growth_views=math.log(2.0), new_video_count=1,
         )]
         inserted, _ = await self._insert(narrative_service, rows)
         _, acceleration, indicator_type, _ = inserted[0]
         assert indicator_type == NarrativeAnalysisIndicatorType.ACCELERATION_RATE
-        expected = 0.0 * 0.40 + math.log(4 / 3) * 0.35 + math.log(2.0) * 0.25
+        expected = 0.0 * 0.40 + math.log(1 + 1 / 2) * 0.10 + math.log(2.0) * 0.50
         assert acceleration == pytest.approx(expected, abs=1e-4)
 
     async def test_gap_normalisation_divides_by_elapsed_days(
@@ -359,7 +361,7 @@ class TestCalculateAccelerationRateForDate:
         one_day = self._make_stats_row(
             uuid.uuid4(),
             current_views=200, current_likes=40, current_comments=0, current_video_count=1,
-            prev_views=100, prev_likes=10, prev_comments=0, prev_video_count=1,
+            prev_views=100, prev_likes=10, prev_comments=0, videos_known_before=1,
             mean_gap_days=1.0,
         )
         ten_days = dict(one_day, narrative_id=uuid.uuid4(), mean_gap_days=10.0)
@@ -382,6 +384,32 @@ class TestCalculateAccelerationRateForDate:
         inserted, _ = await self._insert(narrative_service, rows)
         assert inserted[0][3]["new_video_count"] == 1.0
         assert inserted[0][3]["paired_video_count"] == 1.0
+        assert inserted[0][3]["videos_known_before"] == 1.0
+
+    async def test_volume_growth_ignores_scraper_sweep(self, narrative_service: NarrativeService):
+        """
+        A narrative whose videos the scraper simply covered more of today gained
+        nothing. Counting videos *scraped* per window scored it as volume growth;
+        counting newly *discovered* videos scores it zero.
+        """
+        rows = [self._make_stats_row(
+            uuid.uuid4(),
+            current_views=3000, current_likes=30, current_comments=3, current_video_count=3,
+            prev_views=3000, prev_likes=30, prev_comments=3, videos_known_before=3,
+            growth_views=0.0, new_video_count=0,
+        )]
+        inserted, _ = await self._insert(narrative_service, rows)
+        assert inserted[0][3]["growth_video_count"] == 0.0
+        assert inserted[0][1] == pytest.approx(0.0, abs=1e-6)
+
+    async def test_volume_growth_counts_discovered_videos(self, narrative_service: NarrativeService):
+        """One new video against one already known doubles the narrative's content."""
+        rows = [self._make_stats_row(
+            uuid.uuid4(), 6000, 60, 6, 2, 1000, 10, 1, 1,
+            growth_views=0.0, new_video_count=1,
+        )]
+        inserted, _ = await self._insert(narrative_service, rows)
+        assert inserted[0][3]["growth_video_count"] == pytest.approx(math.log(2.0))
 
     async def test_no_cap_on_extreme_growth(self, narrative_service: NarrativeService):
         """
@@ -409,13 +437,25 @@ class TestCalculateAccelerationRateForDate:
     async def test_collapsing_engagement_drags_score_down(
         self, narrative_service: NarrativeService
     ):
-        """Views up 10,000x but likes flat: the engagement rate collapsed. Say so."""
+        """
+        Views up 10,000x but likes flat: the engagement *ratio* collapsed, and the
+        0.40-weighted term records that. It no longer flips the whole score negative
+        — views carry 0.50 now, and a falling engagement ratio is what a genuine
+        view explosion looks like as casual viewers arrive.
+        """
         rows = [self._make_stats_row(
             uuid.uuid4(), 1_000_000, 10, 0, 1, 100, 1, 0, 1, growth_views=math.log(10_000.0)
         )]
         inserted, _ = await self._insert(narrative_service, rows)
         assert inserted[0][3]["growth_engagement"] < 0
-        assert inserted[0][1] < 0
+
+        steady = self._make_stats_row(
+            uuid.uuid4(), 1_000_000, 100_000, 0, 1, 100, 10, 0, 1,
+            growth_views=math.log(10_000.0),
+        )
+        inserted_steady, _ = await self._insert(narrative_service, [steady])
+        # same view explosion, engagement held: strictly the better score
+        assert inserted_steady[0][1] > inserted[0][1]
 
     async def test_decline_is_negative_and_symmetric(self, narrative_service: NarrativeService):
         """Halving is the exact negative of doubling — the old min() clamped only the top."""

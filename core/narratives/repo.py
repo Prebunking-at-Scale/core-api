@@ -1956,8 +1956,10 @@ class NarrativeRepository:
         cap. A new video's stats are spread across the window we first saw them in,
         because a video's clock starts when it was scraped, not when it was uploaded.
 
-        Video *counts* compare two adjacent equal-length windows, since volume growth
-        is a property of the window rather than of any one video's scrape history.
+        Volume growth is the count of *newly discovered* videos against the count the
+        narrative already had. Comparing videos scraped in adjacent windows instead
+        measured the scraper's sweep: a narrative whose videos the scraper covered
+        more of today than yesterday posted volume growth while gaining nothing.
         """
         await self._session.execute(
             """
@@ -1985,15 +1987,18 @@ class NarrativeRepository:
                   AND vs.recorded_at >  NOW() - make_interval(hours => %(max_baseline_age_hours)s)
                 ORDER BY cn.narrative_id, vs.video_id, vs.recorded_at DESC
             ),
-            previous_window_videos AS (
-                -- the immediately preceding equal-length window, for volume only
+            videos_known_before AS (
+                -- Every video the narrative already had, whenever we last saw it.
+                -- NOT "videos scraped in the preceding window": that counts the
+                -- scraper's sweep, not the narrative. A narrative whose videos the
+                -- scraper happened to cover more of today than yesterday would
+                -- otherwise post volume growth while gaining nothing.
                 SELECT DISTINCT cn.narrative_id, vs.video_id
                 FROM video_stats vs
                 JOIN videos v ON vs.video_id = v.id
                 JOIN video_claims c ON v.id = c.video_id
                 JOIN claim_narratives cn ON c.id = cn.claim_id
-                WHERE vs.recorded_at >  NOW() - make_interval(hours => %(prev_hours)s)
-                  AND vs.recorded_at <= NOW() - make_interval(hours => %(hours)s)
+                WHERE vs.recorded_at <= NOW() - make_interval(hours => %(hours)s)
             ),
             comparable AS (
                 SELECT
@@ -2066,9 +2071,9 @@ class NarrativeRepository:
                 SELECT narrative_id, COUNT(*)::float AS video_count
                 FROM current_videos GROUP BY narrative_id
             ),
-            previous_counts AS (
+            known_before_counts AS (
                 SELECT narrative_id, COUNT(*)::float AS video_count
-                FROM previous_window_videos GROUP BY narrative_id
+                FROM videos_known_before GROUP BY narrative_id
             )
             SELECT
                 cs.narrative_id,
@@ -2077,7 +2082,7 @@ class NarrativeRepository:
                 cs.mean_gap_days,
                 cs.max_gap_days,
                 COALESCE(cc.video_count, 0)::float     AS current_video_count,
-                COALESCE(pc.video_count, 0)::float     AS prev_video_count,
+                COALESCE(kb.video_count, 0)::float     AS videos_known_before,
                 -- a new video's views are new engagement: numerator only
                 (cs.current_views    + COALESCE(ns.views, 0))::float    AS current_views,
                 (cs.current_likes    + COALESCE(ns.likes, 0))::float    AS current_likes,
@@ -2093,13 +2098,12 @@ class NarrativeRepository:
                     1e-9
                 ))::float AS growth_views
             FROM comparable_stats cs
-            LEFT JOIN new_stats       ns ON ns.narrative_id = cs.narrative_id
-            LEFT JOIN current_counts  cc ON cc.narrative_id = cs.narrative_id
-            LEFT JOIN previous_counts pc ON pc.narrative_id = cs.narrative_id
+            LEFT JOIN new_stats           ns ON ns.narrative_id = cs.narrative_id
+            LEFT JOIN current_counts      cc ON cc.narrative_id = cs.narrative_id
+            LEFT JOIN known_before_counts kb ON kb.narrative_id = cs.narrative_id
             """,
             {
                 "hours": hours,
-                "prev_hours": 2 * hours,
                 "max_baseline_age_hours": max_baseline_age_hours,
                 "min_baseline_views": min_baseline_views,
                 "min_gap_days": min_gap_days,

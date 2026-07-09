@@ -306,6 +306,35 @@ async def test_bulk_comparison_rejects_tiny_baselines(conn_factory):
     assert all(r["narrative_id"] != narrative_id for r in rows)
 
 
+async def test_volume_growth_counts_discovery_not_scraper_coverage(conn_factory):
+    """A narrative gains nothing when the scraper merely sweeps more of it.
+
+    Three videos, all long known. Today the scraper hit all three; in the preceding
+    window it saw only one. Counting videos *scraped* per window scored that as
+    volume growth (ln(4/2) = 0.69) for a narrative that gained nothing. Counting
+    newly *discovered* videos scores it zero.
+    """
+    async with conn_factory() as conn:
+        cur = conn.cursor()
+        narrative_id = await _make_narrative(cur)
+        videos = [await _insert_video(cur, views_by_date={}) for _ in range(3)]
+        await _insert_stat(cur, videos[0], 1000, hours_ago=36)
+        await _insert_stat(cur, videos[1], 1000, hours_ago=24 * 5)
+        await _insert_stat(cur, videos[2], 1000, hours_ago=24 * 5)
+        for v in videos:
+            await _insert_stat(cur, v, 1000, hours_ago=2)   # scraped today, unchanged
+        await _link_videos_to_narrative(cur, narrative_id, videos)
+
+        repo = NarrativeRepository(conn.cursor())
+        rows = await repo.get_bulk_narrative_stats_comparison(hours=24)
+
+    row = next(r for r in rows if r["narrative_id"] == narrative_id)
+    assert row["current_video_count"] == 3       # scraper covered all three today
+    assert row["videos_known_before"] == 3       # but the narrative already had them
+    assert row["new_video_count"] == 0           # so no volume growth
+    assert row["growth_views"] == pytest.approx(0.0, abs=1e-9)
+
+
 async def test_bulk_comparison_omits_narratives_with_no_comparable_video(conn_factory):
     """A narrative made only of brand-new videos has nothing to compare against.
 

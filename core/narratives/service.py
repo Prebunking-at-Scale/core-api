@@ -39,10 +39,16 @@ COMPOSITE_ENGAGEMENT_WEIGHT = 0.50
 COMPOSITE_REACH_WEIGHT = 0.30
 COMPOSITE_VELOCITY_WEIGHT = 0.20
 
-# Acceleration rate score weights (must sum to 1)
+# Acceleration rate score weights (must sum to 1).
+#
+# Volume was the second-heaviest term back when views were a capped ratio that
+# saturated constantly and could not carry signal on its own. Views are now a real
+# per-day rate, and a narrative that gains a video already registers that video's
+# views there — so volume no longer needs to stand in for growth, and at 0.35 it
+# was outweighing a genuine doubling of views.
 ACCELERATION_ENGAGEMENT_WEIGHT = 0.40
-ACCELERATION_VIDEO_VOLUME_WEIGHT = 0.35
-ACCELERATION_VIEWS_WEIGHT = 0.25
+ACCELERATION_VIDEO_VOLUME_WEIGHT = 0.10
+ACCELERATION_VIEWS_WEIGHT = 0.50
 
 # Acceleration is a per-day log growth rate: ln(current / previous) / days_elapsed.
 #
@@ -604,11 +610,14 @@ class NarrativeService:
                     (current_engagement + 1e-6) / (prev_engagement + 1e-6)
                 ) / gap_days
 
-                # Volume compares two adjacent windows, so there is no gap to divide
-                # by. The +1 keeps a narrative that had no videos last window finite.
-                growth_video_count = log(
-                    (row["current_video_count"] + 1.0) / (row["prev_video_count"] + 1.0)
-                )
+                # Newly discovered videos against the videos the narrative already
+                # had. Counting videos *scraped* in adjacent windows instead measured
+                # the scraper's sweep: a narrative whose videos the scraper covered
+                # more of today than yesterday scored volume growth while gaining
+                # nothing. A narrative with no prior videos has no comparable video
+                # either, so it never reaches this line.
+                videos_known_before = max(row["videos_known_before"], 1.0)
+                growth_video_count = log(1.0 + row["new_video_count"] / videos_known_before)
 
                 # Already a per-day log rate. Summed at the narrative level, so a
                 # video's influence is proportional to the views it carries, and a
@@ -633,6 +642,7 @@ class NarrativeService:
                         "views_weight": ACCELERATION_VIEWS_WEIGHT,
                         "paired_video_count": row["paired_video_count"],
                         "new_video_count": row["new_video_count"],
+                        "videos_known_before": row["videos_known_before"],
                         "baseline_views": row["prev_views"],
                         "mean_gap_days": row["mean_gap_days"],
                         "max_gap_days": row["max_gap_days"],
