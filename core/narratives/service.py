@@ -1,5 +1,6 @@
 import logging
 from bisect import bisect_left
+from math import log
 from datetime import date, datetime
 from typing import Any, AsyncContextManager, Callable
 from uuid import UUID
@@ -43,10 +44,30 @@ ACCELERATION_ENGAGEMENT_WEIGHT = 0.40
 ACCELERATION_VIDEO_VOLUME_WEIGHT = 0.35
 ACCELERATION_VIEWS_WEIGHT = 0.25
 
-# Hard cap on individual change_* components inside acceleration_rate.
-# Without it, a single video going from 1 → 10k views (change=9999) drowns
-# the weighted sum and makes the per-dimension weights meaningless.
-ACCELERATION_CHANGE_CAP = 5.0
+# Acceleration is a per-day log growth rate: ln(current / previous) / days_elapsed.
+#
+# Log growth is additive over time, so dividing by the elapsed days is a real daily
+# rate rather than an approximation — a video whose baseline is six weeks old no
+# longer books six weeks of growth as one day's surge. It is symmetric (doubling is
+# +0.69, halving -0.69) so decline is not silently averaged against a truncated
+# gain, and its tail is compressed, which is why the old 5.0 cap is gone rather
+# than retuned: nothing runs away for it to catch.
+#
+# For intuition: 0.095 ≈ 10%/day, 0.69 ≈ doubling per day, -0.69 ≈ halving.
+
+# A video's baseline is its latest snapshot before the current window, however old,
+# bounded here. Beyond this the narrative is unscoreable rather than wrong.
+ACCELERATION_MAX_BASELINE_AGE_HOURS = 720  # 30 days
+
+# Below this the ratio is noise: 2 -> 12 views is not a 500% surge.
+ACCELERATION_MIN_BASELINE_VIEWS = 100
+
+# Two snapshots hours apart divide a small change by a tiny number. Floor the gap.
+ACCELERATION_MIN_GAP_DAYS = 0.5
+
+# Above this the growth happened at an unknown time inside the gap; the rate is an
+# average, not an observation. Surfaced in metadata so callers can say so.
+ACCELERATION_STALE_BASELINE_DAYS = 2.0
 
 # Trailing window, in hours, used for BOTH narrative eligibility (which narratives
 # get scored) and the acceleration comparison. Keeping them on one window is what
@@ -555,9 +576,16 @@ class NarrativeService:
         self, calc_date: date, hours: int = INDICATOR_WINDOW_HOURS
     ) -> None:
         async with self.repo() as repo:
-            stats_rows = await repo.get_bulk_narrative_stats_comparison(hours)
+            stats_rows = await repo.get_bulk_narrative_stats_comparison(
+                hours=hours,
+                max_baseline_age_hours=ACCELERATION_MAX_BASELINE_AGE_HOURS,
+                min_baseline_views=ACCELERATION_MIN_BASELINE_VIEWS,
+                min_gap_days=ACCELERATION_MIN_GAP_DAYS,
+            )
             records: list[tuple[UUID, float, NarrativeAnalysisIndicatorType, dict[str, Any] | None]] = []
             for row in stats_rows:
+                gap_days = max(row["mean_gap_days"], ACCELERATION_MIN_GAP_DAYS)
+
                 current_engagement = (
                     row["current_likes"] * VIRALITY_SCORE_LIKES_WEIGHT
                     + row["current_comments"] * VIRALITY_SCORE_COMMENTS_WEIGHT
@@ -568,47 +596,46 @@ class NarrativeService:
                     + row["prev_comments"] * VIRALITY_SCORE_COMMENTS_WEIGHT
                 ) / row["prev_views"] if row["prev_views"] > 0 else 0.0
 
-                # When there is no previous-period baseline the percent-change
-                # is undefined; we treat it as 0 instead of the previous 1.0
-                # fallback, which was conflating "freshly observed" with "100%
-                # growth" and silently inflating accel for new narratives.
-                #
-                # The per-dimension change is capped at ACCELERATION_CHANGE_CAP
-                # so that a single video with a 1-view baseline can't push
-                # change_views into the thousands and drown the weighting.
-                change_engagement = min(
-                    (current_engagement - prev_engagement) / prev_engagement
-                    if prev_engagement > 0 else 0.0,
-                    ACCELERATION_CHANGE_CAP,
-                )
-                change_video_count = min(
-                    (row["current_video_count"] - row["prev_video_count"]) / row["prev_video_count"]
-                    if row["prev_video_count"] > 0 else 0.0,
-                    ACCELERATION_CHANGE_CAP,
-                )
-                change_views = min(
-                    (row["current_views"] - row["prev_views"]) / row["prev_views"]
-                    if row["prev_views"] > 0 else 0.0,
-                    ACCELERATION_CHANGE_CAP,
+                # Log growth per day. Symmetric, additive over time (so dividing by
+                # the gap is a real daily rate, not an approximation), and with a
+                # tail too compressed to need the old 5.0 cap. The epsilon keeps a
+                # zero engagement ratio finite rather than -inf.
+                growth_engagement = log(
+                    (current_engagement + 1e-6) / (prev_engagement + 1e-6)
+                ) / gap_days
+
+                # Volume compares two adjacent windows, so there is no gap to divide
+                # by. The +1 keeps a narrative that had no videos last window finite.
+                growth_video_count = log(
+                    (row["current_video_count"] + 1.0) / (row["prev_video_count"] + 1.0)
                 )
 
+                # Already a per-day log rate, weighted per video by its baseline views.
+                growth_views = row["growth_views"]
+
                 acceleration_rate = (
-                    change_engagement * ACCELERATION_ENGAGEMENT_WEIGHT
-                    + change_video_count * ACCELERATION_VIDEO_VOLUME_WEIGHT
-                    + change_views * ACCELERATION_VIEWS_WEIGHT
+                    growth_engagement * ACCELERATION_ENGAGEMENT_WEIGHT
+                    + growth_video_count * ACCELERATION_VIDEO_VOLUME_WEIGHT
+                    + growth_views * ACCELERATION_VIEWS_WEIGHT
                 )
                 records.append((
                     row["narrative_id"],
                     acceleration_rate,
                     NarrativeAnalysisIndicatorType.ACCELERATION_RATE,
                     {
-                        "change_engagement": change_engagement,
-                        "change_video_count": change_video_count,
-                        "change_views": change_views,
+                        "growth_engagement": growth_engagement,
+                        "growth_video_count": growth_video_count,
+                        "growth_views": growth_views,
                         "engagement_weight": ACCELERATION_ENGAGEMENT_WEIGHT,
                         "video_volume_weight": ACCELERATION_VIDEO_VOLUME_WEIGHT,
                         "views_weight": ACCELERATION_VIEWS_WEIGHT,
                         "paired_video_count": row["paired_video_count"],
+                        "baseline_views": row["prev_views"],
+                        "mean_gap_days": row["mean_gap_days"],
+                        "max_gap_days": row["max_gap_days"],
+                        # The growth happened at an unknown moment inside a long gap;
+                        # the rate is an average, not an observation. Say so.
+                        "stale_baseline": row["max_gap_days"] > ACCELERATION_STALE_BASELINE_DAYS,
                         "window_hours": hours,
                     },
                 ))

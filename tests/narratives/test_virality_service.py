@@ -15,6 +15,7 @@ Patrón de mock para el repo (async context manager):
     with patch.object(service, "repo", return_value=mock_cm):
         result = await service.<method>(...)
 """
+import math
 import uuid
 from datetime import date
 from unittest.mock import AsyncMock, MagicMock, call, patch
@@ -284,9 +285,12 @@ class TestCalculateCompositeViralityForDate:
 
 class TestCalculateAccelerationRateForDate:
     """
-    Weights: engagement=0.40, video_count=0.35, views=0.25
-    Engagement = (likes*1 + comments*5) / views
-    change_x = (current - prev) / prev  if prev > 0  else (1.0 if current > 0 else 0.0)
+    Weights: engagement=0.40, video_count=0.35, views=0.25.
+
+    Acceleration is a per-day log growth rate, not a percent change:
+        growth_engagement  = ln((E_cur + eps) / (E_prev + eps)) / mean_gap_days
+        growth_video_count = ln((n_cur + 1) / (n_prev + 1))          [adjacent windows]
+        growth_views       = supplied by the repo, already per-day and view-weighted
     """
 
     def _make_stats_row(
@@ -294,7 +298,7 @@ class TestCalculateAccelerationRateForDate:
         narrative_id,
         current_views, current_likes, current_comments, current_video_count,
         prev_views, prev_likes, prev_comments, prev_video_count,
-        paired_video_count=1.0,
+        growth_views=0.0, mean_gap_days=1.0, max_gap_days=1.0, paired_video_count=1.0,
     ) -> dict:
         return {
             "narrative_id": narrative_id,
@@ -306,122 +310,155 @@ class TestCalculateAccelerationRateForDate:
             "prev_likes": float(prev_likes),
             "prev_comments": float(prev_comments),
             "prev_video_count": float(prev_video_count),
+            "growth_views": float(growth_views),
+            "mean_gap_days": float(mean_gap_days),
+            "max_gap_days": float(max_gap_days),
             "paired_video_count": float(paired_video_count),
         }
+
+    async def _insert(self, narrative_service, rows):
+        mock_repo = AsyncMock()
+        mock_repo.get_bulk_narrative_stats_comparison.return_value = rows
+        with patch.object(narrative_service, "repo", return_value=_make_repo_cm(mock_repo)):
+            await narrative_service.calculate_acceleration_rate_for_date(date.today())
+        return mock_repo.bulk_insert_narrative_analysis_indicators.call_args[0][0], mock_repo
 
     async def test_acceleration_rate_normal_growth(self, narrative_service: NarrativeService):
         """
         prev:    views=100, likes=10, comments=2, videos=2
         current: views=200, likes=20, comments=4, videos=3
+        growth_views (from repo) = ln(2)/1 = 0.6931
 
-        prev_engagement    = (10*1 + 2*5) / 100 = 20/100 = 0.2
-        current_engagement = (20*1 + 4*5) / 200 = 40/200 = 0.2
-        change_engagement  = (0.2 - 0.2) / 0.2  = 0.0
-        change_video_count = (3 - 2) / 2         = 0.5
-        change_views       = (200 - 100) / 100   = 1.0
-        acceleration       = 0.0*0.40 + 0.5*0.35 + 1.0*0.25 = 0.425
+        E_prev = (10 + 2*5)/100 = 0.2 ; E_cur = (20 + 4*5)/200 = 0.2
+        growth_engagement  = ln(0.200001/0.200001) / 1 = 0.0
+        growth_video_count = ln(4/3)                   = 0.2877
+        acceleration = 0.0*0.40 + 0.2877*0.35 + 0.6931*0.25 = 0.2740
         """
-        narrative_id = uuid.uuid4()
-        row = self._make_stats_row(
-            narrative_id,
+        rows = [self._make_stats_row(
+            uuid.uuid4(),
             current_views=200, current_likes=20, current_comments=4, current_video_count=3,
             prev_views=100, prev_likes=10, prev_comments=2, prev_video_count=2,
-        )
-        mock_repo = AsyncMock()
-        mock_repo.get_bulk_narrative_stats_comparison.return_value = [row]
-
-        with patch.object(narrative_service, "repo", return_value=_make_repo_cm(mock_repo)):
-            await narrative_service.calculate_acceleration_rate_for_date(date.today())
-
-        inserted = mock_repo.bulk_insert_narrative_analysis_indicators.call_args[0][0]
+            growth_views=math.log(2.0),
+        )]
+        inserted, _ = await self._insert(narrative_service, rows)
         _, acceleration, indicator_type, _ = inserted[0]
         assert indicator_type == NarrativeAnalysisIndicatorType.ACCELERATION_RATE
-        assert acceleration == pytest.approx(0.425)
+        expected = 0.0 * 0.40 + math.log(4 / 3) * 0.35 + math.log(2.0) * 0.25
+        assert acceleration == pytest.approx(expected, abs=1e-4)
 
-    async def test_acceleration_rate_no_prev_data(self, narrative_service: NarrativeService):
-        """
-        prev all zeros → percent-change is undefined and treated as 0 (the old
-        1.0 fallback was dropped to stop conflating "freshly observed" with
-        "100% growth"). Each change = 0.0 → acceleration = 0.0.
-        """
-        narrative_id = uuid.uuid4()
-        row = self._make_stats_row(
-            narrative_id,
-            current_views=100, current_likes=5, current_comments=1, current_video_count=2,
-            prev_views=0, prev_likes=0, prev_comments=0, prev_video_count=0,
-        )
-        mock_repo = AsyncMock()
-        mock_repo.get_bulk_narrative_stats_comparison.return_value = [row]
-
-        with patch.object(narrative_service, "repo", return_value=_make_repo_cm(mock_repo)):
-            await narrative_service.calculate_acceleration_rate_for_date(date.today())
-
-        inserted = mock_repo.bulk_insert_narrative_analysis_indicators.call_args[0][0]
-        _, acceleration, _, _ = inserted[0]
-        assert acceleration == pytest.approx(0.0)
-
-    async def test_acceleration_rate_all_zeros(self, narrative_service: NarrativeService):
-        """All zeros → no change → acceleration = 0.0"""
-        narrative_id = uuid.uuid4()
-        row = self._make_stats_row(
-            narrative_id,
-            current_views=0, current_likes=0, current_comments=0, current_video_count=0,
-            prev_views=0, prev_likes=0, prev_comments=0, prev_video_count=0,
-        )
-        mock_repo = AsyncMock()
-        mock_repo.get_bulk_narrative_stats_comparison.return_value = [row]
-
-        with patch.object(narrative_service, "repo", return_value=_make_repo_cm(mock_repo)):
-            await narrative_service.calculate_acceleration_rate_for_date(date.today())
-
-        inserted = mock_repo.bulk_insert_narrative_analysis_indicators.call_args[0][0]
-        _, acceleration, _, _ = inserted[0]
-        assert acceleration == pytest.approx(0.0)
-
-    async def test_comparison_uses_trailing_window_not_calc_date(
+    async def test_gap_normalisation_divides_by_elapsed_days(
         self, narrative_service: NarrativeService
     ):
         """
-        The comparison must be anchored to a trailing window, never to calc_date —
-        that mismatch is what zeroed acceleration on the just-after-midnight run.
+        The same engagement jump over 10 days must score a tenth of the daily rate it
+        would over 1 day. Without this, a video re-scraped after weeks books all of
+        its accumulated growth as one day's surge — the false-early-surge bug.
         """
-        mock_repo = AsyncMock()
-        mock_repo.get_bulk_narrative_stats_comparison.return_value = []
+        one_day = self._make_stats_row(
+            uuid.uuid4(),
+            current_views=200, current_likes=40, current_comments=0, current_video_count=1,
+            prev_views=100, prev_likes=10, prev_comments=0, prev_video_count=1,
+            mean_gap_days=1.0,
+        )
+        ten_days = dict(one_day, narrative_id=uuid.uuid4(), mean_gap_days=10.0)
 
-        with patch.object(narrative_service, "repo", return_value=_make_repo_cm(mock_repo)):
-            await narrative_service.calculate_acceleration_rate_for_date(date.today(), hours=48)
+        inserted, _ = await self._insert(narrative_service, [one_day, ten_days])
+        _, accel_1d, _, _ = inserted[0]
+        _, accel_10d, _, _ = inserted[1]
 
-        mock_repo.get_bulk_narrative_stats_comparison.assert_awaited_once_with(48)
+        growth_1d = inserted[0][3]["growth_engagement"]
+        growth_10d = inserted[1][3]["growth_engagement"]
+        assert growth_10d == pytest.approx(growth_1d / 10.0, rel=1e-6)
+        assert accel_10d < accel_1d
+
+    async def test_no_cap_on_extreme_growth(self, narrative_service: NarrativeService):
+        """
+        A 10,000x jump used to pin change_views at ACCELERATION_CHANGE_CAP = 5.0,
+        which made the metric blind at the top: every saturated narrative tied.
+        Log growth keeps them ordered.
+
+        Likes scale with views so the engagement *ratio* holds steady — otherwise a
+        views explosion with flat likes is a collapsing engagement rate, and the
+        0.40-weighted engagement term correctly drags the score negative.
+        """
+        small = self._make_stats_row(
+            uuid.uuid4(), 1000, 100, 0, 1, 100, 10, 0, 1, growth_views=math.log(10.0)
+        )
+        huge = self._make_stats_row(
+            uuid.uuid4(), 1_000_000, 100_000, 0, 1, 100, 10, 0, 1,
+            growth_views=math.log(10_000.0),
+        )
+        inserted, _ = await self._insert(narrative_service, [small, huge])
+        assert inserted[0][3]["growth_engagement"] == pytest.approx(0.0, abs=1e-4)
+        assert inserted[1][3]["growth_engagement"] == pytest.approx(0.0, abs=1e-4)
+        assert inserted[1][1] > inserted[0][1]          # ordered, not tied at a cap
+        assert inserted[1][3]["growth_views"] == pytest.approx(math.log(10_000.0))
+
+    async def test_collapsing_engagement_drags_score_down(
+        self, narrative_service: NarrativeService
+    ):
+        """Views up 10,000x but likes flat: the engagement rate collapsed. Say so."""
+        rows = [self._make_stats_row(
+            uuid.uuid4(), 1_000_000, 10, 0, 1, 100, 1, 0, 1, growth_views=math.log(10_000.0)
+        )]
+        inserted, _ = await self._insert(narrative_service, rows)
+        assert inserted[0][3]["growth_engagement"] < 0
+        assert inserted[0][1] < 0
+
+    async def test_decline_is_negative_and_symmetric(self, narrative_service: NarrativeService):
+        """Halving is the exact negative of doubling — the old min() clamped only the top."""
+        doubling = self._make_stats_row(uuid.uuid4(), 200, 0, 0, 1, 100, 0, 0, 1,
+                                        growth_views=math.log(2.0))
+        halving = self._make_stats_row(uuid.uuid4(), 50, 0, 0, 1, 100, 0, 0, 1,
+                                       growth_views=math.log(0.5))
+        inserted, _ = await self._insert(narrative_service, [doubling, halving])
+        assert inserted[0][3]["growth_views"] == pytest.approx(-inserted[1][3]["growth_views"])
+        assert inserted[1][1] < 0
+
+    async def test_stale_baseline_is_flagged(self, narrative_service: NarrativeService):
+        """A long gap means the growth happened at an unknown time inside it."""
+        fresh = self._make_stats_row(uuid.uuid4(), 200, 0, 0, 1, 100, 0, 0, 1, max_gap_days=1.0)
+        stale = self._make_stats_row(uuid.uuid4(), 200, 0, 0, 1, 100, 0, 0, 1, max_gap_days=42.0)
+        inserted, _ = await self._insert(narrative_service, [fresh, stale])
+        assert inserted[0][3]["stale_baseline"] is False
+        assert inserted[1][3]["stale_baseline"] is True
+        assert inserted[1][3]["max_gap_days"] == 42.0
+
+    async def test_repo_receives_baseline_guards(self, narrative_service: NarrativeService):
+        """The min-baseline / max-age / min-gap guards belong to the query."""
+        _, mock_repo = await self._insert(narrative_service, [
+            self._make_stats_row(uuid.uuid4(), 200, 0, 0, 1, 100, 0, 0, 1)
+        ])
+        mock_repo.get_bulk_narrative_stats_comparison.assert_awaited_once_with(
+            hours=24, max_baseline_age_hours=720, min_baseline_views=100, min_gap_days=0.5
+        )
 
     async def test_percentile_is_stored_in_metadata(self, narrative_service: NarrativeService):
-        """
-        Acceleration is classified on its rank within the cohort, so every record
-        carries its PERCENT_RANK. Postgres semantics: min → 0.0, max → 1.0.
-        """
+        """Postgres PERCENT_RANK semantics: min -> 0.0, max -> 1.0."""
         rows = [
-            # change_views drives each: 0.0, 1.0, 3.0 → accel 0.0, 0.25, 0.75
-            self._make_stats_row(uuid.uuid4(), 100, 0, 0, 1, 100, 0, 0, 1),
-            self._make_stats_row(uuid.uuid4(), 200, 0, 0, 1, 100, 0, 0, 1),
-            self._make_stats_row(uuid.uuid4(), 400, 0, 0, 1, 100, 0, 0, 1),
+            self._make_stats_row(uuid.uuid4(), 100, 0, 0, 1, 100, 0, 0, 1, growth_views=0.0),
+            self._make_stats_row(uuid.uuid4(), 200, 0, 0, 1, 100, 0, 0, 1, growth_views=1.0),
+            self._make_stats_row(uuid.uuid4(), 400, 0, 0, 1, 100, 0, 0, 1, growth_views=3.0),
         ]
-        mock_repo = AsyncMock()
-        mock_repo.get_bulk_narrative_stats_comparison.return_value = rows
-
-        with patch.object(narrative_service, "repo", return_value=_make_repo_cm(mock_repo)):
-            await narrative_service.calculate_acceleration_rate_for_date(date.today())
-
-        inserted = mock_repo.bulk_insert_narrative_analysis_indicators.call_args[0][0]
+        inserted, _ = await self._insert(narrative_service, rows)
         percentiles = [metadata["percentile"] for _, _, _, metadata in inserted]
         assert percentiles == pytest.approx([0.0, 0.5, 1.0])
 
     async def test_percentile_ties_share_lowest_rank(self, narrative_service: NarrativeService):
-        """Ties get the same rank, as PERCENT_RANK does in SQL."""
         assert narrative_service._percent_ranks([5.0, 1.0, 1.0]) == pytest.approx([1.0, 0.0, 0.0])
 
     async def test_percentile_single_narrative_is_zero(self, narrative_service: NarrativeService):
-        """A lone row scores 0.0 in Postgres, not 1.0. Mirror that."""
         assert narrative_service._percent_ranks([7.3]) == [0.0]
         assert narrative_service._percent_ranks([]) == []
+
+    async def test_comparison_uses_trailing_window_not_calc_date(
+        self, narrative_service: NarrativeService
+    ):
+        mock_repo = AsyncMock()
+        mock_repo.get_bulk_narrative_stats_comparison.return_value = []
+        with patch.object(narrative_service, "repo", return_value=_make_repo_cm(mock_repo)):
+            await narrative_service.calculate_acceleration_rate_for_date(date.today(), hours=48)
+        assert mock_repo.get_bulk_narrative_stats_comparison.call_args.kwargs["hours"] == 48
 
 
 # ---------------------------------------------------------------------------

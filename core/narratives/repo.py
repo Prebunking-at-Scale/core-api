@@ -1907,37 +1907,53 @@ class NarrativeRepository:
             ],
         )
 
-    async def get_bulk_narrative_stats_comparison(self, hours: int = 24) -> list[dict]:
+    async def get_bulk_narrative_stats_comparison(
+        self,
+        hours: int = 24,
+        max_baseline_age_hours: int = 720,
+        min_baseline_views: int = 100,
+        min_gap_days: float = 0.5,
+    ) -> list[dict]:
         """
-        Compare each narrative's engagement over the trailing `hours` window against
-        the window immediately before it. Returns one row per narrative that has at
-        least one *comparable* video.
+        Compare each narrative's engagement in the trailing `hours` window against
+        each video's last known state before that window. Returns one row per
+        narrative with at least one comparable video and a meaningful baseline.
 
-        Both windows are anchored to NOW(), never to a calendar date. Anchoring the
+        Windows are anchored to NOW(), never to a calendar date. Anchoring the
         comparison to `calc_date` while narrative eligibility was anchored to NOW()
         meant the two never overlapped when the job ran shortly after midnight: at
-        00:04 the calendar day held almost no snapshots, so `current` and `previous`
+        00:04 the calendar day held almost no snapshots, so current and previous
         resolved to the same carried-forward row and every delta was exactly 0.
 
-        A video contributes engagement figures only if it has a snapshot in *both*
-        windows — otherwise the two sides are not comparable and carrying the last
-        known value forward would report growth of exactly 0 for a video nobody
-        looked at. Carry-forward is correct for cumulative totals; it is wrong for a
-        rate. A narrative with no such video is omitted entirely, so its acceleration
-        is absent rather than a confident zero.
+        A video contributes to the rates only if it was observed on both sides.
+        Carrying its last value forward into the current window is right for a
+        cumulative total and wrong for a rate: it reports growth of exactly 0 for a
+        video nobody looked at. A narrative with no comparable video is omitted, so
+        its acceleration is absent rather than a confident zero.
 
-        Video *counts* are taken per window rather than from the paired set, so that
-        a narrative gaining videos still registers volume growth.
+        The baseline is a video's latest snapshot *before* the current window,
+        however old (bounded by `max_baseline_age_hours`) — not merely one inside the
+        preceding window. Restricting it there discarded every video on a slower
+        scrape cadence, including the case this metric most wants to catch: a video
+        untouched for weeks that has suddenly jumped. We take it, and record how many
+        days the gap actually spans, so the caller can turn the change into a per-day
+        rate instead of booking six weeks of growth as one day's surge.
+
+        `growth_views` is therefore already a per-day log rate, weighted per video by
+        its baseline views so a 2-view video cannot outvote a 500k-view one. Summing
+        raw views first and taking the ratio afterwards — as this query used to — is
+        what let one small stale video dominate a narrative's score.
+
+        Video *counts* compare two adjacent equal-length windows rather than the wide
+        baseline: volume growth is a property of the window, not of any one video's
+        scrape history.
         """
         await self._session.execute(
             """
             WITH current_videos AS (
                 SELECT DISTINCT ON (cn.narrative_id, vs.video_id)
-                    cn.narrative_id,
-                    vs.video_id,
-                    vs.views,
-                    vs.likes,
-                    vs.comments
+                    cn.narrative_id, vs.video_id,
+                    vs.views, vs.likes, vs.comments, vs.recorded_at
                 FROM video_stats vs
                 JOIN videos v ON vs.video_id = v.id
                 JOIN video_claims c ON v.id = c.video_id
@@ -1945,46 +1961,72 @@ class NarrativeRepository:
                 WHERE vs.recorded_at > NOW() - make_interval(hours => %(hours)s)
                 ORDER BY cn.narrative_id, vs.video_id, vs.recorded_at DESC
             ),
-            previous_videos AS (
+            baseline_videos AS (
+                -- latest snapshot before the current window, however old
                 SELECT DISTINCT ON (cn.narrative_id, vs.video_id)
-                    cn.narrative_id,
-                    vs.video_id,
-                    vs.views,
-                    vs.likes,
-                    vs.comments
+                    cn.narrative_id, vs.video_id,
+                    vs.views, vs.likes, vs.comments, vs.recorded_at
+                FROM video_stats vs
+                JOIN videos v ON vs.video_id = v.id
+                JOIN video_claims c ON v.id = c.video_id
+                JOIN claim_narratives cn ON c.id = cn.claim_id
+                WHERE vs.recorded_at <= NOW() - make_interval(hours => %(hours)s)
+                  AND vs.recorded_at >  NOW() - make_interval(hours => %(max_baseline_age_hours)s)
+                ORDER BY cn.narrative_id, vs.video_id, vs.recorded_at DESC
+            ),
+            previous_window_videos AS (
+                -- the immediately preceding equal-length window, for volume only
+                SELECT DISTINCT cn.narrative_id, vs.video_id
                 FROM video_stats vs
                 JOIN videos v ON vs.video_id = v.id
                 JOIN video_claims c ON v.id = c.video_id
                 JOIN claim_narratives cn ON c.id = cn.claim_id
                 WHERE vs.recorded_at >  NOW() - make_interval(hours => %(prev_hours)s)
                   AND vs.recorded_at <= NOW() - make_interval(hours => %(hours)s)
-                ORDER BY cn.narrative_id, vs.video_id, vs.recorded_at DESC
             ),
             paired AS (
                 SELECT
                     c.narrative_id,
-                    c.video_id,
                     c.views    AS current_views,
                     c.likes    AS current_likes,
                     c.comments AS current_comments,
-                    p.views    AS prev_views,
-                    p.likes    AS prev_likes,
-                    p.comments AS prev_comments
+                    b.views    AS prev_views,
+                    b.likes    AS prev_likes,
+                    b.comments AS prev_comments,
+                    EXTRACT(EPOCH FROM (c.recorded_at - b.recorded_at)) / 86400.0 AS raw_gap_days,
+                    GREATEST(
+                        EXTRACT(EPOCH FROM (c.recorded_at - b.recorded_at)) / 86400.0,
+                        %(min_gap_days)s
+                    ) AS gap_days
                 FROM current_videos c
-                JOIN previous_videos p USING (narrative_id, video_id)
+                JOIN baseline_videos b USING (narrative_id, video_id)
             ),
-            paired_stats AS (
+            per_video AS (
+                SELECT *,
+                    LN((current_views + 1.0) / (prev_views + 1.0)) / gap_days AS growth_views
+                FROM paired
+            ),
+            aggregated AS (
                 SELECT
                     narrative_id,
-                    COUNT(*)::float                        AS paired_video_count,
+                    COUNT(*)::float                           AS paired_video_count,
                     COALESCE(SUM(current_views), 0)::float    AS current_views,
                     COALESCE(SUM(current_likes), 0)::float    AS current_likes,
                     COALESCE(SUM(current_comments), 0)::float AS current_comments,
                     COALESCE(SUM(prev_views), 0)::float       AS prev_views,
                     COALESCE(SUM(prev_likes), 0)::float       AS prev_likes,
-                    COALESCE(SUM(prev_comments), 0)::float    AS prev_comments
-                FROM paired
+                    COALESCE(SUM(prev_comments), 0)::float    AS prev_comments,
+                    -- baseline-weighted: a 2-view video cannot outvote a 500k-view one
+                    (CASE WHEN SUM(prev_views) > 0
+                          THEN SUM(prev_views * growth_views) / SUM(prev_views)
+                          ELSE AVG(growth_views) END)::float  AS growth_views,
+                    (CASE WHEN SUM(prev_views) > 0
+                          THEN SUM(prev_views * gap_days) / SUM(prev_views)
+                          ELSE AVG(gap_days) END)::float      AS mean_gap_days,
+                    MAX(raw_gap_days)::float                  AS max_gap_days
+                FROM per_video
                 GROUP BY narrative_id
+                HAVING SUM(prev_views) >= %(min_baseline_views)s
             ),
             current_counts AS (
                 SELECT narrative_id, COUNT(*)::float AS video_count
@@ -1992,24 +2034,33 @@ class NarrativeRepository:
             ),
             previous_counts AS (
                 SELECT narrative_id, COUNT(*)::float AS video_count
-                FROM previous_videos GROUP BY narrative_id
+                FROM previous_window_videos GROUP BY narrative_id
             )
             SELECT
-                ps.narrative_id,
-                ps.paired_video_count,
+                a.narrative_id,
+                a.paired_video_count,
+                a.growth_views,
+                a.mean_gap_days,
+                a.max_gap_days,
                 COALESCE(cc.video_count, 0)::float AS current_video_count,
-                ps.current_views,
-                ps.current_likes,
-                ps.current_comments,
+                a.current_views,
+                a.current_likes,
+                a.current_comments,
                 COALESCE(pc.video_count, 0)::float AS prev_video_count,
-                ps.prev_views,
-                ps.prev_likes,
-                ps.prev_comments
-            FROM paired_stats ps
-            LEFT JOIN current_counts  cc ON cc.narrative_id = ps.narrative_id
-            LEFT JOIN previous_counts pc ON pc.narrative_id = ps.narrative_id
+                a.prev_views,
+                a.prev_likes,
+                a.prev_comments
+            FROM aggregated a
+            LEFT JOIN current_counts  cc ON cc.narrative_id = a.narrative_id
+            LEFT JOIN previous_counts pc ON pc.narrative_id = a.narrative_id
             """,
-            {"hours": hours, "prev_hours": 2 * hours},
+            {
+                "hours": hours,
+                "prev_hours": 2 * hours,
+                "max_baseline_age_hours": max_baseline_age_hours,
+                "min_baseline_views": min_baseline_views,
+                "min_gap_days": min_gap_days,
+            },
         )
         return await self._session.fetchall()
 

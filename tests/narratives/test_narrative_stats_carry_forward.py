@@ -1,12 +1,22 @@
-"""DB-backed tests for the carry-forward behaviour of the narrative stats queries.
+"""DB-backed tests for how the narrative stats queries handle sparse scraping.
 
 video_stats is scraped sparsely: a video is not guaranteed to have a row on every
-calendar day. These tests build a tiny narrative with deliberately gappy snapshots
-and assert that the queries carry each video's last-known snapshot forward, rather
-than treating a missing day as zero engagement (the bug raised in PR review).
+calendar day. These tests build tiny narratives with deliberately gappy snapshots.
+
+Cumulative *totals* must carry each video's last-known snapshot forward, rather than
+treating a missing day as zero engagement (the bug raised in PR review).
+
+*Rates* must not: acceleration compares a video's current snapshot against its last
+known one, records how many days actually elapsed, and divides — so a video untouched
+for weeks is still comparable, but its accumulated growth is not booked as one day's
+surge. A video with no baseline at all yields no row, so acceleration is absent rather
+than a confident zero.
 """
 
+import math
 from uuid import UUID, uuid4
+
+import pytest
 
 from core.narratives.repo import NarrativeRepository
 
@@ -103,53 +113,148 @@ async def _insert_stat(cur, video_id: UUID, views: int, hours_ago: int) -> None:
     )
 
 
-async def test_bulk_comparison_only_sums_videos_present_in_both_windows(conn_factory):
-    """Engagement is a rate, so both endpoints must be observed.
+async def test_bulk_comparison_only_sums_videos_observed_on_both_sides(conn_factory):
+    """A rate needs two real measurements of the same video.
 
-    A is snapshotted in both the current (0-24h) and previous (24-48h) window, so it
-    is comparable. B only appears in the previous window and C only in the current
-    one — neither can yield a rate, so both are excluded from the sums. Carrying them
-    forward instead would let a video nobody re-scraped report growth of exactly 0,
-    and (worse) a current-only video would compare against a baseline of 0 and invent
-    an unbounded acceleration.
+    A has a snapshot in the current window and an older baseline, so it is comparable.
+    C appears only in the current window — no baseline exists, so it cannot yield a
+    rate and is excluded from the sums. Carrying C forward would compare it against
+    itself (growth exactly 0) or, worse, against a baseline of 0 (unbounded growth).
 
-    Video *counts* are still taken per window, so volume growth stays visible.
+    Video *counts* still come from the two adjacent windows, so volume growth stays
+    visible even though C contributes no engagement figures.
     """
     async with conn_factory() as conn:
         cur = conn.cursor()
         narrative_id = await _make_narrative(cur)
         a = await _insert_video(cur, views_by_date={})
-        b = await _insert_video(cur, views_by_date={})
         c = await _insert_video(cur, views_by_date={})
-        await _insert_stat(cur, a, 100, hours_ago=36)   # previous window
-        await _insert_stat(cur, a, 300, hours_ago=2)    # current window  → paired
-        await _insert_stat(cur, b, 50, hours_ago=36)    # previous only
-        await _insert_stat(cur, c, 70, hours_ago=2)     # current only
-        await _link_videos_to_narrative(cur, narrative_id, [a, b, c])
+        await _insert_stat(cur, a, 1000, hours_ago=36)   # baseline
+        await _insert_stat(cur, a, 2000, hours_ago=2)    # current  -> comparable
+        await _insert_stat(cur, c, 700, hours_ago=2)     # current only, no baseline
+        await _link_videos_to_narrative(cur, narrative_id, [a, c])
 
         repo = NarrativeRepository(conn.cursor())
         rows = await repo.get_bulk_narrative_stats_comparison(hours=24)
 
     row = next(r for r in rows if r["narrative_id"] == narrative_id)
     assert row["paired_video_count"] == 1
-    assert row["current_views"] == 300   # A only — not 370
-    assert row["prev_views"] == 100      # A only — not 150
+    assert row["current_views"] == 2000   # A only — not 2700
+    assert row["prev_views"] == 1000
     assert row["current_video_count"] == 2   # A and C
-    assert row["prev_video_count"] == 2      # A and B
+    assert row["prev_video_count"] == 1      # A only
 
 
-async def test_bulk_comparison_omits_narratives_with_no_comparable_video(conn_factory):
-    """No paired video → no row at all, so acceleration is absent rather than 0.0.
+async def test_bulk_comparison_accepts_a_baseline_older_than_the_previous_window(conn_factory):
+    """A video untouched for weeks that suddenly jumps must still be comparable.
 
-    The old query emitted every narrative via a FULL OUTER JOIN, so a narrative with
-    nothing to compare scored a confident zero and was classified on it.
+    Requiring the baseline to sit inside the immediately-preceding window discarded
+    exactly this narrative — the one the metric most wants to catch. The gap is
+    reported so the caller can turn the change into a per-day rate.
     """
     async with conn_factory() as conn:
         cur = conn.cursor()
         narrative_id = await _make_narrative(cur)
-        stale = await _insert_video(cur, views_by_date={})
-        await _insert_stat(cur, stale, 500, hours_ago=200)   # outside both windows
-        await _link_videos_to_narrative(cur, narrative_id, [stale])
+        v = await _insert_video(cur, views_by_date={})
+        await _insert_stat(cur, v, 1000, hours_ago=24 * 20)   # 20 days ago
+        await _insert_stat(cur, v, 8000, hours_ago=2)         # just re-scraped
+        await _link_videos_to_narrative(cur, narrative_id, [v])
+
+        repo = NarrativeRepository(conn.cursor())
+        rows = await repo.get_bulk_narrative_stats_comparison(hours=24)
+
+    row = next(r for r in rows if r["narrative_id"] == narrative_id)
+    assert row["prev_views"] == 1000
+    assert row["current_views"] == 8000
+    gap = 20 - 2 / 24
+    assert row["max_gap_days"] == pytest.approx(gap, abs=0.05)
+    # 8x growth spread over ~20 days, not booked as one day's surge
+    assert row["growth_views"] == pytest.approx(math.log(8001 / 1001) / gap, rel=0.02)
+
+
+async def test_bulk_comparison_baseline_at_the_age_limit_is_excluded(conn_factory):
+    """The age bound is strict: a baseline exactly `max_baseline_age_hours` old is out."""
+    async with conn_factory() as conn:
+        cur = conn.cursor()
+        narrative_id = await _make_narrative(cur)
+        v = await _insert_video(cur, views_by_date={})
+        await _insert_stat(cur, v, 1000, hours_ago=720)   # exactly the limit
+        await _insert_stat(cur, v, 8000, hours_ago=2)
+        await _link_videos_to_narrative(cur, narrative_id, [v])
+
+        repo = NarrativeRepository(conn.cursor())
+        rows = await repo.get_bulk_narrative_stats_comparison(hours=24, max_baseline_age_hours=720)
+
+    assert all(r["narrative_id"] != narrative_id for r in rows)
+
+
+async def test_bulk_comparison_rejects_baselines_beyond_the_age_limit(conn_factory):
+    """Past the age limit the narrative is unscoreable rather than wrong."""
+    async with conn_factory() as conn:
+        cur = conn.cursor()
+        narrative_id = await _make_narrative(cur)
+        v = await _insert_video(cur, views_by_date={})
+        await _insert_stat(cur, v, 1000, hours_ago=24 * 40)   # 40 days — beyond 30
+        await _insert_stat(cur, v, 8000, hours_ago=2)
+        await _link_videos_to_narrative(cur, narrative_id, [v])
+
+        repo = NarrativeRepository(conn.cursor())
+        rows = await repo.get_bulk_narrative_stats_comparison(hours=24, max_baseline_age_hours=720)
+
+    assert all(r["narrative_id"] != narrative_id for r in rows)
+
+
+async def test_bulk_comparison_rejects_tiny_baselines(conn_factory):
+    """2 -> 12 views is not a 500% surge; it is noise."""
+    async with conn_factory() as conn:
+        cur = conn.cursor()
+        narrative_id = await _make_narrative(cur)
+        v = await _insert_video(cur, views_by_date={})
+        await _insert_stat(cur, v, 2, hours_ago=36)
+        await _insert_stat(cur, v, 12, hours_ago=2)
+        await _link_videos_to_narrative(cur, narrative_id, [v])
+
+        repo = NarrativeRepository(conn.cursor())
+        rows = await repo.get_bulk_narrative_stats_comparison(hours=24, min_baseline_views=100)
+
+    assert all(r["narrative_id"] != narrative_id for r in rows)
+
+
+async def test_bulk_comparison_weights_growth_by_baseline_views(conn_factory):
+    """A 2-view video must not outvote a 500k-view one.
+
+    The old query summed raw views first and took the ratio after, so one tiny stale
+    video could dominate a narrative's score. Per-video growth, weighted by baseline
+    views, makes the big video decide.
+    """
+    async with conn_factory() as conn:
+        cur = conn.cursor()
+        narrative_id = await _make_narrative(cur)
+        big = await _insert_video(cur, views_by_date={})
+        tiny = await _insert_video(cur, views_by_date={})
+        await _insert_stat(cur, big, 500_000, hours_ago=36)
+        await _insert_stat(cur, big, 505_000, hours_ago=2)    # +1%
+        await _insert_stat(cur, tiny, 2, hours_ago=36)
+        await _insert_stat(cur, tiny, 2000, hours_ago=2)      # +100000%
+        await _link_videos_to_narrative(cur, narrative_id, [big, tiny])
+
+        repo = NarrativeRepository(conn.cursor())
+        rows = await repo.get_bulk_narrative_stats_comparison(hours=24)
+
+    row = next(r for r in rows if r["narrative_id"] == narrative_id)
+    assert row["paired_video_count"] == 2
+    # The big video's ~1% growth dominates; the tiny video's blow-up barely registers.
+    assert row["growth_views"] < 0.05
+
+
+async def test_bulk_comparison_omits_narratives_with_no_comparable_video(conn_factory):
+    """No baseline at all -> no row, so acceleration is absent rather than 0.0."""
+    async with conn_factory() as conn:
+        cur = conn.cursor()
+        narrative_id = await _make_narrative(cur)
+        fresh = await _insert_video(cur, views_by_date={})
+        await _insert_stat(cur, fresh, 5000, hours_ago=2)   # only ever seen once
+        await _link_videos_to_narrative(cur, narrative_id, [fresh])
 
         repo = NarrativeRepository(conn.cursor())
         rows = await repo.get_bulk_narrative_stats_comparison(hours=24)
@@ -158,10 +263,11 @@ async def test_bulk_comparison_omits_narratives_with_no_comparable_video(conn_fa
 
 
 async def test_bulk_comparison_window_is_relative_to_now_not_a_calendar_day(conn_factory):
-    """A snapshot 2h old and one 36h old pair up even when they straddle midnight.
+    """Snapshots 2h and 36h old pair up even when they straddle midnight.
 
-    Under the calendar-day comparison this narrative scored exactly 0 whenever the job
-    ran shortly after midnight: both sides resolved to the same carried-forward row.
+    Under the calendar-day comparison this narrative scored exactly 0 whenever the
+    job ran shortly after midnight: both sides resolved to the same carried-forward
+    row.
     """
     async with conn_factory() as conn:
         cur = conn.cursor()
@@ -177,6 +283,7 @@ async def test_bulk_comparison_window_is_relative_to_now_not_a_calendar_day(conn
     row = next(r for r in rows if r["narrative_id"] == narrative_id)
     assert row["current_views"] == 2000
     assert row["prev_views"] == 1000
+    assert row["growth_views"] > 0
 
 
 async def test_delta_for_period_baselines_on_pre_window_snapshot(conn_factory):
