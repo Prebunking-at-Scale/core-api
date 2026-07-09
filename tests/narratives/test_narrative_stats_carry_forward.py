@@ -138,8 +138,11 @@ async def test_bulk_comparison_counts_a_brand_new_video_as_growth(conn_factory):
     assert row["new_video_count"] == 1
     assert row["prev_views"] == 1000
     assert row["current_views"] == 6100          # 1100 + 5000
+    # A's 100 views over its own 34h gap, plus N's 5000 spread across the window,
+    # as a fraction of the narrative's known baseline of 1000.
     gap = 34 / 24
-    assert row["growth_views"] == pytest.approx(math.log(6101 / 1001) / gap, rel=0.02)
+    daily_gain = 100 / gap + 5000 / 1.0
+    assert row["growth_views"] == pytest.approx(math.log(1 + daily_gain / 1000), rel=0.02)
 
 
 async def test_bulk_comparison_drops_an_unobserved_video_rather_than_calling_it_new(conn_factory):
@@ -219,8 +222,40 @@ async def test_bulk_comparison_accepts_a_baseline_older_than_the_previous_window
     assert row["current_views"] == 8000
     gap = 20 - 2 / 24
     assert row["max_gap_days"] == pytest.approx(gap, abs=0.05)
-    # 8x growth spread over ~20 days, not booked as one day's surge
-    assert row["growth_views"] == pytest.approx(math.log(8001 / 1001) / gap, rel=0.02)
+    # 7000 views gained over ~20 days, not booked as one day's surge
+    assert row["growth_views"] == pytest.approx(math.log(1 + (7000 / gap) / 1000), rel=0.02)
+
+
+async def test_bulk_comparison_divides_each_video_by_its_own_gap(conn_factory):
+    """The same gain over a longer gap is a slower rate.
+
+    Two narratives each gain exactly 1000 views. One was last seen 34 hours ago, the
+    other 28 days ago. Dividing by a narrative-wide average, or not dividing at all,
+    would score them identically — which is how a re-scrape after weeks used to
+    masquerade as a surge.
+    """
+    async with conn_factory() as conn:
+        cur = conn.cursor()
+        fresh_id = await _make_narrative(cur)
+        stale_id = await _make_narrative(cur)
+        fresh = await _insert_video(cur, views_by_date={})
+        stale = await _insert_video(cur, views_by_date={})
+        await _insert_stat(cur, fresh, 1000, hours_ago=36)
+        await _insert_stat(cur, fresh, 2000, hours_ago=2)
+        await _insert_stat(cur, stale, 1000, hours_ago=24 * 28)
+        await _insert_stat(cur, stale, 2000, hours_ago=2)
+        await _link_videos_to_narrative(cur, fresh_id, [fresh])
+        await _link_videos_to_narrative(cur, stale_id, [stale])
+
+        repo = NarrativeRepository(conn.cursor())
+        rows = await repo.get_bulk_narrative_stats_comparison(hours=24)
+
+    fresh_row = next(r for r in rows if r["narrative_id"] == fresh_id)
+    stale_row = next(r for r in rows if r["narrative_id"] == stale_id)
+    assert fresh_row["current_views"] == stale_row["current_views"] == 2000
+    assert fresh_row["growth_views"] > 10 * stale_row["growth_views"]
+    assert fresh_row["growth_views"] == pytest.approx(math.log(1 + (1000 / (34 / 24)) / 1000), rel=0.02)
+    assert stale_row["growth_views"] == pytest.approx(math.log(1 + (1000 / (28 - 2 / 24)) / 1000), rel=0.02)
 
 
 async def test_bulk_comparison_baseline_at_the_age_limit_is_excluded(conn_factory):

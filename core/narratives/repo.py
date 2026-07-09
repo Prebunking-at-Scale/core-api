@@ -1947,11 +1947,14 @@ class NarrativeRepository:
           It is dropped, and if a narrative has no comparable video it is omitted
           entirely, so its acceleration is absent rather than a confident zero.
 
-        Growth is summed at the narrative level and only then turned into a ratio, so
-        a video's influence is proportional to the views it actually carries: a
-        2-view video cannot outvote a 500k-view one. `growth_views` is returned as a
-        per-day log rate — log growth is additive over time, which is what makes
-        dividing by the elapsed gap a real daily rate rather than an approximation.
+        Each video's gain is divided by *its own* gap, not by an average across the
+        narrative: a video last seen 40 days ago gained those views over 40 days. The
+        per-video daily gains are then summed and expressed as a fraction of the
+        narrative's known baseline. Summing in absolute views means a video's
+        influence is proportional to the views it actually carries — a 2-view video
+        cannot outvote a 500k-view one — and the log keeps the tail bounded without a
+        cap. A new video's stats are spread across the window we first saw them in,
+        because a video's clock starts when it was scraped, not when it was uploaded.
 
         Video *counts* compare two adjacent equal-length windows, since volume growth
         is a property of the window rather than of any one video's scrape history.
@@ -2005,13 +2008,23 @@ class NarrativeRepository:
                     GREATEST(
                         EXTRACT(EPOCH FROM (c.recorded_at - b.recorded_at)) / 86400.0,
                         %(min_gap_days)s
-                    ) AS gap_days
+                    ) AS gap_days,
+                    -- each video's gain spread over its OWN gap, not the narrative's
+                    -- average: a video last seen 40 days ago gained over 40 days.
+                    (c.views - b.views) / GREATEST(
+                        EXTRACT(EPOCH FROM (c.recorded_at - b.recorded_at)) / 86400.0,
+                        %(min_gap_days)s
+                    ) AS view_rate
                 FROM current_videos c
                 JOIN baseline_videos b USING (narrative_id, video_id)
             ),
             new_videos AS (
-                -- never seen before the window: baseline is genuinely zero
-                SELECT c.narrative_id, c.views, c.likes, c.comments
+                -- Never seen before the window, so the narrative did not have these
+                -- stats before and has gained them now. A video's clock starts when it
+                -- was first scraped, not when it was uploaded: we observed the views
+                -- arriving in this window, so they are spread across this window.
+                SELECT c.narrative_id, c.views, c.likes, c.comments,
+                       c.views / (%(hours)s / 24.0) AS view_rate
                 FROM current_videos c
                 WHERE NOT EXISTS (
                     SELECT 1 FROM video_stats older
@@ -2030,6 +2043,7 @@ class NarrativeRepository:
                     COALESCE(SUM(prev_likes), 0)::float       AS prev_likes,
                     COALESCE(SUM(prev_comments), 0)::float    AS prev_comments,
                     -- representative gap, weighted by the views each baseline carries
+                    COALESCE(SUM(view_rate), 0)::float        AS view_rate_sum,
                     (CASE WHEN SUM(prev_views) > 0
                           THEN SUM(prev_views * gap_days) / SUM(prev_views)
                           ELSE AVG(gap_days) END)::float      AS mean_gap_days,
@@ -2041,10 +2055,11 @@ class NarrativeRepository:
             new_stats AS (
                 SELECT
                     narrative_id,
-                    COUNT(*)::float                   AS new_video_count,
-                    COALESCE(SUM(views), 0)::float    AS views,
-                    COALESCE(SUM(likes), 0)::float    AS likes,
-                    COALESCE(SUM(comments), 0)::float AS comments
+                    COUNT(*)::float                     AS new_video_count,
+                    COALESCE(SUM(views), 0)::float      AS views,
+                    COALESCE(SUM(likes), 0)::float      AS likes,
+                    COALESCE(SUM(comments), 0)::float   AS comments,
+                    COALESCE(SUM(view_rate), 0)::float  AS view_rate_sum
                 FROM new_videos GROUP BY narrative_id
             ),
             current_counts AS (
@@ -2070,10 +2085,13 @@ class NarrativeRepository:
                 cs.prev_views,
                 cs.prev_likes,
                 cs.prev_comments,
-                (
-                    LN((cs.current_views + COALESCE(ns.views, 0) + 1.0) / (cs.prev_views + 1.0))
-                    / cs.mean_gap_days
-                )::float AS growth_views
+                -- Sum of per-video daily gains, expressed as a fraction of the
+                -- narrative's known baseline, in log space. Each video is already
+                -- normalised by its own gap, so there is nothing left to divide by.
+                LN(GREATEST(
+                    1.0 + (cs.view_rate_sum + COALESCE(ns.view_rate_sum, 0)) / cs.prev_views,
+                    1e-9
+                ))::float AS growth_views
             FROM comparable_stats cs
             LEFT JOIN new_stats       ns ON ns.narrative_id = cs.narrative_id
             LEFT JOIN current_counts  cc ON cc.narrative_id = cs.narrative_id
