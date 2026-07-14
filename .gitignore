@@ -208,3 +208,6 @@ db_backup_*.sql
 # Ad-hoc downloaded media / transcripts
 *.webm
 *_transcript.json
+
+# Migrations pending manual execution on production (not run automatically)
+manual-migrations/
