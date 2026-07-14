@@ -52,6 +52,37 @@ SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 NARRATIVES_BASE_URL = os.environ.get("NARRATIVES_BASE_ENDPOINT")
 NARRATIVES_API_KEY = os.environ.get("NARRATIVES_API_KEY")
 
+"""narrative virality / analysis indicator tuning
+
+Weights and thresholds for the virality and acceleration indicators. Read from the
+environment so a deployment can retune them without a code change; the defaults are
+the production values. Composite and acceleration weights must each sum to 1.
+"""
+# Composite virality score weights (must sum to 1)
+COMPOSITE_ENGAGEMENT_WEIGHT = float(os.environ.get("COMPOSITE_ENGAGEMENT_WEIGHT", "0.50"))
+COMPOSITE_REACH_WEIGHT = float(os.environ.get("COMPOSITE_REACH_WEIGHT", "0.30"))
+COMPOSITE_VELOCITY_WEIGHT = float(os.environ.get("COMPOSITE_VELOCITY_WEIGHT", "0.20"))
+
+# Acceleration rate score weights (must sum to 1)
+ACCELERATION_ENGAGEMENT_WEIGHT = float(os.environ.get("ACCELERATION_ENGAGEMENT_WEIGHT", "0.40"))
+ACCELERATION_VIDEO_VOLUME_WEIGHT = float(os.environ.get("ACCELERATION_VIDEO_VOLUME_WEIGHT", "0.35"))
+ACCELERATION_VIEWS_WEIGHT = float(os.environ.get("ACCELERATION_VIEWS_WEIGHT", "0.25"))
+
+# Hard cap on individual change_* components inside acceleration_rate.
+# Without it, a single video going from 1 → 10k views (change=9999) drowns
+# the weighted sum and makes the per-dimension weights meaningless.
+ACCELERATION_CHANGE_CAP = float(os.environ.get("ACCELERATION_CHANGE_CAP", "5.0"))
+
+# Alert-level percentile thresholds. Both indicators are classified by their
+# PERCENT_RANK within the run's cohort, never by their raw values, so each threshold
+# means a knowable fraction of that cohort. See
+# NarrativeService.update_narrative_alert_levels for the classification.
+COMPOSITE_PERCENTILE_VIRAL = float(os.environ.get("COMPOSITE_PERCENTILE_VIRAL", "0.95"))
+COMPOSITE_PERCENTILE_EARLY_SURGE_MAX = float(os.environ.get("COMPOSITE_PERCENTILE_EARLY_SURGE_MAX", "0.50"))
+COMPOSITE_PERCENTILE_WATCH_MIN = float(os.environ.get("COMPOSITE_PERCENTILE_WATCH_MIN", "0.70"))
+ACCELERATION_PERCENTILE_SURGE = float(os.environ.get("ACCELERATION_PERCENTILE_SURGE", "0.95"))
+ACCELERATION_PERCENTILE_WATCH_MIN = float(os.environ.get("ACCELERATION_PERCENTILE_WATCH_MIN", "0.70"))
+
 """internationalisation"""
 i18n.set("file_format", "json")
 i18n.set("filename_format", "{locale}.{format}")
