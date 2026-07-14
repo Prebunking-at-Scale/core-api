@@ -9,6 +9,7 @@ from psycopg.types.json import Jsonb
 from core.errors import ConflictError
 from core.models import Claim, Entity, Narrative, NarrativeAlertLevel, Topic, Video
 from core.narratives.models import (
+    IndicatorPayload,
     NarrativeAnalysisIndicatorType,
     NarrativeDetail,
     NarrativeListItem,
@@ -1991,7 +1992,7 @@ class NarrativeRepository:
 
     async def get_bulk_analysis_indicators_for_date(
         self, calc_date: date
-    ) -> dict[UUID, dict[str, dict[str, Any]]]:
+    ) -> dict[UUID, dict[str, IndicatorPayload]]:
         """
         Get the latest composite_virality and acceleration_rate per narrative for a given date.
         Returns narrative_id → {indicator_type: {"value": float, "metadata": dict}}.
@@ -2015,7 +2016,7 @@ class NarrativeRepository:
             {"calc_date": calc_date},
         )
         rows = await self._session.fetchall()
-        result: dict[UUID, dict[str, dict[str, Any]]] = {}
+        result: dict[UUID, dict[str, IndicatorPayload]] = {}
         for row in rows:
             result.setdefault(row["narrative_id"], {})[row["indicator_type"]] = {
                 "value": row["indicator_value"],
