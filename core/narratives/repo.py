@@ -9,6 +9,7 @@ from psycopg.types.json import Jsonb
 from core.errors import ConflictError
 from core.models import Claim, Entity, Narrative, NarrativeAlertLevel, Topic, Video
 from core.narratives.models import (
+    IndicatorPayload,
     NarrativeAnalysisIndicatorType,
     NarrativeDetail,
     NarrativeListItem,
@@ -1991,17 +1992,22 @@ class NarrativeRepository:
 
     async def get_bulk_analysis_indicators_for_date(
         self, calc_date: date
-    ) -> dict[UUID, dict[str, float]]:
+    ) -> dict[UUID, dict[str, IndicatorPayload]]:
         """
         Get the latest composite_virality and acceleration_rate per narrative for a given date.
-        Returns a dict keyed by narrative_id → {indicator_type: indicator_value}.
+        Returns narrative_id → {indicator_type: {"value": float, "metadata": dict}}.
+
+        The metadata is carried because both indicators are classified on their
+        percentile rank within the run's cohort, which lives there rather than in
+        indicator_value.
         """
         await self._session.execute(
             """
             SELECT DISTINCT ON (narrative_id, indicator_type)
                 narrative_id,
                 indicator_type,
-                indicator_value
+                indicator_value,
+                metadata
             FROM narrative_analysis_indicators
             WHERE calculated_at::date = %(calc_date)s
               AND indicator_type IN ('composite_virality', 'acceleration_rate')
@@ -2010,10 +2016,35 @@ class NarrativeRepository:
             {"calc_date": calc_date},
         )
         rows = await self._session.fetchall()
-        result: dict[UUID, dict[str, float]] = {}
+        result: dict[UUID, dict[str, IndicatorPayload]] = {}
         for row in rows:
-            result.setdefault(row["narrative_id"], {})[row["indicator_type"]] = row["indicator_value"]
+            result.setdefault(row["narrative_id"], {})[row["indicator_type"]] = {
+                "value": row["indicator_value"],
+                "metadata": row["metadata"] or {},
+            }
         return result
+
+    async def clear_alert_levels_except(self, narrative_ids: list[UUID]) -> None:
+        """
+        Null out alert_level for every narrative outside `narrative_ids`.
+
+        A narrative that could not be scored this run — missing either indicator —
+        must not keep yesterday's badge. NULL means "not scoreable", which is distinct
+        from the NONE level meaning "scored, nothing notable". Callers must not pass an
+        empty list: that would clear every badge in the table, which is what a failed
+        run looks like.
+        """
+        if not narrative_ids:
+            return
+        await self._session.execute(
+            """
+            UPDATE narratives
+            SET alert_level = NULL, updated_at = NOW()
+            WHERE alert_level IS NOT NULL
+              AND NOT (id = ANY(%(narrative_ids)s))
+            """,
+            {"narrative_ids": narrative_ids},
+        )
 
     async def bulk_update_narrative_alert_levels(
         self, records: list[tuple[UUID, NarrativeAlertLevel]]
