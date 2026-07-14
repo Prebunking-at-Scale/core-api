@@ -4,6 +4,20 @@ from datetime import date, datetime
 from typing import Any, AsyncContextManager, Callable
 from uuid import UUID
 
+from core.config import (
+    ACCELERATION_CHANGE_CAP,
+    ACCELERATION_ENGAGEMENT_WEIGHT,
+    ACCELERATION_PERCENTILE_SURGE,
+    ACCELERATION_PERCENTILE_WATCH_MIN,
+    ACCELERATION_VIDEO_VOLUME_WEIGHT,
+    ACCELERATION_VIEWS_WEIGHT,
+    COMPOSITE_ENGAGEMENT_WEIGHT,
+    COMPOSITE_PERCENTILE_EARLY_SURGE_MAX,
+    COMPOSITE_PERCENTILE_VIRAL,
+    COMPOSITE_PERCENTILE_WATCH_MIN,
+    COMPOSITE_REACH_WEIGHT,
+    COMPOSITE_VELOCITY_WEIGHT,
+)
 from core.entities.service import EntityService
 from core.models import Claim, Narrative, NarrativeAlertLevel, Video
 from core.narratives.models import (
@@ -33,37 +47,18 @@ VIRALITY_SCORE_COMMENTS_WEIGHT = 5     # weight of comments relative to likes
 VIRALITY_SCORE_REACH_CAP_LIMIT = 10    # cap reach score at 10x the average views
 VIRALITY_SCORE_VELOCITY_DAYS_BACK = 2  # window (days) used for velocity score
 
-# Composite virality score weights (must sum to 1)
-COMPOSITE_ENGAGEMENT_WEIGHT = 0.50
-COMPOSITE_REACH_WEIGHT = 0.30
-COMPOSITE_VELOCITY_WEIGHT = 0.20
-
-# Acceleration rate score weights (must sum to 1)
-ACCELERATION_ENGAGEMENT_WEIGHT = 0.40
-ACCELERATION_VIDEO_VOLUME_WEIGHT = 0.35
-ACCELERATION_VIEWS_WEIGHT = 0.25
-
-# Hard cap on individual change_* components inside acceleration_rate.
-# Without it, a single video going from 1 → 10k views (change=9999) drowns
-# the weighted sum and makes the per-dimension weights meaningless.
-ACCELERATION_CHANGE_CAP = 5.0
-
-# Alert levels compare BOTH indicators by their PERCENT_RANK within the cohort
-# scored on the same run, never by their raw values.
+# Composite virality and acceleration weights, the acceleration change cap, and the
+# alert-level percentile thresholds are read from the environment (see core.config for
+# the values, their defaults, and the tuning notes) and imported at the top of this
+# module.
 #
-# The two are not on comparable scales. composite_virality is a blend of percentile
-# ranks: bounded, bell-shaped, and in production it reaches only 0.90 with a 99th
-# percentile of 0.81 — so an absolute cut of 0.85 selected the top 0.14%, not the
-# "top ~15%" its comment claimed. acceleration_rate is a raw capped ratio whose
-# median is 0 and whose tail saturates ACCELERATION_CHANGE_CAP: an absolute cut of
-# 1.2 selected the top 0.064%, and of the narratives that reached it, 13 of 14 were
-# pinned at the cap. Ranking both puts them on one scale and makes each threshold
-# mean a knowable fraction of the cohort.
-COMPOSITE_PERCENTILE_VIRAL = 0.95
-COMPOSITE_PERCENTILE_EARLY_SURGE_MAX = 0.50
-COMPOSITE_PERCENTILE_WATCH_MIN = 0.70
-ACCELERATION_PERCENTILE_SURGE = 0.95
-ACCELERATION_PERCENTILE_WATCH_MIN = 0.70
+# Alert levels compare BOTH indicators by their PERCENT_RANK within the cohort scored
+# on the same run, never by their raw values. The two are not on comparable scales:
+# composite_virality is a bounded, bell-shaped blend of percentile ranks (in
+# production it reaches only 0.90, 99th percentile 0.81), while acceleration_rate is a
+# raw capped ratio whose median is 0 and whose tail saturates ACCELERATION_CHANGE_CAP.
+# Ranking both puts them on one scale and makes each threshold a knowable fraction of
+# the cohort.
 
 def _merge_narrative_context(
     existing: str | None, new: str | None
