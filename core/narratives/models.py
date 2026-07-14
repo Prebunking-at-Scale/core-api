@@ -1,12 +1,23 @@
 from datetime import date, datetime
 from enum import Enum
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypedDict, TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel
 
 from core.entities.models import EntityInput
 from core.models import Claim, Entity, NarrativeAlertLevel, Topic, Video
+
+class IndicatorPayload(TypedDict):
+    """
+    One analysis indicator as carried by get_bulk_analysis_indicators_for_date:
+    the raw indicator_value plus its free-form metadata blob (JSONB), which holds
+    the percentile rank the alert-level classification compares on.
+    """
+
+    value: float
+    metadata: dict[str, Any]
+
 
 class NarrativeInput(BaseModel):
     title: str
