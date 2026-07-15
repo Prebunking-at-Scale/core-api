@@ -595,10 +595,17 @@ class NarrativeService:
                     ACCELERATION_CHANGE_CAP,
                 )
 
-                acceleration_rate = (
+                # Acceleration measures how fast a narrative is *growing*, so it is
+                # floored at 0: a declining narrative is not "negatively accelerating"
+                # for alerting purposes, it is simply not surging. Without the floor,
+                # decliners produce negative rates, and percent-ranking those pushes a
+                # merely-flat (0.0) narrative into a high acceleration percentile — the
+                # noise-as-signal that mislabels flat narratives as EARLY_SURGE.
+                acceleration_rate = max(
+                    0.0,
                     change_engagement * ACCELERATION_ENGAGEMENT_WEIGHT
                     + change_video_count * ACCELERATION_VIDEO_VOLUME_WEIGHT
-                    + change_views * ACCELERATION_VIEWS_WEIGHT
+                    + change_views * ACCELERATION_VIEWS_WEIGHT,
                 )
                 records.append((
                     row["narrative_id"],
