@@ -16,7 +16,7 @@ Patrón de mock para el repo (async context manager):
         result = await service.<method>(...)
 """
 import uuid
-from datetime import date
+from datetime import date, timedelta
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
@@ -716,12 +716,13 @@ class TestRunNarrativeAnalysisIndicatorsPipeline:
         mocks["calculate_acceleration_rate_for_date"].assert_called_once_with(calc_date=calc_date)
         mocks["update_narrative_alert_levels"].assert_called_once_with(calc_date=calc_date)
 
-    async def test_pipeline_uses_today_when_no_calc_date(self, narrative_service: NarrativeService):
+    async def test_pipeline_uses_yesterday_when_no_calc_date(self, narrative_service: NarrativeService):
         mocks = self._patch_sub_methods(narrative_service, [[]])
-        today = date.today()
+        # Defaults to yesterday — the last completed scraping day (see pipeline docstring).
+        yesterday = date.today() - timedelta(days=1)
 
         with patch.multiple(narrative_service, **mocks):
             await narrative_service.run_narrative_analysis_indicators_pipeline()
 
-        mocks["calculate_composite_virality_for_date"].assert_called_once_with(calc_date=today)
-        mocks["update_narrative_alert_levels"].assert_called_once_with(calc_date=today)
+        mocks["calculate_composite_virality_for_date"].assert_called_once_with(calc_date=yesterday)
+        mocks["update_narrative_alert_levels"].assert_called_once_with(calc_date=yesterday)

@@ -1,6 +1,6 @@
 import logging
 from bisect import bisect_left
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, AsyncContextManager, Callable
 from uuid import UUID
 
@@ -595,10 +595,17 @@ class NarrativeService:
                     ACCELERATION_CHANGE_CAP,
                 )
 
-                acceleration_rate = (
+                # Acceleration measures how fast a narrative is *growing*, so it is
+                # floored at 0: a declining narrative is not "negatively accelerating"
+                # for alerting purposes, it is simply not surging. Without the floor,
+                # decliners produce negative rates, and percent-ranking those pushes a
+                # merely-flat (0.0) narrative into a high acceleration percentile — the
+                # noise-as-signal that mislabels flat narratives as EARLY_SURGE.
+                acceleration_rate = max(
+                    0.0,
                     change_engagement * ACCELERATION_ENGAGEMENT_WEIGHT
                     + change_video_count * ACCELERATION_VIDEO_VOLUME_WEIGHT
-                    + change_views * ACCELERATION_VIEWS_WEIGHT
+                    + change_views * ACCELERATION_VIEWS_WEIGHT,
                 )
                 records.append((
                     row["narrative_id"],
@@ -700,14 +707,22 @@ class NarrativeService:
         Args:
             batch_size: Number of narratives to process per batch.
             hours: Time window used to scope which narratives are considered.
-            calc_date: Date to use for indicator/alert calculations (defaults to today).
+            calc_date: Date to use for indicator/alert calculations. Defaults to
+                       yesterday — the last *completed* scraping day. The acceleration
+                       indicator compares the carried-forward video stats "as of
+                       calc_date" against "as of calc_date - 1", so the difference is
+                       driven entirely by videos scraped on calc_date itself. Defaulting
+                       to today would run against a day that has barely been scraped
+                       (the job fires just after midnight UTC), leaving current == prev
+                       and acceleration == 0 for almost every narrative. Scoring the last
+                       completed day gives a full day of scraping on both sides.
             on_progress: Optional callback invoked after each batch with
                          (total_processed, errors) so callers can report progress.
 
         Returns:
             (total_processed, errors) counts from phase 1.
         """
-        target_date = calc_date or date.today()
+        target_date = calc_date or (date.today() - timedelta(days=1))
 
         average_views = await self.get_average_views_for_all_narratives()
 
