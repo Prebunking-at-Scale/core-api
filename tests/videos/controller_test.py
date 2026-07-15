@@ -279,7 +279,7 @@ async def test_get_videos_by_expected_views_ordering(
     )
     assert video1_response.status_code == 201
 
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(1)
 
     await api_key_client.patch(
         f"/api/videos/{video1.id}",
@@ -292,14 +292,14 @@ async def test_get_videos_by_expected_views_ordering(
     )
     assert video2_response.status_code == 201
 
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(1)
 
     await api_key_client.patch(
         f"/api/videos/{video2.id}",
         json={"views": 500},
     )
 
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(1)
 
     response = await api_key_client.get("/api/videos/by-expected-views?min_age_hours=0")
     assert response.status_code == 200
