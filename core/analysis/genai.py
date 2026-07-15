@@ -1,7 +1,7 @@
 import asyncio
+import logging
 import os
 import random
-import logging
 from typing import Literal
 
 from google import genai
@@ -15,7 +15,9 @@ from google.genai.types import (
     Part,
     SafetySetting,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from core.analysis.language_id import normalize_language_code
 
 log = logging.getLogger(__name__)
 
@@ -66,6 +68,14 @@ class Sentence(BaseModel):
     language: str = Field(
         description="Language of the sentence as a two letter ISO language code (e.g. 'en', 'es')"
     )
+
+    @field_validator("language")
+    @classmethod
+    def normalise_language(cls, value: str) -> str:
+        # The model is asked for a two letter code but does not always comply
+        # (e.g. "eng", "English"). Normalise here so every stored language is
+        # canonical and the languages dropdown does not accumulate duplicates.
+        return normalize_language_code(value) or value
 
 
 class RetriesExceededError(Exception):
