@@ -1,6 +1,6 @@
 import logging
 from bisect import bisect_left
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, AsyncContextManager, Callable
 from uuid import UUID
 
@@ -700,14 +700,22 @@ class NarrativeService:
         Args:
             batch_size: Number of narratives to process per batch.
             hours: Time window used to scope which narratives are considered.
-            calc_date: Date to use for indicator/alert calculations (defaults to today).
+            calc_date: Date to use for indicator/alert calculations. Defaults to
+                       yesterday — the last *completed* scraping day. The acceleration
+                       indicator compares the carried-forward video stats "as of
+                       calc_date" against "as of calc_date - 1", so the difference is
+                       driven entirely by videos scraped on calc_date itself. Defaulting
+                       to today would run against a day that has barely been scraped
+                       (the job fires just after midnight UTC), leaving current == prev
+                       and acceleration == 0 for almost every narrative. Scoring the last
+                       completed day gives a full day of scraping on both sides.
             on_progress: Optional callback invoked after each batch with
                          (total_processed, errors) so callers can report progress.
 
         Returns:
             (total_processed, errors) counts from phase 1.
         """
-        target_date = calc_date or date.today()
+        target_date = calc_date or (date.today() - timedelta(days=1))
 
         average_views = await self.get_average_views_for_all_narratives()
 

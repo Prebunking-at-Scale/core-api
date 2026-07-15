@@ -123,8 +123,17 @@ def process_alerts():
 @click.command()
 @click.option("--batch-size", default=100, show_default=True, help="Number of narratives to process per batch.")
 @click.option("--hours", default=24, show_default=True, help="Time window in hours for narrative analysis indicators calculation.")
-def run_narrative_analysis_indicators_pipeline(batch_size: int, hours: int):
+@click.option(
+    "--calc-date",
+    type=click.DateTime(formats=["%Y-%m-%d"]),
+    default=None,
+    help="Date (YYYY-MM-DD) to score. Defaults to yesterday, the last completed "
+    "scraping day; acceleration is ~0 if run against the current, barely-scraped day.",
+)
+def run_narrative_analysis_indicators_pipeline(batch_size: int, hours: int, calc_date):
     """Calculate narrative analysis indicators for all narratives."""
+    target_date = calc_date.date() if calc_date is not None else None
+
     async def main():
         pool = pool_factory(postgres_url)
         await pool.open()
@@ -139,6 +148,7 @@ def run_narrative_analysis_indicators_pipeline(batch_size: int, hours: int):
             total_processed, errors = await service.run_narrative_analysis_indicators_pipeline(
                 batch_size=batch_size,
                 hours=hours,
+                calc_date=target_date,
                 on_progress=on_progress,
             )
 
