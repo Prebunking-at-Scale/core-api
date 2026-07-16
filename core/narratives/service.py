@@ -554,7 +554,7 @@ class NarrativeService:
                 }
                 records.append((narrative_id, composite, NarrativeAnalysisIndicatorType.COMPOSITE_VIRALITY, metadata))
             self._attach_percentiles(records)
-            await repo.bulk_insert_narrative_analysis_indicators(records)
+            await repo.bulk_insert_narrative_analysis_indicators(records, calc_date=calc_date)
 
     async def calculate_acceleration_rate_for_date(self, calc_date: date) -> None:
         async with self.repo() as repo:
@@ -621,7 +621,7 @@ class NarrativeService:
                     },
                 ))
             self._attach_percentiles(records)
-            await repo.bulk_insert_narrative_analysis_indicators(records)
+            await repo.bulk_insert_narrative_analysis_indicators(records, calc_date=calc_date)
 
     async def update_narrative_alert_levels(self, calc_date: date) -> int:
         """

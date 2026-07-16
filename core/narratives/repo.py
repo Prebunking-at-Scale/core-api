@@ -1887,15 +1887,30 @@ class NarrativeRepository:
     async def bulk_insert_narrative_analysis_indicators(
         self,
         records: list[tuple[UUID, float, NarrativeAnalysisIndicatorType, dict | None]],
+        calc_date: date | None = None,
     ) -> None:
         """
         Bulk insert analysis indicators for multiple narratives at once.
         Each record is a (narrative_id, indicator_value, indicator_type) tuple.
+
+        `calculated_at` records the day the indicator *describes*, not the moment the
+        row was written, because that is how it is read back:
+        get_bulk_analysis_indicators_for_date filters `calculated_at::date = calc_date`.
+        Stamping NOW() instead only agrees with the reader when a run scores the same
+        day it executes; once the pipeline began scoring the last *completed* day, a
+        00:05 run wrote rows dated today and then asked for rows dated yesterday,
+        silently classifying against the previous run's output.
+
+        Mirrors insert_narrative_virality_score: the wall-clock time is kept so reruns
+        on the same day still order newest-last. Defaults to the current timestamp.
         """
         await self._session.executemany(
             """
             INSERT INTO narrative_analysis_indicators (narrative_id, indicator_value, indicator_type, metadata, calculated_at)
-            VALUES (%(narrative_id)s, %(indicator_value)s, %(indicator_type)s, %(metadata)s, NOW())
+            VALUES (
+                %(narrative_id)s, %(indicator_value)s, %(indicator_type)s, %(metadata)s,
+                COALESCE(%(calc_date)s::date, CURRENT_DATE) + LOCALTIME
+            )
             """,
             [
                 {
@@ -1903,6 +1918,7 @@ class NarrativeRepository:
                     "indicator_value": indicator_value,
                     "indicator_type": indicator_type.value,
                     "metadata": Jsonb(metadata) if metadata is not None else None,
+                    "calc_date": calc_date,
                 }
                 for narrative_id, indicator_value, indicator_type, metadata in records
             ],
