@@ -1,0 +1,44 @@
+-- Does engagement_score measure "engaging", or does it measure "few views"?
+--
+-- engagement_score = (likes*1 + comments*5) / views, and it is 50% of the composite.
+-- Being a ratio, it is maximised by a small denominator: a video with 1 view and 1
+-- comment scores 6.0, while a narrative with 1M views and 5k comments scores ~0.075.
+-- If that pathology is real in the data, the top of the engagement ranking will be
+-- dominated by low-view narratives, and half the composite axis is measuring smallness.
+--
+-- The metadata on each engagement_score row carries the exact likes/comments/views the
+-- score was computed from, so this needs no joins back to video_stats.
+--
+-- reach_score and velocity_score come along for comparison: reach is the only term that
+-- measures size directly, so engagement_score vs reach_score is the test.
+
+WITH latest AS (
+    SELECT MAX(calculated_at::date) AS d
+    FROM narrative_virality_scores
+    WHERE score_type = 'engagement_score'
+),
+s AS (
+    SELECT DISTINCT ON (narrative_id, score_type)
+           narrative_id,
+           score_type,
+           score_value,
+           metadata
+    FROM narrative_virality_scores
+    WHERE calculated_at::date = (SELECT d FROM latest)
+      AND score_type IN ('engagement_score', 'reach_score', 'velocity_score')
+    ORDER BY narrative_id, score_type, calculated_at DESC
+)
+SELECT
+    narrative_id,
+
+    max(score_value) FILTER (WHERE score_type = 'engagement_score') AS engagement_score,
+    max(score_value) FILTER (WHERE score_type = 'reach_score')      AS reach_score,
+    max(score_value) FILTER (WHERE score_type = 'velocity_score')   AS velocity_score,
+
+    -- what the engagement score was actually computed from
+    max((metadata->>'views')::bigint)    FILTER (WHERE score_type = 'engagement_score') AS views,
+    max((metadata->>'likes')::bigint)    FILTER (WHERE score_type = 'engagement_score') AS likes,
+    max((metadata->>'comments')::bigint) FILTER (WHERE score_type = 'engagement_score') AS comments
+FROM s
+GROUP BY narrative_id
+ORDER BY engagement_score DESC;
