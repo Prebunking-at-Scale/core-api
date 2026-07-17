@@ -36,7 +36,15 @@
 -- ============================================================================
 --   O2/O3  boundary_composite / boundary_accel are PLACEHOLDERS. They cannot be
 --          derived from data; they are the product call this query exists to inform.
---          Try 0.80/0.50, then 0.90/0.80, and look at what lands in `viral`.
+--
+--          MEASURED 2026-07-17, first run: at 0.80/0.50 this badged all 2237 narratives
+--          in the cohort (409 of them `viral`). boundary_accel = 0.50 is meaningless on
+--          this axis -- 42.5% sit at exactly zero, median accel is 0.000024 and p90 is
+--          0.0215, so 0.50 selects "anything above the zero block", including narratives
+--          that grew 0.002%. The signal lives in the top 1-2%: p99 = 1.39.
+--          Start at boundary_accel = 0.98 and work down. And note that a percentile that
+--          high is an absolute threshold wearing a costume -- which is D2's rejected
+--          option, so if it works that is a finding about D2.
 --   O5.5   change_video_count is DROPPED. Under D0 a change needs two observations, and
 --          a video first seen on calc_date has one -- that term is what puts the 576
 --          scraper-discovery narratives at the top of the axis. The other two weights
@@ -193,28 +201,47 @@ narrative_prev AS (
     FROM prev_state
     GROUP BY narrative_id
 ),
+-- Current state restricted to videos that HAVE a baseline. This join is the whole
+-- point: without it, cur sums EVERY video (including ones first seen on calc_date)
+-- while prev sums only baselined ones, so a narrative that gained a 67k-view video
+-- reports it as 78x "growth". That is the change_video_count defect leaking through
+-- the views term -- dropping the count term does not remove it. Numerator and
+-- denominator must cover the SAME videos. (This is O5.6's clean form, and it commits
+-- us to O5.3's second option -- see the caveat in the header.)
+cur_baselined AS (
+    SELECT s.narrative_id,
+           count(*)                         AS prev_videos,
+           COALESCE(sum(s.views), 0)::float    AS views,
+           COALESCE(sum(s.likes), 0)::float    AS likes,
+           COALESCE(sum(s.comments), 0)::float AS comments
+    FROM state s
+    JOIN prev_state p
+      ON p.narrative_id = s.narrative_id AND p.video_id = s.video_id
+    GROUP BY s.narrative_id
+),
 -- INNER JOIN to narrative_prev is deliberate: no baseline = no second observation =
 -- not measurable as a change, per D0. Narratives whose videos all appeared on
 -- calc_date drop out here rather than scoring as growth.
 accel_raw AS (
     SELECT
         vi.narrative_id,
-        ns.views AS cur_views,
+        cb.prev_videos,
+        cb.views AS cur_views,
         np.views AS prev_views,
-        CASE WHEN ns.views > 0
-             THEN (ns.likes * (SELECT likes_weight FROM params)
-                 + ns.comments * (SELECT comments_weight FROM params)) / ns.views
+        CASE WHEN cb.views > 0
+             THEN (cb.likes * (SELECT likes_weight FROM params)
+                 + cb.comments * (SELECT comments_weight FROM params)) / cb.views
              ELSE 0 END AS cur_eng,
         CASE WHEN np.views > 0
              THEN (np.likes * (SELECT likes_weight FROM params)
                  + np.comments * (SELECT comments_weight FROM params)) / np.views
              ELSE 0 END AS prev_eng
     FROM visited vi
-    JOIN narrative_state ns ON ns.narrative_id = vi.narrative_id
+    JOIN cur_baselined   cb ON cb.narrative_id = vi.narrative_id
     JOIN narrative_prev  np ON np.narrative_id = vi.narrative_id
 ),
 accel AS (
-    SELECT narrative_id, cur_views, prev_views,
+    SELECT narrative_id, prev_videos, cur_views, prev_views,
         least(CASE WHEN prev_eng > 0 THEN (cur_eng - prev_eng) / prev_eng ELSE 0 END,
               (SELECT change_cap FROM params))                    AS change_engagement,
         least(CASE WHEN prev_views > 0 THEN (cur_views - prev_views) / prev_views ELSE 0 END,
@@ -241,9 +268,11 @@ accel_ranked AS (
 SELECT
     ar.narrative_id,
     n.title,
-    cr.videos,
-    cr.views::bigint                        AS views,
-    ar.prev_views::bigint                   AS prev_views,
+    cr.videos                               AS videos,        -- all videos known
+    ar.prev_videos                          AS videos_baselined, -- the ones accel uses
+    cr.views::bigint                        AS views_all,     -- composite's number
+    ar.cur_views::bigint                    AS cur_views,     -- accel's numerator base
+    ar.prev_views::bigint                   AS prev_views,    -- same videos, day before
     round(cr.composite::numeric, 4)         AS composite,
     round(cr.composite_pct::numeric, 4)     AS composite_pct,
     round(ar.accel::numeric, 6)             AS accel,
