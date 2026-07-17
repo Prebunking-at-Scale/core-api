@@ -1,18 +1,21 @@
 -- Simulate the redesigned alert system (D0-D8) against the database.
 -- Returns every narrative that WOULD carry a badge, with both axes and the badge.
 --
--- Run it as-is. Then change calc_date to CURRENT_DATE - 1 and run it again -- neither day
--- is clean, and the pair tells you more than either:
+-- Run it as-is: calc_date is the LAST COMPLETED SCRAPING DAY (yesterday), compared
+-- against the day before. This mirrors production -- the pipeline defaults to
+-- date.today() - 1 for exactly this reason (core/narratives/service.py:725, and the
+-- docstring above it): acceleration is driven by videos scraped ON calc_date, so scoring
+-- a part-scraped day leaves current == prev and hands almost everyone a zero.
 --
---   CURRENT_DATE      honest denominator (nothing has eroded yet, so accel_pct is real),
---                     but the day is only part-done, so growth is a partial day's worth
---                     and the cohort is whatever the scraper reached so far.
---   CURRENT_DATE - 1  full-day growth, and matches what production actually scores --
---                     but accel_pct is inflated, because some of the flat narratives have
---                     already eroded out of the cohort (see KNOWN LIMITATION below).
+-- Do NOT set calc_date = CURRENT_DATE to "avoid the erosion" below. It buys an honest
+-- denominator by measuring a different quantity -- a part-day's growth over whatever
+-- subset the scraper has reached so far -- which is not what the system computes and not
+-- what production would badge.
 --
--- Compare the cohort sizes between the two runs: that difference is the erosion, and it
--- is the most direct read on it available.
+-- Optional second run, as a cross-check only: CURRENT_DATE / CURRENT_DATE - 1 gives an
+-- un-eroded cohort for a partial day. The gap between its cohort size and the default
+-- run's is the most direct read on the erosion available -- but read it as a diagnostic
+-- about the data, not as a preview of the badges.
 --
 -- ============================================================================
 -- WHAT IS SIMULATED FAITHFULLY (settled decisions)
@@ -57,16 +60,24 @@
 --   flat    (visited, nothing changed)    -> ERODED, and completely gone once every one
 --                                            of the narrative's videos is re-scraped.
 --
--- Consequence: `accel` values for movers are trustworthy on a past day, but `accel_pct`
--- is NOT -- the ranking loses its zeros, so everything ranks too high. Read the raw
--- `accel` column and the mover list; do not choose boundaries from `accel_pct` on a
--- historical run. Only calc_date = today gives an honest denominator.
+-- The default calc_date (yesterday) is ~1 day into that decay, so expect SOME of the flat
+-- population to be missing already. What that does, precisely:
+--
+--   * The ORDER of narratives on the acceleration axis is CORRECT. Every mover is
+--     present with its true raw `accel`, and dropping zeros from the bottom does not
+--     reorder anything above them.
+--   * The `accel_pct` VALUES are INFLATED. Missing zeros shrink the denominator, so every
+--     surviving narrative ranks higher than it should.
+--
+-- So: trust the mover list, the raw `accel` column, and the ranking order. Treat the
+-- badge counts as an OVER-estimate -- an inflated accel_pct pushes narratives over
+-- boundary_accel that production would not have promoted. Do not fix O2/O3 from this run.
 -- ============================================================================
 
 WITH params AS (
     SELECT
-        CURRENT_DATE          AS calc_date,          -- set from updated_at_distribution
-        CURRENT_DATE - 1      AS prev_date,
+        CURRENT_DATE - 1      AS calc_date,   -- last COMPLETED scraping day, as production
+        CURRENT_DATE - 2      AS prev_date,
         -- D7 composite weights
         0.625::float AS w_comp_engagement,
         0.375::float AS w_comp_reach,
