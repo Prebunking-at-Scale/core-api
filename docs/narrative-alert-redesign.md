@@ -3,9 +3,17 @@
 **Status:** design in progress. Decisions below are settled; open questions at the end
 are not. No implementation yet.
 
-**Revised 2026-07-17.** D0 was added and now derives D3, D5 and D7, which were previously
-argued independently. Several measurements in this document were retracted in the same
-pass — see *Retractions* under "Validation still owed" before citing any number here.
+**Revised 2026-07-17.** Two passes:
+
+1. **D0** was added and now derives D3, D5 and D7, which were previously argued
+   independently. Several measurements were retracted — see *Retractions* under
+   "Validation still owed" before citing any number here.
+2. **D9** was added after simulating D0 against the database. It fixes the largest defect
+   in the system: `change_engagement` is a *rate* weighted 0.40 against views' 0.25, so it
+   cancels the growth it is meant to modify and **679 of the 779 zeroes turned out to be
+   narratives that grew and were erased**. This explains the "movers are noise" reading,
+   the binary axis, and the scraper-discovery narratives owning the top — all of it is
+   downstream of one line. See the defect above D9.
 
 **Branch:** `redesign/narrative-alert-system`, based on `fix/indicators-calc-date-stamp`
 (the classifier on `main` reads the previous run's indicators, so any evaluation done
@@ -77,6 +85,48 @@ numbers and stamps them with the requested date.
 averaged gives a bell curve by CLT — hence the observed p50 = 0.51, max = 0.91, and the
 fact that nothing reaches 0 or 1. The second ranking is why `composite_pct` is uniform
 while `composite` is not. Whether the double ranking is intended is unresolved.
+
+**`change_engagement` cancels the growth it is meant to modify.** *Found 2026-07-17 by
+simulating D0; this is the largest defect in the document and it was invisible until the
+zeros were split.*
+
+`engagement_score = (likes + 5×comments) / views` is a **rate**. Differencing a rate
+against a *level's* growth means that whenever views grow faster than engagement — which
+is exactly what spread looks like, since views outpace likes — `change_engagement` goes
+**negative**. And it carries weight 0.40 against views' 0.25, so it wins:
+
+```
+likes flat, views grow by g:
+  change_engagement = 1/(1+g) - 1 = -g/(1+g)  ≈ -g
+  acceleration      = 0.40(-g) + 0.25(g) = -0.15g   →  negative for ANY g  →  max(0,…) → 0
+```
+
+| with likes flat | chg_eng | chg_views | acceleration |
+|---|---|---|---|
+| +10% views | −0.091 | 0.100 | **0** |
+| +50% views | −0.333 | 0.500 | **0** |
+| doubles views | −0.500 | 1.000 | 0.05 |
+
+A narrative can grow **50% in a day and score exactly zero**. It must more than double to
+register at all — and a doubling scores 0.05, one *seventh* of what the scraper finding it
+a single extra video pays. The penalty is worst at ~30% growth (the threshold peaks at
+`v = 1.3`), i.e. precisely the band steady genuine spread lives in; only explosions escape.
+
+**Measured on 2026-07-16 data (n=2237):**
+
+- **679 of the 779 zeros are narratives that grew in views and were floored.** Only **86**
+  are genuinely flat. One of the erased grew **35.8%** in a day.
+- 920 of the 1236 growing narratives (74%) have `change_engagement` fighting their own
+  growth. Spearman(`change_views`, `change_engagement`) = **−0.427** — the term is
+  substantially a negated copy of the term it is added to.
+- Consequence: **the acceleration axis has never measured growth.** It measures
+  *acquisition*, because `change_video_count` is the only term that is not a rate and so
+  the only one that cannot be cancelled. 20 of the top 20 got there by gaining videos.
+
+**This retroactively explains the rest of this document.** "The median mover grew 0.46%, so
+movers are noise" — the real movers were floored out of the mover set before it was
+measured. The huge zero block, the binary axis, the scraper-discovery narratives owning
+the top: all downstream of this one line. Fixed by D9.
 
 **`video_stats` is a change log, not a measurement log.** `update_video`
 (`core/videos/repo.py:103`) bumps `videos.updated_at` unconditionally but writes a
@@ -568,6 +618,59 @@ Rejected alternatives, for the record:
   ranks and identical −0.172. It changes the distribution's shape only. Relevant because
   `feat/unify-virality-windows` uses log growth and is earmarked for salvage under D4.
 
+### D9 — Acceleration measures speed of distribution; engagement only modifies it
+
+```
+acceleration = 0.10×change_engagement + 0.35×change_video_count + 0.55×change_views
+                    (was 0.40)                                         (was 0.25)
+```
+
+**Acceleration is the velocity axis** — the growth measure D7 evicted from composite has
+to live somewhere, and this is where. Its job is to say how fast a narrative is spreading.
+
+**Engagement stays, as a modifier.** A narrative whose engagement is rising should rank
+above one whose engagement is falling; that is a real quality signal and the *rate*
+semantics are the right way to ask it — absolute engagement could not, since it rises for
+anything that grows at all. The term is not the problem.
+
+**The weight was.** A modifier that outweighs the thing it modifies is not a modifier. The
+only hard constraint is:
+
+```
+w_engagement < w_views          (0.40 > 0.25 is what produced the defect above)
+```
+
+Everything else is taste. 0.10/0.35/0.55 is the proposal; the exact split is a free choice.
+
+**Measured effect** (2026-07-16, n=2237, reweighting offline from the stored components):
+
+| | 0.40/0.35/0.25 | 0.10/0.35/0.55 |
+|---|---|---|
+| narratives scored exactly 0 | 771 | **104** |
+| of those, genuinely flat | 86 | **86** |
+| real growers erased by the floor | 679 | **4** |
+| best `accel` reachable by real growth | 0.840 | **1.453** |
+
+**675 narratives that genuinely grew are recovered.** The zero block shrinks to the 86 that
+are actually flat — which is D5 working as intended for the first time, and it means
+`consolidated` finally denotes "big and flat" rather than "grew, but the rate fell".
+
+**What D9 does not fix, deliberately:**
+
+- **Badge volume.** 2237 either way — `accel_pct >= 0.50` selects half the cohort whatever
+  you rank. Volume is set by boundaries, not weights. See O2/O3.
+- **Acquisition dominance.** At `boundary_accel = 0.99`, 22 of the 23 narratives that fire
+  gained videos. That is D0/O5.5's new-video rule working as specified — a narrative that
+  gained a 750k-view video *did* grow by 750k views — and no reweighting can or should
+  change it. Whether it is signal turns on O5.5's `uploaded_at` question.
+
+**Supersedes** the `feat/unify-virality-windows` reweighting of `change_video_count`
+(0.35 → 0.10), which targeted the right symptom — noise at the top — from the wrong term.
+The video-count weight was never the problem; the engagement weight was.
+
+**Interaction with O8.** With these weights the floor is nearly inert: 4 narratives instead
+of 679. O8 stops being urgent, but the question stands on its own merits.
+
 ---
 
 ## Open questions
@@ -692,9 +795,12 @@ Not answerable from the pulls so far: `narrative_coverage.txt` reports baseline 
 for refreshed videos, so the staleness distribution of the never-visited ~19k is unknown.
 Needs one query.
 
-**O8 — Should `max(0, ...)` stay?** *New, 2026-07-17.* "Measured and declined" is a
-measurement; flooring it to zero merges decliners with genuinely flat narratives, which is
-the class of merge D0 forbids. The floor was added deliberately
+**O8 — Should `max(0, ...)` stay?** *New 2026-07-17; DE-ESCALATED the same day by D9.*
+Under the old weights the floor erased 679 real growers. Under D9's it touches **4**, so
+this is no longer urgent — the floor was never the disease, it was what made the
+`change_engagement` defect fatal instead of merely wrong. The question still stands on its
+own merits: "measured and declined" is a measurement; flooring it to zero merges decliners
+with genuinely flat narratives, which is the class of merge D0 forbids. The floor was added deliberately
 (`core/narratives/service.py:598-603`) to stop decliners going negative and pushing flat
 narratives up the ranking — but under D0 that reordering is *correct*: a flat narrative is
 genuinely accelerating more than a shrinking one, and `consolidated` (big and flat) should

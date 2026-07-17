@@ -73,6 +73,19 @@
 --          days of growth as if it were 1. D4 will move these numbers.
 --
 -- ============================================================================
+-- RUN THIS TWICE. The comparison is the point.
+-- ============================================================================
+--   run 1: new_video_max_age_days = NULL   (as set -- every new video counts)
+--   run 2: new_video_max_age_days = 7      (only genuinely-new uploads count)
+--
+-- Measured 2026-07-17 with the D9 weights: at boundary_accel 0.99, 22 of the 23
+-- narratives that fire gained videos. So the alert stream is ~96% video-acquisition
+-- events, and whether that is signal or noise depends entirely on whether those videos
+-- are genuinely new or old ones the scraper just found. The delta between run 1 and
+-- run 2 IS that answer. It closes O5.5.
+-- ============================================================================
+--
+-- ============================================================================
 -- KNOWN LIMITATION: this DEGRADES for a past calc_date, it does not fail cleanly.
 --
 -- The visit predicate below unions permanent evidence (a video_stats row on calc_date --
@@ -104,10 +117,14 @@ WITH params AS (
         -- D7 composite weights
         0.625::float AS w_comp_engagement,
         0.375::float AS w_comp_reach,
-        -- acceleration weights -- production's originals, restored (see NEW VIDEOS below)
-        0.40::float  AS w_acc_engagement,
+        -- acceleration weights, per D9. Acceleration measures SPEED OF DISTRIBUTION;
+        -- engagement is a MODIFIER on it and must not be able to overturn it.
+        -- Production ships 0.40/0.35/0.25, where engagement (0.40) outweighs views (0.25)
+        -- and cancels the growth it is meant to modify -- see D9 in the design doc.
+        -- The only hard constraint is w_acc_engagement < w_acc_views.
+        0.10::float  AS w_acc_engagement,
         0.35::float  AS w_acc_video_count,
-        0.25::float  AS w_acc_views,
+        0.55::float  AS w_acc_views,
         -- NEW VIDEOS: a video first seen on calc_date counts as the narrative's growth,
         -- provided the NARRATIVE itself has a baseline. The knob decides which new videos
         -- are real growth vs scraper discovery, using videos.uploaded_at:
