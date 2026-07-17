@@ -828,23 +828,36 @@ video scraped after 50 days whose surge happened on day 40 reports `(large growt
 96.8% of the cohort is within 7 days, 99.2% within 14. A cap anywhere in that range
 removes the laundering case for ~3% of the cohort. Cheap; take it.
 
-**O5.5 — Videos with no baseline. D0 forces this: add `claim_narratives.created_at`, or
-drop the term.** A video first scraped on `calc_date` has one observation, and a change
-needs two — so under D0 it cannot contribute to acceleration. But `change_video_count`
-currently counts it as growth, which is why the 576 no-baseline narratives sit at the top
-of the axis (see the scraper defect above).
+**O5.5 — Videos with no baseline. SETTLED 2026-07-17. Two rules:**
 
-The signal is worth keeping if it can be had honestly: a narrative genuinely gaining a
-video is probably the strongest `early_surge` evidence available. But `claim_narratives`
-has no `created_at` (see the schema defect above), so "gained a video" and "we discovered
-an old video" are indistinguishable. Previously this listed three options; **D0 removes
-the first.** What remains:
+1. **The narrative must have had videos the day before.** One with none was *created* on
+   `calc_date` — that is birth, not acceleration — and is excluded from the cohort (the
+   inner join to the previous day's state). "As long as there is something to compare
+   with" is the bright line, and it sits at the **narrative**, not the video.
+2. **A gained video counts as growth if it is genuinely new** — `videos.uploaded_at`
+   within **7 days** of `calc_date`. An older video the scraper merely discovered does not
+   count: the narrative did not gain it, our knowledge did. **`uploaded_at IS NULL` counts
+   as new** — missing platform metadata is not evidence a video is old, and a video should
+   not be penalised for it.
 
-- **Migrate `claim_narratives` to add `created_at`** — measures linkage properly, forward
-  only.
-- **Drop no-baseline videos from acceleration** — safe, loses the new-video signal.
+Under rule 2, `change_video_count` measures real new content rather than scraper sweep, so
+it is kept at its production weight (D9).
 
-There is no third path where we keep counting things we did not measure.
+> **This document was wrong** to say "the schema forecloses telling them apart". That is
+> true of `claim_narratives`, which has no `created_at` and so cannot date the **link** —
+> but `videos.uploaded_at` dates the **upload**, which is what rule 2 needs. It is written
+> on ingest and already trusted for exactly this kind of reasoning:
+> `core/narratives/repo.py:314` ranks a narrative's videos by upload date to power the
+> "first content" filters, and `core/videos/repo.py:364` computes views-per-second since
+> upload. The earlier framing — "either migrate `claim_narratives` or drop the term, there
+> is no third path" — missed a column that was already there.
+
+**Not yet measured.** Under the pre-rule behaviour, 247 of the 333 narratives that fire
+(74%) got there by gaining videos. How many survive rule 2 is unknown until the query is
+re-run; the gap between them *is* the discovery contamination. **The residual risk is that
+`uploaded_at` is sparsely populated** — rule 2's NULL-is-new choice means a mostly-NULL
+column would silently make the age test a no-op and return us to counting every swept
+video. The `videos_gained` column in the output shows whether that has happened.
 
 **O5.6 — Aggregation.** D4 wants each video divided by its own gap, but acceleration is
 defined on narrative-level sums today. Combining per-video *rates* into a narrative rate

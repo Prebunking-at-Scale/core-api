@@ -45,26 +45,22 @@
 --          Start at boundary_accel = 0.98 and work down. And note that a percentile that
 --          high is an absolute threshold wearing a costume -- which is D2's rejected
 --          option, so if it works that is a finding about D2.
---   O5.5   NEW VIDEOS -- the bright line is at the NARRATIVE, not the video.
+--   O5.5   NEW VIDEOS -- SETTLED. Two rules, both at the NARRATIVE level then the video:
 --
---          A video first seen on calc_date DOES count as the narrative's growth, so long
---          as the narrative itself has something to compare against. A narrative with no
---          videos the day before was CREATED on calc_date; that is birth, not
---          acceleration, and it is excluded (the INNER JOIN to narrative_prev).
---          change_video_count is therefore restored at its production weight.
+--          1. The narrative must have had videos the day before. A narrative with none was
+--             CREATED on calc_date -- that is birth, not acceleration -- and is excluded
+--             (the INNER JOIN to narrative_prev).
+--          2. A video the narrative gained counts as growth if it is GENUINELY NEW:
+--             uploaded within new_video_max_age_days (7) of calc_date. An older video the
+--             scraper merely discovered does not count -- the narrative did not gain it,
+--             our knowledge did. uploaded_at IS NULL counts as new.
 --
---          The risk this accepts: "the narrative gained a video" and "the scraper found
---          an old video" look identical, and the second is not growth. `videos.uploaded_at`
---          separates them -- it is populated on ingest and already trusted for this kind
---          of reasoning (core/narratives/repo.py:314, core/videos/repo.py:364). Set
---          new_video_max_age_days = 7 to count only genuinely-new uploads and re-run;
---          the delta between that and the NULL default IS the discovery contamination,
---          measured rather than argued.
+--          change_video_count is restored at its production weight, since under rule 2 it
+--          now measures real new content rather than scraper sweep.
 --
---          NOTE: this makes the doc's O5.5 wrong where it says "the schema forecloses
---          telling them apart". That is true of claim_narratives (no created_at, so we
---          cannot date the LINK), but uploaded_at dates the UPLOAD, which is a good
---          enough proxy for this. Fix the doc once the knob has been run.
+--          NOTE: the design doc's O5.5 was wrong to say "the schema forecloses telling
+--          them apart". True of claim_narratives (no created_at, so the LINK cannot be
+--          dated), but uploaded_at dates the UPLOAD, which is what rule 2 needs.
 --   O8     the GREATEST(0.0, ...) floor is KEPT (current behaviour). It merges decliners
 --          with genuinely flat narratives, which D0 arguably forbids. Delete the
 --          GREATEST() to see decliners rank below flat ones.
@@ -73,16 +69,20 @@
 --          days of growth as if it were 1. D4 will move these numbers.
 --
 -- ============================================================================
--- RUN THIS TWICE. The comparison is the point.
+-- OPTIONAL SECOND RUN -- measures the discovery contamination.
 -- ============================================================================
---   run 1: new_video_max_age_days = NULL   (as set -- every new video counts)
---   run 2: new_video_max_age_days = 7      (only genuinely-new uploads count)
+-- Run as-is (new_video_max_age_days = 7), then again with it set to NULL, which disables
+-- the age test and counts every new video the way the pre-O5.5 behaviour did.
 --
--- Measured 2026-07-17 with the D9 weights: at boundary_accel 0.99, 22 of the 23
--- narratives that fire gained videos. So the alert stream is ~96% video-acquisition
--- events, and whether that is signal or noise depends entirely on whether those videos
--- are genuinely new or old ones the scraper just found. The delta between run 1 and
--- run 2 IS that answer. It closes O5.5.
+-- The gap between the two is how much of the alert stream was the scraper finding old
+-- videos rather than narratives spreading. Under D10's geometry the NULL run fires 333
+-- narratives, 247 of them (74%) on gained videos. If the 7-day run fires far fewer, most
+-- of that 74% was sweep. If it fires about as many, the gained videos really are new
+-- content and the alert stream was honest all along.
+--
+-- Watch `videos_gained` in the output. If it collapses to ~0 everywhere, uploaded_at is
+-- probably NULL or unreliable across the corpus and the age test is doing nothing
+-- meaningful -- check before drawing any conclusion from the comparison.
 -- ============================================================================
 --
 -- ============================================================================
@@ -125,14 +125,19 @@ WITH params AS (
         0.10::float  AS w_acc_engagement,
         0.35::float  AS w_acc_video_count,
         0.55::float  AS w_acc_views,
-        -- NEW VIDEOS: a video first seen on calc_date counts as the narrative's growth,
-        -- provided the NARRATIVE itself has a baseline. The knob decides which new videos
-        -- are real growth vs scraper discovery, using videos.uploaded_at:
-        --   NULL -> count EVERY new video as growth (the rule as stated)
-        --   7    -> count a new video only if it was UPLOADED within 7 days of calc_date;
-        --           an old video the scraper merely found does not count
-        -- See the NEW VIDEOS block in the header before changing this.
-        NULL::int    AS new_video_max_age_days,
+        -- NEW VIDEOS (O5.5). A video first seen on calc_date counts as the narrative's
+        -- growth, provided the NARRATIVE itself has a baseline AND the video is genuinely
+        -- new: uploaded within this many days of calc_date. An older video the scraper
+        -- merely discovered is not growth -- the narrative did not gain it, we just
+        -- learned it existed.
+        --
+        -- A video with uploaded_at IS NULL is treated as NEW: missing platform metadata
+        -- is not evidence the video is old, and a video should not be penalised for it.
+        --
+        -- Set to NULL to disable the age test entirely (counts every new video) -- for
+        -- diagnostics only; the difference between 7 and NULL is the discovery
+        -- contamination.
+        7::int       AS new_video_max_age_days,
         -- from core/narratives/service.py:45-46 and core/config.py:74
         1.0::float   AS likes_weight,
         5.0::float   AS comments_weight,
@@ -253,21 +258,22 @@ narrative_prev AS (
     FROM prev_state
     GROUP BY narrative_id
 ),
--- Current state for the acceleration numerator. Baselined videos ALWAYS count. Videos
--- with no baseline (first seen on calc_date) count as the narrative's growth too -- that
--- is the point -- subject to the uploaded_at age knob:
+-- Current state for the acceleration numerator. Three cases:
 --
---   new_video_max_age_days IS NULL  -> every new video counts
---   new_video_max_age_days = N      -> a new video counts only if uploaded within N days
---                                      of calc_date. An old video the scraper merely
---                                      discovered is excluded: the narrative did not gain
---                                      it, we just learned it existed.
+--   1. Baselined video (seen on or before prev_date)  -> ALWAYS counts. It has two
+--      observations, so its change is measurable.
+--   2. No baseline, uploaded within new_video_max_age_days of calc_date -> COUNTS. The
+--      narrative genuinely gained a video; that is real growth and the strongest
+--      early_surge evidence there is.
+--   3. No baseline, uploaded longer ago than that      -> EXCLUDED. The scraper merely
+--      discovered an old video. The narrative did not gain it; our knowledge did.
 --
--- videos.uploaded_at is populated on ingest and is already trusted for this kind of
--- reasoning elsewhere (core/narratives/repo.py:314, core/videos/repo.py:364). It is
--- NULLABLE, though -- a new video with a NULL uploaded_at cannot be aged, and is treated
--- as NOT genuinely new (conservative). If that turns out to be most of them, the knob is
--- useless and this needs checking before anyone leans on it.
+-- uploaded_at IS NULL falls in case 2 -- treated as new. Missing platform metadata is not
+-- evidence a video is old.
+--
+-- videos.uploaded_at is written on ingest and already trusted for this kind of reasoning
+-- (core/narratives/repo.py:314 ranks a narrative's videos by upload date;
+-- core/videos/repo.py:364 computes views/sec since upload).
 state_for_accel AS (
     SELECT s.narrative_id, s.video_id, s.views, s.likes, s.comments,
            (p.video_id IS NOT NULL) AS had_baseline
@@ -275,12 +281,11 @@ state_for_accel AS (
     LEFT JOIN prev_state p
            ON p.narrative_id = s.narrative_id AND p.video_id = s.video_id
     JOIN videos v ON v.id = s.video_id
-    WHERE p.video_id IS NOT NULL                               -- baselined: always counts
-       OR (SELECT new_video_max_age_days FROM params) IS NULL  -- knob off: all new count
-       OR (v.uploaded_at IS NOT NULL
-           AND v.uploaded_at::date
-               >= (SELECT calc_date FROM params)
-                  - (SELECT new_video_max_age_days FROM params))
+    WHERE p.video_id IS NOT NULL                               -- 1. baselined
+       OR (SELECT new_video_max_age_days FROM params) IS NULL  -- age test disabled
+       OR v.uploaded_at IS NULL                                -- 2a. unknown -> assume new
+       OR v.uploaded_at::date >= (SELECT calc_date FROM params)  -- 2b. genuinely new
+                                 - (SELECT new_video_max_age_days FROM params)
 ),
 narrative_cur_accel AS (
     SELECT narrative_id,
