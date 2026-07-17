@@ -852,12 +852,37 @@ it is kept at its production weight (D9).
 > upload. The earlier framing — "either migrate `claim_narratives` or drop the term, there
 > is no third path" — missed a column that was already there.
 
-**Not yet measured.** Under the pre-rule behaviour, 247 of the 333 narratives that fire
-(74%) got there by gaining videos. How many survive rule 2 is unknown until the query is
-re-run; the gap between them *is* the discovery contamination. **The residual risk is that
-`uploaded_at` is sparsely populated** — rule 2's NULL-is-new choice means a mostly-NULL
-column would silently make the age test a no-op and return us to counting every swept
-video. The `videos_gained` column in the output shows whether that has happened.
+**What rule 2 can and cannot move** (bounded from the 2026-07-16 NULL run, n=2237, before
+the rule was applied):
+
+**65% of the cohort is untouchable.** The rule only reaches narratives that gained a video,
+so the 1455 with `videos_gained = 0` cannot move at all. Of the 333 that fire, **86 fire on
+real view growth of existing videos and are locked in**; the other 247 are entirely at the
+rule's mercy. So the outcome is bounded:
+
+| | every gained video genuinely new | every gained video old sweep |
+|---|---|---|
+| fires (`viral` + `early_surge`) | 333 — rule is a no-op | **86** |
+| `viral` | 120 | **9** |
+| `early_surge` | 213 | **77** |
+
+The gap between those columns *is* the discovery contamination. It is too wide to reason
+about — `viral` at 9 versus 120 is a different product — which is why the measurement
+matters rather than the argument.
+
+**The rule is monotone: it can only remove alerts, never create them.** A narrative demoted
+out of `viral`/`early_surge` lands in `consolidated`/`trending`, so those two can only grow.
+
+**Residual risk — `uploaded_at` population.** Rule 2's NULL-is-new choice means a
+sparsely-populated column would silently make the age test a no-op and return us to
+counting every swept video. **The failure mode looks exactly like success**: "the gained
+videos are genuinely new" and "we have no upload dates" both show up as `videos_gained`
+barely moving. Check the column before believing a null result.
+
+> **Measurement owed:** the 7-day run's actual numbers are not recorded here. Re-run
+> `simulate_d0_alert_levels.txt` (it now defaults to `new_video_max_age_days = 7`) and
+> compare against `studio_results_20260717_1451.csv`, which is the NULL run. Until then
+> this design's alert volume is known only to within the table above.
 
 **O5.6 — Aggregation.** D4 wants each video divided by its own gap, but acceleration is
 defined on narrative-level sums today. Combining per-video *rates* into a narrative rate
