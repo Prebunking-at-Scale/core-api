@@ -3,6 +3,10 @@
 **Status:** design in progress. Decisions below are settled; open questions at the end
 are not. No implementation yet.
 
+**Revised 2026-07-17.** D0 was added and now derives D3, D5 and D7, which were previously
+argued independently. Several measurements in this document were retracted in the same
+pass — see *Retractions* under "Validation still owed" before citing any number here.
+
 **Branch:** `redesign/narrative-alert-system`, based on `fix/indicators-calc-date-stamp`
 (the classifier on `main` reads the previous run's indicators, so any evaluation done
 there measures the bug rather than the design).
@@ -74,28 +78,36 @@ averaged gives a bell curve by CLT — hence the observed p50 = 0.51, max = 0.91
 fact that nothing reaches 0 or 1. The second ranking is why `composite_pct` is uniform
 while `composite` is not. Whether the double ranking is intended is unresolved.
 
-**Acceleration is biased downward by partial coverage.** A narrative is many videos, and
-on any day only some are refreshed. The numerator (delta) covers only the refreshed
-videos — carried-forward videos contribute exactly zero — while the denominator covers
-*all* of them:
+**`video_stats` is a change log, not a measurement log.** `update_video`
+(`core/videos/repo.py:103`) bumps `videos.updated_at` unconditionally but writes a
+`video_stats` row only `if stats_changed` — where `stats_changed` also includes
+`channel_followers`. So a video re-scraped with unmoved numbers leaves **no trace in
+`video_stats`**, and the absence of a row on a day means *either* nobody looked *or*
+somebody looked and nothing moved. Carry-forward then renders both as an identical
+`accel = 0`, and `max(0, ...)` folds declines into the same value. Three distinct states —
+unmeasured, flat, declining — arrive at the ranking as one number. **This is the root
+defect; D0 exists to fix it.**
 
-```
-today_total = refreshed videos (fresh) + the rest (carried forward)
-prev_total  = all videos as of calc_date - 1
-delta       = growth of the refreshed videos only
-
-acceleration = delta / prev_total(ALL videos)
-```
-
-So a narrative measured through 5% of its videos reports roughly 5% of its actual
-growth. This is not missing data — it is present data carrying a wrong number, and
-nothing downstream can distinguish it from a narrative that genuinely grew that little.
-
-**This may invalidate the "movers are noise" reading.** The finding that the median
-mover grew 0.46% and p25 grew 0.029% is used throughout this document. If the median
-mover's coverage is ~5%, then 0.46% measured is ~9% actual, and those narratives are
-real movers seen through a keyhole rather than noise. The measurement is sound; the
-interpretation may not be. **Unresolved — see O5.1 and the validation notes.**
+> ~~**Acceleration is biased downward by partial coverage.**~~ **Retracted 2026-07-17.**
+> The claim was that the numerator covers only refreshed videos while the denominator
+> covers all of them, so a narrative measured through 5% of its videos reports ~5% of its
+> actual growth — and that this "may invalidate the 'movers are noise' reading", since
+> 0.46% measured would be ~9% actual.
+>
+> **The premise is largely wrong.** Carried-forward videos contribute zero to the
+> numerator — true — but that only *understates* growth if those videos actually grew.
+> Most have no `video_stats` row precisely **because they did not change**, so zero is
+> their correct contribution, not a missing one. The residual bias comes only from videos
+> genuinely not visited, which `video_stats` cannot identify at all (see the change-log
+> defect above).
+>
+> **Measured, and the effect is absent.** Across a hundredfold range of coverage, median
+> measured acceleration is flat: 0.00068 at <1% coverage vs 0.00080 at ≥50% — despite
+> low-coverage narratives also being the large ones (coverage correlates −0.61 with size)
+> and large narratives growing slower in percentage terms, both of which should drag the
+> top row down. Correcting per narrative rather than dividing median-by-median moves the
+> mover median from 0.46% to **0.44%**. The "movers are noise" reading **survives**.
+> See O5.1, also resolved.
 
 **Reach mixes data sources.** Numerator from `video_stats` snapshots; denominator
 (`get_average_views_for_all_narratives`) from the `videos` table's own `views` column
@@ -107,11 +119,29 @@ unanswerable. `video_claims` does carry `created_at`, but claim creation is not 
 event as narrative linking. This forecloses distinguishing "the narrative gained a
 video" from "the scraper discovered an old video" — see O5.5.
 
-**35% of acceleration tracks the scraper.** `change_video_count` compares videos *known*
-as of each date, and under carry-forward "known" means "has any snapshot on or before D".
-A video first scraped on D counts as new growth, so a narrative that gained nothing but
-got swept scores acceleration. `feat/unify-virality-windows` reweighted this term from
-0.35 to 0.10 for exactly this reason.
+**35% of acceleration tracks the scraper — and it dominates the top of the axis.**
+`change_video_count` compares videos *known* as of each date, and under carry-forward
+"known" means "has any snapshot on or before D". A video first scraped on D counts as new
+growth, so a narrative that gained nothing but got swept scores acceleration.
+`feat/unify-virality-windows` reweighted this term from 0.35 to 0.10 for exactly this
+reason.
+
+This is **the same defect as the zeros, one term over**: absence of a record read as a
+fact about the world. We never observed the video not existing; we had not looked. D0
+forbids it by identical logic — a change needs two observations, and a video first seen
+on `calc_date` has one.
+
+Measured on 2026-07-15, the effect is not marginal — **it is the whole top of the axis**:
+
+| | n | median accel | max |
+|---|---|---|---|
+| movers with a refreshed baselined video | 807 | 0.0006 | 2.09 |
+| movers with **no** baselined refresh (new videos only) | 576 | **0.0296** | **3.37** |
+
+Fifty times the median, and the cohort maximum is one of them. The five largest have 1–3
+baselined videos and a few hundred baseline views — tiny narratives that got swept. Since
+alerts fire from the top of this axis, this population *is* the alert stream. See O5.5,
+which D0 promotes from an open option to a forced choice.
 
 **Data quality:** 2 of 3116 narratives have more likes than views (438 likes on 16
 views; 23k likes on 13k views). They take the top two engagement ranks
@@ -129,6 +159,11 @@ case barely occurs. Composite also uses engagement's *percentile*, so outlier ma
 distort nothing. Engagement belongs on the composite axis and is measured reasonably.
 
 ## What we measured
+
+> ⚠ **Some figures in this section were retracted on 2026-07-17** — notably the −0.173
+> correlation and everything computed on the `accel > 0` "mover" cohort. The structural
+> findings (the pool mismatch, the binary axis, composite's shape) replicated on a second
+> day and stand. **Read *Retractions* at the end before citing anything here.**
 
 All figures from the 2026-07-16 00:05 run (scoring 2026-07-15), over the 3116
 narratives that have **both** indicators and are therefore classifiable.
@@ -178,7 +213,19 @@ Composite is well spread and usable as-is. Acceleration is not: over half the co
 zero, and among the 1384 that are non-zero, the median grew **0.46%** and p25 grew
 **0.029%**.
 
-### The axes are anti-correlated, and that is real
+### The axes are anti-correlated — *disputed as of 2026-07-17*
+
+> **Status of the three numbers in this section:**
+>
+> - **Full cohort, −0.173 — RETRACTED.** It is **+0.198** on 2026-07-16. See *Retractions*.
+> - **Movers with velocity, −0.015 — holds.** −0.080 on 2026-07-16. Both ≈ 0.
+> - **Movers without velocity (D7), −0.172 — suspect, not retracted.** It was computed on
+>   the `accel > 0` cohort, which overlaps D0's real cohort by only 58%, and it could not
+>   be re-checked on 2026-07-16 because rebuilding the D7 composite needs the
+>   engagement/reach/velocity component scores and that day's pull carries only the blend.
+>   **Re-run the component pull for a second day before D7 or D8 leans on it.**
+>
+> The reasoning below is sound; the specific magnitude is what is in doubt.
 
 Over the full cohort, Spearman between the axes is **−0.173**. Restricted to the 1384
 narratives that actually moved (the cohort D5 leaves us), it is **−0.015** — apparently
@@ -223,6 +270,75 @@ top-20% × top-20% yields 26 on this day, top-10% × top-10% yields 0.
 
 ## Decisions
 
+### D0 — Rank only what we measured
+
+**Acceleration ranks only narratives we measured on `calc_date`. Composite ranks only
+narratives we measured at least once.**
+
+Composite is a *level*; acceleration is a *rate*. A level is known from any past
+measurement — not re-scraping a narrative today does not make its size unknown. A rate
+requires two observations bracketing the period; without a measurement on the day it is
+not zero, it is **uncomputable**, and a narrative we did not look at must not be ranked
+as the least-accelerating one.
+
+The two axes therefore rank over different pools. That is a consequence of the two axes
+requiring different evidence, not a design choice needing its own justification. D3, D5
+and D7 all follow from this rule and are stated below as its consequences.
+
+**The current system has the two criteria exactly backwards:**
+
+| axis | D0 requires | the code actually does |
+|---|---|---|
+| composite | measured **at least once** (~22k) | `videos.updated_at` within 24h of `NOW()` → **visited today** (~2–3k) |
+| acceleration | measured **today** | any snapshot on or before `calc_date` → **ever measured** (~22k) |
+
+Each axis wears the other's cohort rule, and that single swap produces both headline
+pathologies. Composite's cohort is volatile and scraper-driven (3116 → 2078 overnight)
+because it is filtered for freshness it does not need. Acceleration is 93% zeros because
+it is computed over ~20k narratives nobody measured that day. One mistake, seen from two
+ends.
+
+**Mechanism — which column answers which question.**
+
+`videos.updated_at` is the **visit record**: `update_video` (`core/videos/repo.py:103`)
+bumps it unconditionally on every scrape.
+
+`video_stats` is **not** a measurement log, it is a **change log**: the same function
+writes a stats row only `if stats_changed`. So the absence of a `video_stats` row on a
+day means *either* we did not look *or* we looked and nothing moved — precisely the two
+states D0 forbids fusing. (`get_bulk_narrative_stats_comparison`'s own docstring says as
+much — "unchanged data is not re-recorded" — the clause was simply never connected to
+this decision.)
+
+The predicates are therefore:
+
+- **Acceleration:** ≥1 of the narrative's videos has `videos.updated_at::date = calc_date`.
+- **Composite:** ≥1 video with any `video_stats` row. Since `create_video` always writes
+  one, this reduces in practice to *the narrative has at least one video*.
+
+Using `updated_at::date = calc_date` also removes the sliding-`NOW()` defect: the current
+`updated_at >= NOW() - 24h` re-evaluates `NOW()` per batch transaction, so the cohort
+moves underneath the pagination mid-run. A fixed date does not.
+
+**Accepted cost — the acceleration cohort is computable exactly once.** `updated_at` is a
+single mutable column recording only the *last* visit, so once a video is visited again
+the earlier day's answer is gone forever. Consequences, all of which are real:
+
+- **No backfill.** `--calc-date` cannot reconstruct an older day's acceleration cohort.
+- **No re-scoring.** If the weights change, history cannot be re-scored; only new days can
+  be measured. Every tuning iteration costs a wait.
+- **A missed or failed run loses that day permanently.**
+- **A race at the day boundary.** The job scores yesterday but reads `updated_at` today,
+  so any video re-visited between midnight and the moment the acceleration phase reads is
+  silently dropped from the cohort. At a 00:05 start that is a 5-minute window — but
+  phase 1 runs first, and D3 makes phase 1 ~11× longer, so the real window is however long
+  phase 1 takes. If the scraper's daily sweep begins near midnight the loss could be both
+  large and biased. **Unverified — needs the scraper's schedule. See O6.**
+
+A `video_visits(video_id, visited_at)` table would remove all four for the price of a
+migration. Deferred, not rejected — revisit if the race in O6 turns out to bite, or the
+first time an inability to re-score history blocks a decision.
+
 ### D1 — Four labels
 
 `early_surge`, `trending`, `viral`, `consolidated`, replacing the current
@@ -248,21 +364,35 @@ thing being ranked is real, since ranking cannot manufacture signal where there 
 
 ### D3 — The two axes rank over *deliberately different* pools
 
+**A consequence of D0, not an independent decision.** Composite requires one measurement
+ever; acceleration requires one today; so the pools differ. Nothing further needs arguing.
+
 **Composite** is ranked over **every narrative with video stats**, using each
 narrative's last known measurement (carry-forward). **Acceleration** is ranked only over
-narratives whose videos were **revisited on `calc_date`**.
+narratives whose videos were **visited on `calc_date`** (`videos.updated_at::date`, per
+D0's mechanism note — *not* `video_stats`, which cannot answer this).
 
-**Rationale — composite is a state, acceleration is a change.** A narrative's size and
-engagement are still known from its last measurement; not re-scraping it today does not
-make it unknown, so carry-forward is legitimate. Acceleration needs two measurements;
-without a fresh one it is genuinely uncomputable. Different epistemics, so different
-pools is the correct answer rather than a compromise.
+The second-order benefit is worth keeping in view: if composite were ranked only among
+today's revisited narratives, a narrative's "how big am I" rank would shift day to day
+depending on **who else happened to get scraped** — scraper noise injected directly into
+the composite axis, which is the thing D2's rationale is trying to keep out. That is not
+a hypothetical; it is the observed 3116 → 2078 turnover. Ranking over all narratives
+gives a stable, scraper-independent answer.
 
-There is a second reason. If composite were ranked only among today's revisited
-narratives, a narrative's "how big am I" rank would shift day to day depending on **who
-else happened to get scraped** — scraper noise injected directly into the composite
-axis, which is the thing D2's rationale is trying to keep out. Ranking over all
-narratives gives a stable, scraper-independent answer.
+**D3 is worth more than the cost line below suggests.** Composite's current pool comes
+from `get_prevalent_narratives_summary` — a *dashboard pagination query*
+(`core/narratives/repo.py:1595`, docstring: "optimized for dashboard display"), whose
+predicate is `videos.updated_at >= NOW() - 24h` ordered by how many of the narrative's
+videos were touched, paginated. "Prevalent" therefore means *recently scraped, ranked by
+how much of it got scraped* — not large, not important. Adopting D3 deletes that query
+from the pipeline and takes the `NOW()` anchor, the wrong-table filter and the
+pagination instability with it. It is not merely a better ranking pool.
+
+**Implementation cost (revised).** ~22.4k narratives vs ~2.1k on 2026-07-16 — **~11×**,
+not the 7× estimated earlier. Phase 1 is per-narrative: each opens a transaction, opens a
+*second* nested transaction for `get_narrative_stats`, then issues three separate inserts
+(`core/narratives/service.py:444-536`). At 22k that is ~88k queries across ~44k
+transactions. **Phase 1 must become a bulk query before D3 is shippable.**
 
 **Why mixing pools is safe here:** every region boundary is axis-aligned. Each
 percentile is only ever compared to a constant on its own axis (`composite >= 0.8`,
@@ -296,34 +426,43 @@ video divided by its own gap. Salvage rather than rewrite.
 
 ### D5 — Unmeasured narratives are excluded from the cohort, not ranked at zero
 
+**A consequence of D0** — the acceleration half of it, stated as a cohort predicate.
+
 **The predicate:** a narrative is in the acceleration cohort if **at least one of its
-videos has a `video_stats` row recorded on `calc_date`**. Zero refreshed videos means
-excluded; one or more means it stays.
+videos has `videos.updated_at::date = calc_date`**. Not visited means excluded; visited
+means it stays.
 
-The 55.6% sitting at exactly zero are largely narratives whose videos were not
-re-measured, so the carried-forward snapshot is identical on both days. That is missing
-data wearing a zero. Ranking them as "the least accelerating" asserts something the data
-does not support, and it is what compresses the usable axis into a sliver.
+> **Corrected 2026-07-17.** This predicate previously read "*at least one of its videos
+> has a `video_stats` row recorded on `calc_date`*", justified by: "*the two cases are
+> distinguishable — `video_stats.recorded_at` makes this a plain `EXISTS`. This is a
+> measurement question, not an inference.*" **That was false and D5 was unimplementable
+> as written.** `video_stats` is a change log (D0's mechanism note): a video re-scraped
+> with unmoved numbers writes no row. So the `EXISTS` answers "did any video's stats
+> *change* today", and its absence fuses "we did not look" with "we looked and nothing
+> moved" — the two cases D5 exists to separate. The visit is recorded in
+> `videos.updated_at`, which is what the predicate now uses.
 
-**Narratives that were refreshed but did not grow stay in, ranked at zero.** That is not
-a compromise — it is required. `consolidated` means big *and flat*, so a large narrative
+The narratives sitting at exactly zero are largely ones whose videos were not visited, so
+the carried-forward snapshot is identical on both days. That is missing data wearing a
+zero. Ranking them as "the least accelerating" asserts something the data does not
+support, and it is what compresses the usable axis into a sliver.
+
+**Narratives that were visited but did not grow stay in, ranked at zero.** That is not a
+compromise — it is required. `consolidated` means big *and flat*, so a large narrative
 that genuinely stopped growing has `accel = 0` by definition. Excluding all zeros would
 drop precisely those narratives out of the taxonomy, producing a discontinuity where
 growing 0.01% earns `consolidated` and growing 0.00% earns no label at all.
 
-The two cases are distinguishable — `video_stats.recorded_at` makes "was any video
-refreshed on `calc_date`" a plain `EXISTS`. This is a measurement question, not an
-inference.
-
 **Consequence:** a tie-block of honest zeros remains at the bottom of the acceleration
-axis, sized by however many refreshed narratives are genuinely flat. That is fine for
+axis, sized by however many visited narratives are genuinely flat. That is fine for
 `consolidated` (they *should* share the bottom rank) but it means the smallest non-zero
-rank sits at the block's height — so the `y = 0.4` boundary is only safe if the block is
-smaller than 40% of the cohort. Unverified; see O3 and the validation notes.
+rank sits at the block's height — so a low boundary is only meaningful if the block is
+smaller than the boundary. **The block's size is unknown and unmeasurable from existing
+data** (it needs the visit predicate, which is forward-only per D0), so this cannot be
+settled until visit data accumulates. See O3.
 
-**Not addressed by D5:** partial coverage. See the coverage-bias defect above and O5.1 —
-D5 as scoped is all-or-nothing, and says nothing about the narrative whose acceleration
-is real but measured through 5% of its videos.
+**Not addressed by D5:** partial coverage — but this now looks like a non-problem; see
+the coverage-bias defect above and O5.1, both of which were retracted on 2026-07-17.
 
 ### D6 — `viral` requires both axes at once
 
@@ -346,6 +485,12 @@ composite = engagement_pct×0.625 + reach_pct×0.375
 
 The weights are the current 0.50 / 0.30 rescaled proportionally, preserving their 5:3
 balance. (The exact split is a free choice; proportional is the default, not a finding.)
+
+**Dropping velocity is a consequence of D0, not a weighting judgement.** Velocity is a
+*change* measure; D0 says changes may only be ranked where measured on `calc_date`;
+composite's pool is "measured at least once". A change measure cannot live on that axis.
+It is a category error, and the rest of this section is the empirical confirmation rather
+than the argument.
 
 **Rationale.** D3 ranks composite over every narrative with stats, using carry-forward.
 That works for engagement and reach, which are **state** — still known from the last
@@ -411,26 +556,37 @@ with a `viral` box carved out of the top-right) is agreed in shape, and D6 confi
 `viral` box stays a box rather than becoming a band. The specific boundary values are
 provisional and depend on O2.
 
-Note that the boundaries must now be read against the **mover cohort** (D5), not the
-full corpus: "top 10% of narratives that moved" is 138 narratives, not 312.
+**O3 now blocks on instrumentation, not analysis.** A boundary is only meaningful if it
+sits above the honest-zero tie block (D5), and that block's size cannot be computed from
+existing data — it needs the visit predicate, which D0 makes forward-only. **No boundary
+number can be chosen until visit data accumulates.**
+
+> **Retracted 2026-07-17:** an earlier revision put the tie block at 42.5% of the cohort
+> (596 of 1403) and concluded `y = 0.4` "fails, narrowly". Both numbers came from the
+> mislabelled split — see *Retractions*. The true block size is unknown.
 
 **O4 — Frontend and API impact.** `narrative_alert_level` is a Postgres enum and the
 labels are user-facing. Renaming `alert`/`watch` to `trending`/`consolidated` needs a
 migration and coordination with consumers.
 
-**O5 — the measurement rules.** D5 settles the top-level predicate (≥1 video refreshed
-on `calc_date`). These remain:
+**O5 — the measurement rules.** D0 settles the top-level predicate (≥1 video with
+`videos.updated_at::date = calc_date`). These remain:
 
-**O5.1 — Coverage threshold.** Coverage is a continuum, not a flag, and acceleration is
-biased down by (1 − coverage). D5 as scoped is all-or-nothing: it drops narratives at 0%
-coverage and keeps everything else, including the narrative measured through 5% of its
-videos whose number is wrong by 20×. Should the predicate instead be `coverage >= k`,
-and what is `k`? **This is the highest-value open question** — it also decides whether
-the "movers are noise" reading survives.
+**O5.1 — Coverage threshold. RESOLVED 2026-07-17: no threshold.** The question was
+whether the predicate should be `coverage >= k` rather than all-or-nothing, since
+acceleration was thought biased down by (1 − coverage). Three reasons to close it:
 
-**O5.2 — How coverage is measured.** By video count, or views-weighted? Views-weighted
-is the recommendation: one refreshed video holding 99% of the narrative's views is 99%
-covered, not 1%. It is the share that actually drives the number.
+1. **The premise is largely false** — see the retracted coverage-bias defect. A video
+   with no stats row mostly did not *change*, so zero is its correct contribution.
+2. **The effect is not detectable.** Median measured acceleration is flat across a
+   hundredfold range of coverage (0.00068 at <1% vs 0.00080 at ≥50%).
+3. **It would be a size filter in disguise.** Coverage correlates **−0.61** with
+   narrative size, so `coverage >= k` systematically drops the largest narratives —
+   exactly the population `viral` and `consolidated` exist to describe. That is a bad
+   trade for a bias that cannot be measured.
+
+**O5.2 — How coverage is measured. MOOT** — follows O5.1. (For the record, the
+views-weighted measure was the right one and is what the O5.1 numbers use.)
 
 **O5.3 — Denominator scope.** Two options, neither free:
 - `Δ(refreshed) / prev(all)` — today's behaviour. Biased down by (1 − coverage).
@@ -441,19 +597,35 @@ covered, not 1%. It is the share that actually drives the number.
 Which is right depends on how the revisit strategy selects videos — a question about the
 scraper, not about this data.
 
-**O5.4 — Maximum baseline staleness.** D4 divides by elapsed days, which assumes growth
-was even across the gap. A video scraped after 50 days whose surge happened on day 40
-reports `(large growth)/50` as *today's* rate — per-day normalisation launders an old
-surge into current acceleration. There should be a maximum gap past which a baseline is
-unusable. Value unknown; needs the staleness distribution.
+**O5.4 — Maximum baseline staleness. RESOLVED 2026-07-17: cap at 7–14 days.** The worry
+was that D4's per-day normalisation launders an old surge into current acceleration — a
+video scraped after 50 days whose surge happened on day 40 reports `(large growth)/50` as
+*today's* rate. Real, but rare. Measured on 2026-07-15:
 
-**O5.5 — Videos with no baseline.** A video first scraped on `calc_date` has nothing to
-compare against. Narrative growth, or scraper discovery? **The schema forecloses telling
-them apart** (see the `claim_narratives` defect above). Options: treat first-scrape as
-growth (wrong whenever old content is discovered); drop no-baseline videos (safe, but
-blind to new-video growth — arguably the strongest early-surge signal available); or
-migrate `claim_narratives` to add `created_at`, which fixes it correctly but only
-forward.
+| avg baseline age | p10 | p50 | p90 | p99 | max |
+|---|---|---|---|---|---|
+| days | 1.0 | 1.0 | 4.0 | 11.0 | 91.0 |
+
+96.8% of the cohort is within 7 days, 99.2% within 14. A cap anywhere in that range
+removes the laundering case for ~3% of the cohort. Cheap; take it.
+
+**O5.5 — Videos with no baseline. D0 forces this: add `claim_narratives.created_at`, or
+drop the term.** A video first scraped on `calc_date` has one observation, and a change
+needs two — so under D0 it cannot contribute to acceleration. But `change_video_count`
+currently counts it as growth, which is why the 576 no-baseline narratives sit at the top
+of the axis (see the scraper defect above).
+
+The signal is worth keeping if it can be had honestly: a narrative genuinely gaining a
+video is probably the strongest `early_surge` evidence available. But `claim_narratives`
+has no `created_at` (see the schema defect above), so "gained a video" and "we discovered
+an old video" are indistinguishable. Previously this listed three options; **D0 removes
+the first.** What remains:
+
+- **Migrate `claim_narratives` to add `created_at`** — measures linkage properly, forward
+  only.
+- **Drop no-baseline videos from acceleration** — safe, loses the new-video signal.
+
+There is no third path where we keep counting things we did not measure.
 
 **O5.6 — Aggregation.** D4 wants each video divided by its own gap, but acceleration is
 defined on narrative-level sums today. Combining per-video *rates* into a narrative rate
@@ -465,6 +637,41 @@ narrative_daily_growth = Σ(video's daily view gain) / Σ(baseline views of thos
 
 Numerator and denominator then cover the same videos — which is O5.3's second option, so
 O5.3 and O5.6 are one decision, not two.
+
+**O6 — The scraper's revisit strategy.** *New, 2026-07-17, and the highest-value open
+question now that O5.1 is closed.* Two things depend on it and neither is answerable from
+this database:
+
+- **Does the revisit strategy prioritise active videos?** This decides O5.3/O5.6 (whether
+  `Δ(refreshed)/prev(refreshed)` is biased upward), and it is the leading explanation for
+  why coverage dilution is undetectable (O5.1). Until it is known, acceleration is
+  *uninterpretable* rather than merely noisy.
+- **When does the daily sweep run?** D0's acceleration predicate reads `updated_at` today
+  for a `calc_date` of yesterday, so every video re-visited between midnight and the
+  moment phase 2 reads is silently dropped from the cohort. Phase 1 runs first and D3
+  makes it ~11× longer, so that window is however long phase 1 takes. If the sweep starts
+  near midnight the loss could be large and biased, and D0's cheap `updated_at` mechanism
+  would have to give way to a `video_visits` log.
+
+This is a question for whoever owns the scraper, and it is the real critical path.
+
+**O7 — Staleness bound for composite.** *New, 2026-07-17.* D0 admits any narrative
+"measured at least once" to the composite pool, with no upper bound on how old that
+measurement is. A narrative last measured six months ago has a well-defined state — a
+six-month-old one. Should it be ranked against a narrative measured yesterday? This is
+the composite-side analogue of O5.4, which only ever asked about acceleration baselines.
+Not answerable from the pulls so far: `narrative_coverage.txt` reports baseline age only
+for refreshed videos, so the staleness distribution of the never-visited ~19k is unknown.
+Needs one query.
+
+**O8 — Should `max(0, ...)` stay?** *New, 2026-07-17.* "Measured and declined" is a
+measurement; flooring it to zero merges decliners with genuinely flat narratives, which is
+the class of merge D0 forbids. The floor was added deliberately
+(`core/narratives/service.py:598-603`) to stop decliners going negative and pushing flat
+narratives up the ranking — but under D0 that reordering is *correct*: a flat narrative is
+genuinely accelerating more than a shrinking one, and `consolidated` (big and flat) should
+rank above a narrative losing views rather than tie with it. Removing the floor changes
+what the bottom of the axis means, so decide it explicitly rather than inheriting it.
 
 ---
 
@@ -483,31 +690,91 @@ rank top on both axes and fire, so the 0 plausibly means "nothing went viral tha
 rather than "this cannot fire". That is an inference from one day. **Before shipping,
 confirm over ~2 weeks that `viral` fires sometimes at the chosen boundaries.**
 
-**Every mover-cohort figure in this document uses the WRONG cohort.** The −0.172, the
-`viral` grid, the n=1384 — all were produced by filtering to `accel > 0`. That is not
-D5's predicate. `accel > 0` also drops narratives that *were* refreshed and genuinely
-did not grow, which D5 explicitly keeps. The real cohort is larger than 1384 by however
-many narratives are refreshed-and-flat, and it contains honest zeros that the simulation
-excluded. **Every one of these numbers must be recomputed against the real predicate
-before any boundary is chosen.**
+### Retractions — 2026-07-17
 
-The split of the 1732 zeros into refreshed-and-flat versus never-refreshed is unknown
-and is the single number that unblocks this. `narrative_coverage.txt` in the repo root
-pulls it, along with the coverage distribution O5.1 needs and the baseline-staleness
-distribution O5.4 needs.
+Read these before citing any number in this document.
 
-**D3's expanded composite pool has not been simulated.** Composite is currently computed
-only for the prevalent set (~3116); D3 requires it for all ~22k. Every composite
-percentile in this document is a rank out of 3116 and will change under D3 — including
-the `viral` grid, since adding ~19k dormant narratives moves where the active ones rank.
-This also has a real cost: phase 1 currently batches over prevalent narratives only, so
-D3 means computing composite for 7× more narratives.
+**The mover-cohort figures still use the wrong cohort, but not for the stated reason.**
+The −0.172, the `viral` grid and the n=1384 were produced by filtering to `accel > 0`,
+which is not D0's predicate. The earlier claim was that the real cohort is "larger than
+1384 by however many narratives are refreshed-and-flat." **It isn't.** Measured against
+`narrative_coverage.txt` on 2026-07-15, the proxy makes two errors that cancel in the
+count: it drops 596 narratives it should keep and admits 576 it should not. The cohorts
+come out the same size (1383 vs 1403) and **overlap on only 807 narratives — 58%**. Same
+size, 42% different population, and no summary statistic reveals it. Every mover-cohort
+number still needs recomputing; the size just will not warn you.
 
-**D4 has not been simulated at all.** Per-day normalisation needs each video's elapsed
-gap, which no pull so far carries. D4 changes what acceleration measures, so it will
-move the distributions and the correlation — in either direction.
+**The split's labels were wrong.** What was reported as "596 refreshed-and-flat / 1135
+never-refreshed" is not that at all, because `video_stats` is a change log:
 
-**Every number comes from a single run** (2026-07-15). Before boundaries are fixed, the
-measurements should be repeated across several days to confirm the distributions are
-stable — particularly the 55.6% zero fraction and the −0.172 correlation, both of which
-the design now leans on heavily.
+| reported as | actually is | n |
+|---|---|---|
+| "refreshed and flat — D5 keeps" | had ≥1 stats *change*, net effect ≤ 0 → **decliners floored to zero** | 596 |
+| "never refreshed — D5 drops" | no stats change: **unmeasured *and* genuinely flat, fused** | 1135 |
+
+The 1135 are mostly narratives that *were* re-scraped — that is why they are in the
+composite pool at all — whose numbers did not move. D5's two target cases are the two
+fused inside them.
+
+**The tie block is not 42.5%.** See O3.
+
+**The coverage-bias defect and O5.1** are retracted and resolved respectively; see above.
+
+**The full-cohort −0.173 correlation should never have been a finding.** On 2026-07-16 it
+is **+0.198** — a sign flip and a 0.37 swing in one day. It is computed over a population
+about half of which is tied at exactly zero, and those zeros are mostly narratives nobody
+re-scraped, so the statistic measures *whether the narratives that went unmeasured that
+day happened to be big or small*. That is a property of the scraper's schedule, not of the
+narratives. Its instability is itself evidence for D0. Among movers the picture is stable
+and boring: −0.015 → −0.080.
+
+### Replicated on a second day (2026-07-16)
+
+The structural claims hold; only the magnitudes moved.
+
+| | 07-15 | 07-16 |
+|---|---|---|
+| classifiable cohort | 3116 | 2078 |
+| implied `composite_pct` cohort | 3116 | 2078 |
+| implied `accel_pct` cohort | 22321 | 22376 |
+| smallest non-zero `accel_pct` | 0.9296 | 0.9347 |
+| `composite` p50 / max | 0.510 / 0.911 | 0.512 / 0.947 |
+| `accel` exactly zero | 55.6% | 47.0% |
+
+The pool mismatch, the binary acceleration axis and composite's shape all reproduce. The
+zero fraction moved 8.6 points, so do not lean on 55.6% as a constant.
+
+**The `calculated_at` bug is still live in production.** `f552c0d` is not deployed: 47 of
+2026-07-16's 149 `early_surge` badges sit at acceleration percentile exactly 0.0 — a
+combination the classifier cannot emit. All 430 narratives that became classifiable that
+run carry a NULL badge, exactly and only those 430, which is precisely what the bug
+predicts (no previous-run rows → unclassifiable → nulled). The 75 narratives badged
+`viral` have a median acceleration of 0.00016.
+
+### What can and cannot be simulated
+
+D0 splits the simulation cleanly in two, and this is the practical upshot of the whole
+2026-07-17 pass.
+
+**Composite's half can be simulated today.** "Measured at least once" is answerable from
+existing data — `create_video` always writes a `video_stats` row, so every video has a
+first measurement on record. D3's expanded pool can therefore be evaluated against any
+historical day, right now, with no new instrumentation. Worth doing: every composite
+percentile in this document is a rank out of ~3116 and will move under D3, since adding
+~19k dormant narratives changes where the active ones land — including the `viral` grid.
+
+**Acceleration's half cannot be simulated at all.** D0's predicate needs `updated_at`,
+which records only the *last* visit, so no past day's acceleration cohort can be
+reconstructed. This is not "hard", it is impossible from recorded data. **Consequences:**
+the boundary numbers (O2, O3) cannot be chosen from history; the design can only be
+validated as visit data accrues, day by day, going forward; and each tuning iteration
+costs a wait rather than a re-run. If that becomes intolerable, the `video_visits` table
+in D0 is the escape hatch — and it only starts paying from the day it ships, so the
+decision has a clock on it.
+
+**D4 has not been simulated either.** Per-day normalisation needs each video's elapsed
+gap, which no pull so far carries. D4 changes what acceleration measures, so it will move
+the distributions and the correlation — in either direction.
+
+**`viral` must still be shown to fire.** See above; unchanged, and now unfalsifiable from
+history for the same reason acceleration is.
