@@ -1,9 +1,23 @@
 # Narrative alert system — redesign
 
-**Status:** design in progress. Decisions below are settled; open questions at the end
-are not. No implementation yet.
+**Status: the alert conditions are CLOSED (2026-07-17).** D0–D10 define what the system
+badges and why; D10 carries the exact conditions. No implementation yet.
 
-**Revised 2026-07-17.** Two passes:
+**What is closed:** the labels, both axes and how they are computed, both cohorts, the
+weights, and the region geometry. O2 and O3 are answered; D3's grey-diagonal caveat is
+resolved.
+
+**What is not, and none of it is alert-condition design:**
+- **O6** — the scraper's revisit strategy. Not answerable from this database, and it gates
+  O5.3/O5.6 (whether `Δ(refreshed)/prev(refreshed)` is biased upward) plus D0's
+  day-boundary race. **The critical path.**
+- **O5.5** — the `uploaded_at` run, to learn whether the ~90% of alerts that come from
+  gained videos are narratives genuinely spreading or the scraper finding old videos. A
+  measurement, not a decision: the rule is settled, its *value* is not yet known.
+- **O4** (enum migration and consumers), **O7** (composite staleness bound), **O8** (the
+  floor, de-escalated by D9). Plus D4, which is decided but never simulated.
+
+**Revised 2026-07-17.** Three passes:
 
 1. **D0** was added and now derives D3, D5 and D7, which were previously argued
    independently. Several measurements were retracted — see *Retractions* under
@@ -14,6 +28,10 @@ are not. No implementation yet.
    narratives that grew and were erased**. This explains the "movers are noise" reading,
    the binary axis, and the scraper-discovery narratives owning the top — all of it is
    downstream of one line. See the defect above D9.
+3. **D10** records the region geometry from the source diagram. The regions are
+   **rectangles, not quadrants** — `early_surge` is capped to *small* narratives, and there
+   is a **no-badge region**. Both had been read wrongly here. This closes O2, O3 and D3's
+   caveat, and with them the alert-condition design.
 
 **Branch:** `redesign/narrative-alert-system`, based on `fix/indicators-calc-date-stamp`
 (the classifier on `main` reads the previous run's indicators, so any evaluation done
@@ -420,13 +438,16 @@ ships, so the decision has a clock on it.**
 ### D1 — Four labels
 
 `early_surge`, `trending`, `viral`, `consolidated`, replacing the current
-`viral` / `early_surge` / `alert` / `watch` / `none`.
+`viral` / `early_surge` / `alert` / `watch` / `none`. **Exact conditions: D10.**
 
-The quadrant model these express: small-but-climbing is early surge, big-and-climbing is
-viral, big-and-flat is consolidated, and trending is the broad middle. `consolidated` is
-the genuinely new idea — the old taxonomy had nowhere to put a large narrative that has
+The model these express: small-but-climbing is early surge, big-and-climbing is viral,
+big-and-flat is consolidated, and trending is the broad middle. `consolidated` is the
+genuinely new idea — the old taxonomy had nowhere to put a large narrative that has
 stopped growing, so `viral` absorbed it and a "plateaued-but-popular" branch existed to
 paper over the gap.
+
+**The four are not exhaustive.** Small *and* flat gets no badge at all — see D10's no-badge
+region. The labels partition a *part* of the percentile plane, not all of it.
 
 ### D2 — Axes are percentiles, not absolute values
 
@@ -483,9 +504,10 @@ denominator.
 > into one statement — acceleration is computed only where measurable, and that set is
 > its pool.*
 >
-> *Caveat: this assumes the grey diagonal in the source diagram is a construction line.
+> *~~Caveat: this assumes the grey diagonal in the source diagram is a construction line.
 > If it is a real boundary it compares the two axes to each other, and the pools would
-> have to match after all. Unresolved.*
+> have to match after all. Unresolved.~~* **RESOLVED 2026-07-17 — it is a construction
+> line, provably. See D10. Every edge is axis-aligned and D3 stands.**
 
 ### D4 — Acceleration is growth *per elapsed day*
 
@@ -670,10 +692,12 @@ and flat" rather than "grew, but the rate fell".
 
 - **Badge volume.** 2237 either way — `accel_pct >= 0.50` selects half the cohort whatever
   you rank. Volume is set by boundaries, not weights. See O2/O3.
-- **Acquisition dominance.** At `boundary_accel = 0.99`, 22 of the 23 narratives that fire
-  gained videos. That is D0/O5.5's new-video rule working as specified — a narrative that
-  gained a 750k-view video *did* grow by 750k views — and no reweighting can or should
-  change it. Whether it is signal turns on O5.5's `uploaded_at` question.
+- **Acquisition dominance.** Under D10's geometry, **247 of the 333** narratives that fire
+  (`viral` + `early_surge`) got there by gaining videos — **74% of the alert stream**, and
+  92% of `viral` alone. That is D0/O5.5's new-video rule working as specified — a narrative
+  that gained a 750k-view video *did* grow by 750k views — and no reweighting can or should
+  change it. Whether it is signal turns on O5.5's `uploaded_at` question, which is the last
+  measurement the design is waiting on.
 
 **Supersedes** the `feat/unify-virality-windows` reweighting of `change_video_count`
 (0.35 → 0.10), which targeted the right symptom — noise at the top — from the wrong term.
@@ -684,30 +708,81 @@ and all 43 are growing at ~1e-6. O8 stops being urgent — the floor was never t
 only what made the `change_engagement` defect fatal rather than merely wrong. The question
 stands on its own merits.
 
+### D10 — The region geometry
+
+**Settled 2026-07-17 against the source diagram** (`Captura de pantalla 2026-07-16
+122522 (2).png`). These are the alert conditions. Evaluated **in this order** — `viral` is
+carved out of the `trending` box, so it must be tested first:
+
+```
+viral         composite_pct >= 0.80  AND  accel_pct >= 0.80
+early_surge   composite_pct <= 0.40  AND  accel_pct >= 0.50
+consolidated  composite_pct >= 0.50  AND  accel_pct <= 0.40
+trending      composite_pct >= 0.40  AND  accel_pct >= 0.40
+(no badge)    everything else
+```
+
+**The regions are rectangles, not quadrants.** Two consequences that a quadrant reading
+gets wrong, and that earlier revisions of this document did get wrong:
+
+- **`early_surge` is for SMALL narratives only** (`composite <= 0.40`). It is not "anything
+  climbing" — a large narrative that is climbing is `viral` if it clears 0.80 on both axes,
+  and `trending` otherwise. That cap is the whole point of the label.
+- **There is a no-badge region** — the white bottom-left, small *and* flat. The taxonomy
+  does not tile the plane, and D1's four labels are not exhaustive. An earlier revision
+  recorded "every narrative gets a badge" as a gap in D1; that was an artifact of a
+  two-threshold classifier, not of this design.
+
+**Measured** (2026-07-16, D9 weights, n=2237):
+
+| label | n | share | gained videos |
+|---|---|---|---|
+| `viral` | 120 | 5.4% | 92% |
+| `early_surge` | 213 | 9.5% | 64% |
+| `consolidated` | 681 | 30.4% | 0% |
+| `trending` | 958 | 42.8% | — |
+| *(no badge)* | 265 | 11.8% | — |
+
+1972 of 2237 badged (88%). `consolidated` has a median `accel` of 0.00001 — genuinely
+flat, which is what it is supposed to mean, and only true since D9.
+
+**The grey diagonal `f` is a construction line — RESOLVED.** It runs J(0, 0.5) → L(0.5, 0),
+i.e. `composite + accel = 0.5`. Every badged region above forces `composite + accel >= 0.5`
+(`trending` needs both >= 0.40, so >= 0.80; `early_surge` needs `accel >= 0.50`;
+`consolidated` and `viral` need `composite >= 0.50`). So the triangle below `f` lies
+entirely inside the no-badge region and cuts nothing. Confirmed on the data: 62 narratives
+fall below `f`, all 62 already unbadged, zero exceptions. **This closes D3's caveat** — every
+edge is axis-aligned, the axes are never compared to each other, and D3's differing pools
+are safe.
+
+**Note on the shared edges.** `trending`'s floors (0.40 / 0.40) coincide with
+`early_surge`'s composite ceiling and `consolidated`'s acceleration ceiling, so the regions
+abut with no gap. This is read from the diagram, where the points O and P sit adjacent near
+(0.4, 0.5); they are taken as coincident. If they are in fact distinct, `trending`'s left
+edge is independent of `early_surge`'s right edge and a narrow band between them would be
+unbadged. The simulation artifact exposes all eight edges separately so this can be
+re-examined without touching the query.
+
 ---
 
 ## Open questions
 
-**O2 — Daily volume per label.** Roughly how many narratives should carry each badge on
-a normal day? This is the only free parameter left once D1–D8 are fixed, and it cannot
-be derived from the data. The `viral` grid above is the shape of the answer: with the D7
-composite, top-20% × top-20% gives 26 and top-10% × top-10% gives 0. D8 accepts that
-`viral` is rare, so the question is how rare. Needed before any boundary numbers are
-final.
+**O2 — Daily volume per label. CLOSED 2026-07-17 by D10.** The question was how many
+narratives should carry each badge on a normal day — the last free parameter, underivable
+from data. It is answered by the boundaries the source diagram fixes: on 2026-07-16 that
+is 120 `viral`, 213 `early_surge`, 681 `consolidated`, 958 `trending`, 265 unbadged. The
+volume is whatever the geometry selects; there is no separate volume knob.
 
-**O3 — Region boundaries.** The geometry (a 2×2-ish partition of the percentile plane
-with a `viral` box carved out of the top-right) is agreed in shape, and D6 confirms the
-`viral` box stays a box rather than becoming a band. The specific boundary values are
-provisional and depend on O2.
+**O3 — Region boundaries. CLOSED 2026-07-17 — see D10**, which carries the geometry read
+from the source diagram.
 
-**O3 now blocks on instrumentation, not analysis.** A boundary is only meaningful if it
-sits above the honest-zero tie block (D5), and that block's size cannot be computed from
-existing data — it needs the visit predicate, which D0 makes forward-only. **No boundary
-number can be chosen until visit data accumulates.**
-
-> **Retracted 2026-07-17:** an earlier revision put the tie block at 42.5% of the cohort
-> (596 of 1403) and concluded `y = 0.4` "fails, narrowly". Both numbers came from the
-> mislabelled split — see *Retractions*. The true block size is unknown.
+> Two things this question worried about, both now moot. **The tie-block objection
+> dissolved with D9:** O3 argued no boundary could be chosen until we knew how much of the
+> acceleration axis was a dead tie at zero, and an earlier revision put that block at 42.5%
+> and declared `y = 0.4` unusable. The block is **150 of 2237 (6.7%)** — the 771-strong
+> version was mostly the `change_engagement` defect erasing real growth, not a property of
+> the data. `y = 0.4` sits well clear of it. **And the 42.5% figure is retracted anyway**;
+> it came from the mislabelled split (see *Retractions*).
 
 **O4 — Frontend and API impact.** `narrative_alert_level` is a Postgres enum and the
 labels are user-facing. Renaming `alert`/`watch` to `trending`/`consolidated` needs a
