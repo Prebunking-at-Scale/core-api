@@ -312,7 +312,20 @@ this decision.)
 
 The predicates are therefore:
 
-- **Acceleration:** ≥1 of the narrative's videos has `videos.updated_at::date = calc_date`.
+- **Acceleration:** ≥1 of the narrative's videos was **provably visited** on `calc_date` —
+  which is a *union of two kinds of evidence*, because neither alone is sufficient:
+
+  ```
+  visited(video, D)  ⟸  ∃ video_stats row on D          -- permanent, never decays
+                     ∨  videos.updated_at::date = D      -- ephemeral, overwritten by the next scrape
+  ```
+
+  A `video_stats` row **proves** a visit (`create_video` always writes one;
+  `update_video` writes one when the numbers moved), and `video_stats` is append-only, so
+  that evidence is as good in six months as it is today. `updated_at` catches the visits
+  that changed nothing — but only until the next scrape overwrites it.
+
+  The union misses exactly one case: *visited, nothing changed, and re-visited since*.
 - **Composite:** ≥1 video with any `video_stats` row. Since `create_video` always writes
   one, this reduces in practice to *the narrative has at least one video*.
 
@@ -320,24 +333,39 @@ Using `updated_at::date = calc_date` also removes the sliding-`NOW()` defect: th
 `updated_at >= NOW() - 24h` re-evaluates `NOW()` per batch transaction, so the cohort
 moves underneath the pagination mid-run. A fixed date does not.
 
-**Accepted cost — the acceleration cohort is computable exactly once.** `updated_at` is a
-single mutable column recording only the *last* visit, so once a video is visited again
-the earlier day's answer is gone forever. Consequences, all of which are real:
+**Accepted cost — the cohort decays, and it decays unevenly.** The `updated_at` half of
+the predicate holds only the *last* visit, so it is overwritten by the next scrape. That
+does not make a past day uncomputable — the `video_stats` half is permanent — but it
+splits the cohort into a durable part and a perishable one:
 
-- **No backfill.** `--calc-date` cannot reconstruct an older day's acceleration cohort.
-- **No re-scoring.** If the weights change, history cannot be re-scored; only new days can
-  be measured. Every tuning iteration costs a wait.
-- **A missed or failed run loses that day permanently.**
+| | evidence | on a past `calc_date` |
+|---|---|---|
+| **movers** (≥1 video changed that day) | `video_stats` row — append-only | **recovered in full** |
+| **flat** (visited, nothing changed) | `updated_at` only | **erodes**; gone once every video is re-scraped |
+
+**The decay is not neutral — it eats the honest zeros first**, which are precisely what
+D5 keeps for `consolidated` and precisely what sizes the tie block O3 needs. So:
+
+- **Raw `accel` for movers survives on a past day.** The mover list is inspectable
+  historically; that is more than previously stated here.
+- **`accel_pct` does not.** Losing the zeros shrinks the denominator, so every surviving
+  narrative ranks too high. **Boundaries cannot be chosen from a historical run.**
+- **No re-scoring.** A weights change cannot be re-evaluated against history at the
+  percentile level; only new days can. Every tuning iteration costs a wait.
+- **A missed or failed run loses that day's flat population permanently.**
 - **A race at the day boundary.** The job scores yesterday but reads `updated_at` today,
-  so any video re-visited between midnight and the moment the acceleration phase reads is
-  silently dropped from the cohort. At a 00:05 start that is a 5-minute window — but
-  phase 1 runs first, and D3 makes phase 1 ~11× longer, so the real window is however long
-  phase 1 takes. If the scraper's daily sweep begins near midnight the loss could be both
-  large and biased. **Unverified — needs the scraper's schedule. See O6.**
+  so any *unchanged* video re-visited between midnight and the moment the acceleration
+  phase reads is dropped. At a 00:05 start that is a 5-minute window — but **phase 1 runs
+  first, and D3 makes phase 1 ~11× longer**, so the real window is however long phase 1
+  takes. **Mitigation, and it is cheap: capture the visit set as the first statement of
+  the run, before phase 1**, which bounds the loss to the job's start offset regardless of
+  how slow phase 1 gets. Do this even if nothing else here changes.
 
-A `video_visits(video_id, visited_at)` table would remove all four for the price of a
-migration. Deferred, not rejected — revisit if the race in O6 turns out to bite, or the
-first time an inability to re-score history blocks a decision.
+A `video_visits(video_id, visited_at)` table would remove every one of these for the price
+of a migration, by making the flat half as durable as the mover half. Deferred, not
+rejected — revisit if O6 shows the sweep clusters near midnight, or the first time an
+inability to re-score history blocks a decision. **It only starts paying from the day it
+ships, so the decision has a clock on it.**
 
 ### D1 — Four labels
 
@@ -763,14 +791,21 @@ historical day, right now, with no new instrumentation. Worth doing: every compo
 percentile in this document is a rank out of ~3116 and will move under D3, since adding
 ~19k dormant narratives changes where the active ones land — including the `viral` grid.
 
-**Acceleration's half cannot be simulated at all.** D0's predicate needs `updated_at`,
-which records only the *last* visit, so no past day's acceleration cohort can be
-reconstructed. This is not "hard", it is impossible from recorded data. **Consequences:**
-the boundary numbers (O2, O3) cannot be chosen from history; the design can only be
-validated as visit data accrues, day by day, going forward; and each tuning iteration
-costs a wait rather than a re-run. If that becomes intolerable, the `video_visits` table
-in D0 is the escape hatch — and it only starts paying from the day it ships, so the
-decision has a clock on it.
+**Acceleration's half simulates *partially*, and degrades rather than failing cleanly.**
+D0's predicate unions permanent evidence (a `video_stats` row on `calc_date`) with
+ephemeral evidence (`updated_at`), so on a past day the **movers survive in full** and the
+**visited-but-flat population erodes**. Consequences:
+
+- **Raw `accel` and the mover list are inspectable on a historical day.** Useful — this is
+  how you eyeball whether the detections look sensible.
+- **`accel_pct` is not.** The ranking loses its zeros, so everything ranks too high.
+  **O2 and O3's boundaries cannot be chosen from history**, only from `calc_date = today`
+  or from days accrued going forward.
+- The erosion is biased toward exactly the population D5 exists to keep, so the tie block
+  O3 needs is the *least* recoverable thing in the design.
+
+If that becomes intolerable, the `video_visits` table in D0 is the escape hatch — and it
+only starts paying from the day it ships.
 
 **D4 has not been simulated either.** Per-day normalisation needs each video's elapsed
 gap, which no pull so far carries. D4 changes what acceleration measures, so it will move

@@ -1,0 +1,254 @@
+-- Simulate the redesigned alert system (D0-D8) against the database.
+-- Returns every narrative that WOULD carry a badge, with both axes and the badge.
+--
+-- Run updated_at_distribution.txt FIRST and set calc_date from what it shows.
+--
+-- ============================================================================
+-- WHAT IS SIMULATED FAITHFULLY (settled decisions)
+-- ============================================================================
+--   D0  composite pool = measured at least once; acceleration pool = visited on
+--       calc_date (videos.updated_at::date, NOT video_stats -- it is a change log)
+--   D3  composite ranked over the full ~22k pool, not the ~2-3k dashboard cohort
+--   D5  visited-but-flat narratives stay in, ranked at an honest zero
+--   D6  viral = high composite AND high acceleration
+--   D7  composite = engagement_pct*0.625 + reach_pct*0.375   (velocity dropped)
+--
+-- Also fixed here, per the "reach mixes data sources" defect: BOTH sides of
+-- reach_score come from video_stats. Production divides a video_stats numerator by a
+-- videos-table denominator.
+--
+-- ============================================================================
+-- WHAT IS A GUESS -- CHANGE THESE AND RE-RUN, THAT IS THE POINT OF THE QUERY
+-- ============================================================================
+--   O2/O3  boundary_composite / boundary_accel are PLACEHOLDERS. They cannot be
+--          derived from data; they are the product call this query exists to inform.
+--          Try 0.80/0.50, then 0.90/0.80, and look at what lands in `viral`.
+--   O5.5   change_video_count is DROPPED. Under D0 a change needs two observations, and
+--          a video first seen on calc_date has one -- that term is what puts the 576
+--          scraper-discovery narratives at the top of the axis. The other two weights
+--          are rescaled 0.40/0.25 -> 0.615/0.385. If claim_narratives gets created_at,
+--          this comes back as a real signal.
+--   O8     the GREATEST(0.0, ...) floor is KEPT (current behaviour). It merges decliners
+--          with genuinely flat narratives, which D0 arguably forbids. Delete the
+--          GREATEST() to see decliners rank below flat ones.
+--   D4     per-day normalisation is NOT implemented. Growth is not divided by each
+--          video's elapsed gap, so a video measured after 4 days still contributes 4
+--          days of growth as if it were 1. D4 will move these numbers.
+--
+-- ============================================================================
+-- KNOWN LIMITATION: this DEGRADES for a past calc_date, it does not fail cleanly.
+--
+-- The visit predicate below unions permanent evidence (a video_stats row on calc_date --
+-- append-only, never decays) with ephemeral evidence (videos.updated_at::date =
+-- calc_date -- overwritten by the next scrape). So for an older calc_date:
+--
+--   movers  (>=1 video changed that day)  -> RECOVERED in full. Permanent evidence.
+--   flat    (visited, nothing changed)    -> ERODED, and completely gone once every one
+--                                            of the narrative's videos is re-scraped.
+--
+-- Consequence: `accel` values for movers are trustworthy on a past day, but `accel_pct`
+-- is NOT -- the ranking loses its zeros, so everything ranks too high. Read the raw
+-- `accel` column and the mover list; do not choose boundaries from `accel_pct` on a
+-- historical run. Only calc_date = today gives an honest denominator.
+-- ============================================================================
+
+WITH params AS (
+    SELECT
+        CURRENT_DATE          AS calc_date,          -- set from updated_at_distribution
+        CURRENT_DATE - 1      AS prev_date,
+        -- D7 composite weights
+        0.625::float AS w_comp_engagement,
+        0.375::float AS w_comp_reach,
+        -- acceleration weights (video_count dropped per O5.5, rest rescaled)
+        0.615::float AS w_acc_engagement,
+        0.385::float AS w_acc_views,
+        -- from core/narratives/service.py:45-46 and core/config.py:74
+        1.0::float   AS likes_weight,
+        5.0::float   AS comments_weight,
+        10.0::float  AS reach_cap,
+        5.0::float   AS change_cap,
+        -- O2/O3 -- PLACEHOLDERS, twiddle these
+        0.80::float  AS boundary_composite,
+        0.50::float  AS boundary_accel
+),
+links AS (
+    SELECT DISTINCT cn.narrative_id, v.id AS video_id
+    FROM videos v
+    JOIN video_claims c      ON c.video_id = v.id
+    JOIN claim_narratives cn ON cn.claim_id = c.id
+),
+
+-- ---------------------------------------------------------------- COMPOSITE (D0/D3/D7)
+-- Pool: measured at least once. Carry-forward is legitimate for a *level*.
+state AS (
+    SELECT DISTINCT ON (l.narrative_id, l.video_id)
+           l.narrative_id, l.video_id, vs.views, vs.likes, vs.comments
+    FROM links l
+    JOIN video_stats vs ON vs.video_id = l.video_id
+    WHERE vs.recorded_at::date <= (SELECT calc_date FROM params)
+    ORDER BY l.narrative_id, l.video_id, vs.recorded_at DESC
+),
+narrative_state AS (
+    SELECT narrative_id,
+           count(*)                         AS videos,
+           COALESCE(sum(views), 0)::float    AS views,
+           COALESCE(sum(likes), 0)::float    AS likes,
+           COALESCE(sum(comments), 0)::float AS comments
+    FROM state
+    GROUP BY narrative_id
+),
+avg_views AS (
+    SELECT avg(views) AS avg_views FROM narrative_state WHERE views > 0
+),
+comp_scores AS (
+    SELECT ns.*,
+        CASE WHEN ns.views > 0
+             THEN (ns.likes * (SELECT likes_weight FROM params)
+                 + ns.comments * (SELECT comments_weight FROM params)) / ns.views
+             ELSE 0 END                                          AS engagement_score,
+        CASE WHEN (SELECT avg_views FROM avg_views) > 0
+             THEN least(ns.views / (SELECT avg_views FROM avg_views),
+                        (SELECT reach_cap FROM params)) / (SELECT reach_cap FROM params)
+             ELSE 0 END                                          AS reach_score
+    FROM narrative_state ns
+),
+comp_ranked AS (
+    SELECT *,
+        PERCENT_RANK() OVER (ORDER BY engagement_score) AS engagement_pct,
+        PERCENT_RANK() OVER (ORDER BY reach_score)      AS reach_pct
+    FROM comp_scores
+),
+composite AS (
+    SELECT *,
+        (SELECT w_comp_engagement FROM params) * engagement_pct
+      + (SELECT w_comp_reach FROM params)      * reach_pct        AS composite
+    FROM comp_ranked
+),
+composite_ranked AS (
+    SELECT *, PERCENT_RANK() OVER (ORDER BY composite) AS composite_pct
+    FROM composite
+),
+
+-- ------------------------------------------------------------- ACCELERATION (D0/D4/D5)
+-- Pool: >=1 video VISITED on calc_date. This is the D0 predicate and the whole point.
+-- "Provably visited on calc_date" -- the union of a permanent record and an ephemeral
+-- one. Neither alone is enough:
+--
+--   (a) a video_stats row on calc_date PROVES a visit (create_video always writes one;
+--       update_video writes one when the numbers moved). video_stats is append-only, so
+--       this evidence NEVER decays -- it is as good in six months as it is today.
+--   (b) videos.updated_at::date = calc_date proves a visit that changed nothing. This
+--       evidence DOES decay: the column holds only the last visit, so it is overwritten
+--       the moment the video is scraped again.
+--
+-- Union recovers everything except: visited, nothing changed, AND re-visited since.
+-- That residue is exactly the visited-but-flat population -- i.e. `consolidated`. So the
+-- decay is NOT neutral, it eats the honest zeros first. See D0 / O6.
+visited AS (
+    SELECT DISTINCT l.narrative_id
+    FROM links l
+    JOIN videos v ON v.id = l.video_id
+    WHERE v.updated_at::date = (SELECT calc_date FROM params)      -- (b) decays
+    UNION
+    SELECT DISTINCT l.narrative_id
+    FROM links l
+    JOIN video_stats vs ON vs.video_id = l.video_id
+    WHERE vs.recorded_at::date = (SELECT calc_date FROM params)    -- (a) permanent
+),
+prev_state AS (
+    SELECT DISTINCT ON (l.narrative_id, l.video_id)
+           l.narrative_id, l.video_id, vs.views, vs.likes, vs.comments
+    FROM links l
+    JOIN video_stats vs ON vs.video_id = l.video_id
+    WHERE vs.recorded_at::date <= (SELECT prev_date FROM params)
+    ORDER BY l.narrative_id, l.video_id, vs.recorded_at DESC
+),
+narrative_prev AS (
+    SELECT narrative_id,
+           COALESCE(sum(views), 0)::float    AS views,
+           COALESCE(sum(likes), 0)::float    AS likes,
+           COALESCE(sum(comments), 0)::float AS comments
+    FROM prev_state
+    GROUP BY narrative_id
+),
+-- INNER JOIN to narrative_prev is deliberate: no baseline = no second observation =
+-- not measurable as a change, per D0. Narratives whose videos all appeared on
+-- calc_date drop out here rather than scoring as growth.
+accel_raw AS (
+    SELECT
+        vi.narrative_id,
+        ns.views AS cur_views,
+        np.views AS prev_views,
+        CASE WHEN ns.views > 0
+             THEN (ns.likes * (SELECT likes_weight FROM params)
+                 + ns.comments * (SELECT comments_weight FROM params)) / ns.views
+             ELSE 0 END AS cur_eng,
+        CASE WHEN np.views > 0
+             THEN (np.likes * (SELECT likes_weight FROM params)
+                 + np.comments * (SELECT comments_weight FROM params)) / np.views
+             ELSE 0 END AS prev_eng
+    FROM visited vi
+    JOIN narrative_state ns ON ns.narrative_id = vi.narrative_id
+    JOIN narrative_prev  np ON np.narrative_id = vi.narrative_id
+),
+accel AS (
+    SELECT narrative_id, cur_views, prev_views,
+        least(CASE WHEN prev_eng > 0 THEN (cur_eng - prev_eng) / prev_eng ELSE 0 END,
+              (SELECT change_cap FROM params))                    AS change_engagement,
+        least(CASE WHEN prev_views > 0 THEN (cur_views - prev_views) / prev_views ELSE 0 END,
+              (SELECT change_cap FROM params))                    AS change_views
+    FROM accel_raw
+),
+accel_scored AS (
+    SELECT *,
+        greatest(0.0,                                    -- O8: delete to unfloor declines
+              (SELECT w_acc_engagement FROM params) * change_engagement
+            + (SELECT w_acc_views FROM params)      * change_views
+        ) AS accel
+    FROM accel
+),
+accel_ranked AS (
+    SELECT *, PERCENT_RANK() OVER (ORDER BY accel) AS accel_pct
+    FROM accel_scored
+)
+
+-- --------------------------------------------------------------------- CLASSIFY (D1/D6)
+-- Only the acceleration cohort is classifiable. Every label makes a claim about today
+-- ("climbing", "flat"), and we cannot make that claim about a narrative we did not look
+-- at. Composite's ~22k pool exists to give a stable RANK, not to badge more narratives.
+SELECT
+    ar.narrative_id,
+    n.title,
+    cr.videos,
+    cr.views::bigint                        AS views,
+    ar.prev_views::bigint                   AS prev_views,
+    round(cr.composite::numeric, 4)         AS composite,
+    round(cr.composite_pct::numeric, 4)     AS composite_pct,
+    round(ar.accel::numeric, 6)             AS accel,
+    round(ar.accel_pct::numeric, 4)         AS accel_pct,
+    round(ar.change_engagement::numeric, 6) AS change_engagement,
+    round(ar.change_views::numeric, 6)      AS change_views,
+    CASE
+        WHEN cr.composite_pct >= (SELECT boundary_composite FROM params)
+         AND ar.accel_pct     >= (SELECT boundary_accel FROM params)
+            THEN 'viral'
+        WHEN ar.accel_pct     >= (SELECT boundary_accel FROM params)
+            THEN 'early_surge'
+        WHEN cr.composite_pct >= (SELECT boundary_composite FROM params)
+            THEN 'consolidated'
+        ELSE 'trending'
+    END                                     AS would_be_alert_level,
+    n.alert_level                           AS current_alert_level
+FROM accel_ranked ar
+JOIN composite_ranked cr ON cr.narrative_id = ar.narrative_id
+JOIN narratives n        ON n.id = ar.narrative_id
+ORDER BY ar.accel_pct DESC, cr.composite_pct DESC;
+
+-- Counts per label, if you want the shape before the detail -- wrap the above as `sim`:
+--   SELECT would_be_alert_level, count(*) FROM sim GROUP BY 1 ORDER BY 2 DESC;
+--
+-- NOTE ON 'trending': as written every narrative in the acceleration cohort gets one of
+-- the four labels -- there is no "no badge" region. The doc's D1 calls trending "the
+-- broad middle" but never says whether the middle is a badge or an absence. If most of
+-- the cohort comes back `trending`, that is the question surfacing, not a bug. It needs
+-- deciding (and it is adjacent to the unresolved grey-diagonal caveat in D3).

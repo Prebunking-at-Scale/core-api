@@ -1,0 +1,42 @@
+-- RUN THIS FIRST. It decides whether the simulation below it is worth reading.
+--
+-- D0's acceleration predicate is ">=1 video with videos.updated_at::date = calc_date".
+-- updated_at records only the LAST visit, so the predicate is only honest for a day no
+-- video has been re-visited since. Concretely:
+--
+--   calc_date = today     -> exact, but the day is only partly done
+--   calc_date = yesterday -> undercounts by however many videos were re-visited today
+--   calc_date = older     -> progressively meaningless
+--
+-- This tells us how bad that undercount is, and it is also half of O6 (how fast does the
+-- scraper revisit?) -- which the design doc currently lists as the critical path.
+--
+-- What to look for:
+--   * If most videos were last visited TODAY, the scraper sweeps fast and a calc_date of
+--     yesterday is already badly eroded -> simulate today, accept a partial day.
+--   * If the mass sits on the last few DAYS, revisits are slower, yesterday is mostly
+--     intact -> simulate yesterday, which is a complete day and matches what the real
+--     pipeline scores.
+--   * If a large block sits at exactly today AND the pipeline runs at 00:05, that is the
+--     day-boundary race in O6 -- and it means videos.updated_at is not good enough and we
+--     need the video_visits table after all.
+
+SELECT
+    v.updated_at::date                                          AS last_visited_on,
+    count(*)                                                    AS videos,
+    round(100.0 * count(*) / sum(count(*)) OVER (), 2)          AS pct_of_all_videos,
+    round(100.0 * sum(count(*)) OVER (ORDER BY v.updated_at::date DESC)
+          / sum(count(*)) OVER (), 2)                           AS cumulative_pct
+FROM videos v
+GROUP BY v.updated_at::date
+ORDER BY v.updated_at::date DESC
+LIMIT 30;
+
+-- Sanity totals, run separately if the studio only returns one result set:
+--
+--   SELECT count(*) AS total_videos,
+--          count(*) FILTER (WHERE updated_at::date = CURRENT_DATE)     AS visited_today,
+--          count(*) FILTER (WHERE updated_at::date = CURRENT_DATE - 1) AS last_visited_yesterday,
+--          min(updated_at)::date AS oldest_visit,
+--          max(updated_at)       AS newest_visit
+--   FROM videos;
