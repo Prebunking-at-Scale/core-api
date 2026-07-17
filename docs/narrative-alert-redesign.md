@@ -4,18 +4,25 @@
 badges and why; D10 carries the exact conditions. No implementation yet.
 
 **What is closed:** the labels, both axes and how they are computed, both cohorts, the
-weights, and the region geometry. O2 and O3 are answered; D3's grey-diagonal caveat is
-resolved.
+weights, the region geometry, and the new-video rule. O2, O3, O5.1, O5.2, O5.4 and **O5.5**
+are answered; D3's grey-diagonal caveat is resolved.
 
-**What is not, and none of it is alert-condition design:**
-- **O6** — the scraper's revisit strategy. Not answerable from this database, and it gates
-  O5.3/O5.6 (whether `Δ(refreshed)/prev(refreshed)` is biased upward) plus D0's
-  day-boundary race. **The critical path.**
-- **O5.5** — the `uploaded_at` run, to learn whether the ~90% of alerts that come from
-  gained videos are narratives genuinely spreading or the scraper finding old videos. A
-  measurement, not a decision: the rule is settled, its *value* is not yet known.
-- **O4** (enum migration and consumers), **O7** (composite staleness bound), **O8** (the
-  floor, de-escalated by D9). Plus D4, which is decided but never simulated.
+**Decisions still open** — none of them alert conditions:
+- **O5.3 / O5.6** — denominator scope and aggregation. One decision, not two. Gated on O6.
+- **O7** — composite has no staleness bound.
+- **O8** — the `max(0, …)` floor. De-escalated by D9; touches 43 narratives.
+- **O4** — the enum migration and its consumers. Implementation coordination.
+
+**Measurements owed** — no decision waits on these; they tell us what the design is *worth*:
+- **O5.5's 7-day run.** 74% of the alert stream (247 of 333) comes from narratives gaining
+  videos, and whether those videos are genuinely new is unmeasured. The rule is settled;
+  the outcome is bounded between 86 and 333 alerts. See O5.5.
+- **D4** — decided, never simulated.
+
+**Not ours to answer:**
+- **O6** — the scraper's revisit strategy. Not answerable from this database; it gates
+  O5.3/O5.6 and D0's day-boundary race. **The critical path**, and it belongs to whoever
+  owns the scraper.
 
 **Revised 2026-07-17.** Three passes:
 
@@ -184,8 +191,14 @@ defect; D0 exists to fix it.**
 **`claim_narratives` has no timestamp.** The table is `(claim_id, narrative_id)` with no
 `created_at` (`migrations/7`), so "which videos did this narrative have yesterday" is
 unanswerable. `video_claims` does carry `created_at`, but claim creation is not the same
-event as narrative linking. This forecloses distinguishing "the narrative gained a
-video" from "the scraper discovered an old video" — see O5.5.
+event as narrative linking.
+
+> This used to read "*this forecloses distinguishing 'the narrative gained a video' from
+> 'the scraper discovered an old video'*". **It does not.** `claim_narratives` cannot date
+> the **link**, but `videos.uploaded_at` dates the **upload**, and that is enough to tell a
+> genuinely new video from an old one the scraper just found. O5.5 settles it on that
+> basis. The defect above is real and still limits what can be known about *linkage*; it
+> just does not forfeit the new-video question.
 
 **35% of acceleration tracks the scraper — and it dominates the top of the axis.**
 `change_video_count` compares videos *known* as of each date, and under carry-forward
@@ -208,8 +221,11 @@ Measured on 2026-07-15, the effect is not marginal — **it is the whole top of 
 
 Fifty times the median, and the cohort maximum is one of them. The five largest have 1–3
 baselined videos and a few hundred baseline views — tiny narratives that got swept. Since
-alerts fire from the top of this axis, this population *is* the alert stream. See O5.5,
-which D0 promotes from an open option to a forced choice.
+alerts fire from the top of this axis, this population *is* the alert stream.
+
+**Addressed by O5.5's rule 2**, which counts a gained video only if it was *uploaded*
+within 7 days — so a swept old video no longer scores. How much of this population survives
+that test is the measurement O5.5 still owes.
 
 **Data quality:** 2 of 3116 narratives have more likes than views (438 likes on 16
 views; 23k likes on 13k views). They take the top two engagement ranks
@@ -765,7 +781,25 @@ re-examined without touching the query.
 
 ---
 
-## Open questions
+## Questions (O-numbers)
+
+Most of these are now closed. The numbering is kept because the decisions above reference
+it, and because the reasoning that closed them is worth not re-deriving.
+
+| | question | state |
+|---|---|---|
+| **O2** | daily volume per label | **closed** — set by D10's geometry |
+| **O3** | region boundaries | **closed** — D10 |
+| **O4** | frontend / API impact | open — implementation coordination |
+| **O5.1** | coverage threshold | **closed** — no threshold; the premise was false |
+| **O5.2** | how coverage is measured | **moot** — follows O5.1 |
+| **O5.3** | denominator scope | open — gated on O6 |
+| **O5.4** | maximum baseline staleness | **closed** — cap at 7–14 days |
+| **O5.5** | videos with no baseline | **closed** — rule settled; *measurement owed* |
+| **O5.6** | aggregation | open — the same decision as O5.3 |
+| **O6** | the scraper's revisit strategy | open — **the critical path**, not answerable here |
+| **O7** | staleness bound for composite | open |
+| **O8** | should `max(0, …)` stay | open — de-escalated by D9 |
 
 **O2 — Daily volume per label. CLOSED 2026-07-17 by D10.** The question was how many
 narratives should carry each badge on a normal day — the last free parameter, underivable
