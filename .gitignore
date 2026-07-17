@@ -196,3 +196,18 @@ cython_debug/
 postgresql/
 
 claude.md
+
+# macOS
+.DS_Store
+
+# Local database dumps / backups (never commit production data)
+*.sql.gz
+db_backup_*.sql
+*_Cloud_SQL_Export_*.sql
+
+# Ad-hoc downloaded media / transcripts
+*.webm
+*_transcript.json
+
+# Migrations pending manual execution on production (not run automatically)
+manual-migrations/
