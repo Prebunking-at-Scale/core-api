@@ -642,18 +642,29 @@ w_engagement < w_views          (0.40 > 0.25 is what produced the defect above)
 
 Everything else is taste. 0.10/0.35/0.55 is the proposal; the exact split is a free choice.
 
-**Measured effect** (2026-07-16, n=2237, reweighting offline from the stored components):
+**Measured effect** — both weightings run against the database, 2026-07-16, n=2237
+(identical cohort; every `change_*` component byte-identical between the two runs, so this
+is a clean A/B of the weights alone):
 
 | | 0.40/0.35/0.25 | 0.10/0.35/0.55 |
 |---|---|---|
-| narratives scored exactly 0 | 771 | **104** |
+| narratives scored exactly 0 | 771 | **150** |
 | of those, genuinely flat | 86 | **86** |
-| real growers erased by the floor | 679 | **4** |
+| real growers erased by the floor | 679 | **43** |
 | best `accel` reachable by real growth | 0.840 | **1.453** |
+| label counts (viral / surge / consol / trend) | 401 / 718 / 443 / 675 | 379 / 740 / 465 / 653 |
 
-**675 narratives that genuinely grew are recovered.** The zero block shrinks to the 86 that
-are actually flat — which is D5 working as intended for the first time, and it means
-`consolidated` finally denotes "big and flat" rather than "grew, but the rate fell".
+**636 narratives that genuinely grew are recovered.** The zero block shrinks to 86 that are
+actually flat plus 43 whose growth is ~1e-6 — i.e. flat to any honest reading. That is D5
+working as intended for the first time, and it means `consolidated` finally denotes "big
+and flat" rather than "grew, but the rate fell".
+
+> An earlier revision of this table reported 104 zeros / 4 erased / 675 recovered, from
+> reweighting offline against the CSV's `change_*` columns. Those columns are rounded to 6
+> decimals while the query floors on full precision, so ~40 narratives at ~1e-6 growth
+> appeared to escape the floor when they do not. The figures above are from the actual run.
+> Label counts and the 1.453 ceiling were unaffected — rounding at 1e-6 does not reorder a
+> percentile rank.
 
 **What D9 does not fix, deliberately:**
 
@@ -668,8 +679,10 @@ are actually flat — which is D5 working as intended for the first time, and it
 (0.35 → 0.10), which targeted the right symptom — noise at the top — from the wrong term.
 The video-count weight was never the problem; the engagement weight was.
 
-**Interaction with O8.** With these weights the floor is nearly inert: 4 narratives instead
-of 679. O8 stops being urgent, but the question stands on its own merits.
+**Interaction with O8.** With these weights the floor touches 43 narratives instead of 679,
+and all 43 are growing at ~1e-6. O8 stops being urgent — the floor was never the disease,
+only what made the `change_engagement` defect fatal rather than merely wrong. The question
+stands on its own merits.
 
 ---
 
