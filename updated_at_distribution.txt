@@ -1,25 +1,21 @@
--- RUN THIS FIRST. It decides whether the simulation below it is worth reading.
+-- Background for O6 (the scraper's revisit rate). NOT a prerequisite for
+-- simulate_d0_alert_levels.txt -- run that whenever you like; it reports its own cohort.
 --
--- D0's acceleration predicate is ">=1 video with videos.updated_at::date = calc_date".
--- updated_at records only the LAST visit, so the predicate is only honest for a day no
--- video has been re-visited since. Concretely:
+-- It cannot tell you how badly a past calc_date has eroded, so don't try to use it that
+-- way. The erosion is "visited, unchanged, re-visited since" -- those videos carry
+-- updated_at = the LATER visit and no video_stats row for the earlier one, so they are
+-- invisible by construction. The last-visit date cannot count what it overwrote. This is
+-- D0's whole point, showing up one level down.
 --
---   calc_date = today     -> exact, but the day is only partly done
---   calc_date = yesterday -> undercounts by however many videos were re-visited today
---   calc_date = older     -> progressively meaningless
+-- What it DOES tell you -- half of O6, which the design doc calls the critical path:
+--   * How fast the scraper sweeps: mass on today = fast, spread over days = slow.
+--   * How much of the corpus is effectively dead (the long tail).
+--   * Whether a large block sits at exactly today. If the pipeline runs at 00:05 and the
+--     sweep clusters near midnight, that is the D0 day-boundary race, and it means
+--     videos.updated_at is not good enough and we need the video_visits table.
 --
--- This tells us how bad that undercount is, and it is also half of O6 (how fast does the
--- scraper revisit?) -- which the design doc currently lists as the critical path.
---
--- What to look for:
---   * If most videos were last visited TODAY, the scraper sweeps fast and a calc_date of
---     yesterday is already badly eroded -> simulate today, accept a partial day.
---   * If the mass sits on the last few DAYS, revisits are slower, yesterday is mostly
---     intact -> simulate yesterday, which is a complete day and matches what the real
---     pipeline scores.
---   * If a large block sits at exactly today AND the pipeline runs at 00:05, that is the
---     day-boundary race in O6 -- and it means videos.updated_at is not good enough and we
---     need the video_visits table after all.
+-- The other half of O6 -- does the revisit strategy PRIORITISE active videos? -- is not
+-- answerable here at all. That one is a question for whoever owns the scraper.
 
 SELECT
     v.updated_at::date                                          AS last_visited_on,

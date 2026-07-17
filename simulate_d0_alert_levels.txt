@@ -1,7 +1,18 @@
 -- Simulate the redesigned alert system (D0-D8) against the database.
 -- Returns every narrative that WOULD carry a badge, with both axes and the badge.
 --
--- Run updated_at_distribution.txt FIRST and set calc_date from what it shows.
+-- Run it as-is. Then change calc_date to CURRENT_DATE - 1 and run it again -- neither day
+-- is clean, and the pair tells you more than either:
+--
+--   CURRENT_DATE      honest denominator (nothing has eroded yet, so accel_pct is real),
+--                     but the day is only part-done, so growth is a partial day's worth
+--                     and the cohort is whatever the scraper reached so far.
+--   CURRENT_DATE - 1  full-day growth, and matches what production actually scores --
+--                     but accel_pct is inflated, because some of the flat narratives have
+--                     already eroded out of the cohort (see KNOWN LIMITATION below).
+--
+-- Compare the cohort sizes between the two runs: that difference is the erosion, and it
+-- is the most direct read on it available.
 --
 -- ============================================================================
 -- WHAT IS SIMULATED FAITHFULLY (settled decisions)
