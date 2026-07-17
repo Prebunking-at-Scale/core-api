@@ -138,9 +138,19 @@ WITH params AS (
         5.0::float   AS comments_weight,
         10.0::float  AS reach_cap,
         5.0::float   AS change_cap,
-        -- O2/O3 -- PLACEHOLDERS, twiddle these
-        0.80::float  AS boundary_composite,
-        0.50::float  AS boundary_accel
+        -- O3 geometry, read off the source diagram (Captura de pantalla 2026-07-16).
+        -- Six thresholds, not two -- the regions are RECTANGLES, not quadrants:
+        --   viral        red    composite >= 0.8  AND  accel >= 0.8
+        --   early_surge  orange composite <= 0.4  AND  accel >= 0.5   (SMALL and climbing)
+        --   consolidated blue   composite >= 0.5  AND  accel <= 0.4
+        --   trending     yellow composite >= 0.4  AND  accel >= 0.4, minus viral
+        --   (no badge)   white  everything else -- the bottom-left
+        0.40::float  AS comp_lo,    -- early_surge ceiling / trending floor
+        0.50::float  AS comp_mid,   -- consolidated floor
+        0.80::float  AS comp_hi,    -- viral floor
+        0.40::float  AS accel_lo,   -- consolidated ceiling / trending floor
+        0.50::float  AS accel_mid,  -- early_surge floor
+        0.80::float  AS accel_hi    -- viral floor
 ),
 links AS (
     SELECT DISTINCT cn.narrative_id, v.id AS video_id
@@ -351,15 +361,17 @@ SELECT
     round(ar.change_engagement::numeric, 6)  AS change_engagement,
     round(ar.change_video_count::numeric, 6) AS change_video_count,
     round(ar.change_views::numeric, 6)       AS change_views,
+    -- Order matters: viral is carved OUT of the trending box, so it must be tested first.
     CASE
-        WHEN cr.composite_pct >= (SELECT boundary_composite FROM params)
-         AND ar.accel_pct     >= (SELECT boundary_accel FROM params)
-            THEN 'viral'
-        WHEN ar.accel_pct     >= (SELECT boundary_accel FROM params)
-            THEN 'early_surge'
-        WHEN cr.composite_pct >= (SELECT boundary_composite FROM params)
-            THEN 'consolidated'
-        ELSE 'trending'
+        WHEN cr.composite_pct >= (SELECT comp_hi FROM params)
+         AND ar.accel_pct     >= (SELECT accel_hi FROM params)   THEN 'viral'
+        WHEN cr.composite_pct <= (SELECT comp_lo FROM params)
+         AND ar.accel_pct     >= (SELECT accel_mid FROM params)  THEN 'early_surge'
+        WHEN cr.composite_pct >= (SELECT comp_mid FROM params)
+         AND ar.accel_pct     <= (SELECT accel_lo FROM params)   THEN 'consolidated'
+        WHEN cr.composite_pct >= (SELECT comp_lo FROM params)
+         AND ar.accel_pct     >= (SELECT accel_lo FROM params)   THEN 'trending'
+        ELSE NULL                                    -- the white region: no badge
     END                                     AS would_be_alert_level,
     n.alert_level                           AS current_alert_level
 FROM accel_ranked ar
