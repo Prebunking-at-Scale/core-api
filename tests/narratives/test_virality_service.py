@@ -24,7 +24,7 @@ Patrón de mock para el repo (async context manager):
         result = await service.<method>(...)
 """
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -742,3 +742,117 @@ class TestRunNarrativeAnalysisIndicatorsPipeline:
 
         mocks["calculate_composite_virality_for_date"].assert_called_once_with(calc_date=yesterday)
         mocks["update_narrative_alert_levels"].assert_called_once_with(calc_date=yesterday)
+
+
+# ---------------------------------------------------------------------------
+# Section 6 — get_narrative_analysis_indicators (the read side)
+# ---------------------------------------------------------------------------
+
+class TestGetNarrativeAnalysisIndicators:
+    """
+    The response is what a consumer sees, so C1 has to survive the serialisation too.
+
+    The two axes answer to different evidence and so arrive independently: composite
+    covers every narrative measured at least once (~22k), acceleration only those
+    visited on the day (~2k). Requiring both — which the endpoint used to — returned
+    null for roughly nine narratives in ten, telling a client "nothing measured" about
+    a narrative whose size is perfectly well known.
+    """
+
+    def _rows(self, narrative_id, *, with_acceleration: bool):
+        stamped = datetime(2026, 7, 16, 3, 0)
+        rows = [{
+            "id": uuid.uuid4(),
+            "narrative_id": narrative_id,
+            "indicator_type": NarrativeAnalysisIndicatorType.COMPOSITE_VIRALITY,
+            "indicator_value": 0.62,
+            "calculated_at": stamped,
+            "metadata": {
+                "engagement_percentile": 0.7,
+                "reach_percentile": 0.5,
+                "engagement_weight": 0.625,
+                "reach_weight": 0.375,
+                "percentile": 0.83,
+            },
+        }]
+        if with_acceleration:
+            rows.append({
+                "id": uuid.uuid4(),
+                "narrative_id": narrative_id,
+                "indicator_type": NarrativeAnalysisIndicatorType.ACCELERATION_RATE,
+                "indicator_value": 0.41,
+                "calculated_at": stamped,
+                "metadata": {
+                    "change_engagement": -0.02,
+                    "change_video_count": 0.5,
+                    "change_views": 0.3,
+                    "engagement_weight": 0.10,
+                    "video_volume_weight": 0.35,
+                    "views_weight": 0.55,
+                    "percentile": 0.91,
+                    "refreshed_videos": 4,
+                    "mean_gap_days": 1.5,
+                },
+            })
+        return rows
+
+    async def _get(self, narrative_service, rows):
+        mock_repo = AsyncMock()
+        mock_repo.get_narrative_analysis_indicators.return_value = rows
+        with patch.object(narrative_service, "repo", return_value=_make_repo_cm(mock_repo)):
+            return await narrative_service.get_narrative_analysis_indicators(uuid.uuid4())
+
+    async def test_composite_metadata_survives_without_velocity(
+        self, narrative_service: NarrativeService
+    ):
+        """
+        D6 evicted velocity from the level axis, so the pipeline stopped writing
+        velocity_percentile/velocity_weight. While the response model still required
+        them, every indicator computed by the new pipeline failed validation.
+        """
+        response = await self._get(
+            narrative_service, self._rows(uuid.uuid4(), with_acceleration=True)
+        )
+
+        assert response is not None
+        assert response.composite_virality.metadata.engagement_percentile == pytest.approx(0.7)
+        assert response.composite_virality.metadata.reach_percentile == pytest.approx(0.5)
+
+    async def test_percentile_reaches_the_consumer_on_both_axes(
+        self, narrative_service: NarrativeService
+    ):
+        """
+        The percentile is the number the classifier reads and the only one a client can
+        place on the region plane; indicator_value is a weighted blend of two ranks and
+        is not itself a rank. Undeclared on the model, pydantic silently dropped it.
+        """
+        response = await self._get(
+            narrative_service, self._rows(uuid.uuid4(), with_acceleration=True)
+        )
+
+        assert response.composite_virality.metadata.percentile == pytest.approx(0.83)
+        assert response.acceleration_rate.metadata.percentile == pytest.approx(0.91)
+        assert response.acceleration_rate.metadata.refreshed_videos == 4
+        assert response.acceleration_rate.metadata.mean_gap_days == pytest.approx(1.5)
+
+    async def test_composite_is_returned_when_the_narrative_was_not_visited(
+        self, narrative_service: NarrativeService
+    ):
+        """
+        The ~91% case: a level we know, a rate we could not compute today. The composite
+        must come back, and acceleration must be *absent* rather than zero — a zero
+        would read as "flat", which is the conflation D0 forbids.
+        """
+        response = await self._get(
+            narrative_service, self._rows(uuid.uuid4(), with_acceleration=False)
+        )
+
+        assert response is not None
+        assert response.composite_virality.indicator_value == pytest.approx(0.62)
+        assert response.acceleration_rate is None
+
+    async def test_returns_none_when_nothing_was_ever_measured(
+        self, narrative_service: NarrativeService
+    ):
+        """Composite stays required: with no level at all there is nothing to report."""
+        assert await self._get(narrative_service, []) is None

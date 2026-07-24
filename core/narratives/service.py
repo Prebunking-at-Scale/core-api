@@ -766,6 +766,20 @@ class NarrativeService:
     async def get_narrative_analysis_indicators(
         self, narrative_id: UUID, date: date | None = None
     ) -> NarrativeAnalysisIndicatorsResponse | None:
+        """
+        The two axes answer to different evidence, so they arrive independently.
+
+        Composite is a level and is scored for every narrative with any stats ever
+        (~22k); acceleration is a rate and is scored only for the narratives visited on
+        the day (~2k). Requiring both would therefore hide the composite of roughly
+        nine narratives in ten behind a null response — reporting "we have measured
+        nothing" for a narrative whose size we know perfectly well, which is exactly the
+        conflation of *unmeasured* with *quiet* that D0 exists to prevent.
+
+        So composite is required and acceleration is optional. A caller that gets
+        `acceleration_rate=None` should read it as "not re-measured on this date", never
+        as zero.
+        """
         async with self.repo() as repo:
             if date is not None:
                 date_from = datetime.combine(date, datetime.min.time())
@@ -783,12 +797,11 @@ class NarrativeService:
         by_type: dict[str, Any] = {}
         for row in rows:
             by_type.setdefault(row["indicator_type"], row)
-        if NarrativeAnalysisIndicatorType.COMPOSITE_VIRALITY not in by_type \
-                or NarrativeAnalysisIndicatorType.ACCELERATION_RATE not in by_type:
+        if NarrativeAnalysisIndicatorType.COMPOSITE_VIRALITY not in by_type:
             return None
 
         cv = by_type[NarrativeAnalysisIndicatorType.COMPOSITE_VIRALITY]
-        ar = by_type[NarrativeAnalysisIndicatorType.ACCELERATION_RATE]
+        ar = by_type.get(NarrativeAnalysisIndicatorType.ACCELERATION_RATE)
 
         return NarrativeAnalysisIndicatorsResponse(
             narrative_id=narrative_id,
@@ -805,7 +818,7 @@ class NarrativeService:
                 indicator_type=NarrativeAnalysisIndicatorType.ACCELERATION_RATE,
                 calculated_at=ar["calculated_at"],
                 metadata=ar["metadata"],
-            ),
+            ) if ar is not None else None,
             date=cv["calculated_at"].date(),
         )
 
