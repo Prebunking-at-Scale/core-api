@@ -58,30 +58,57 @@ Weights and thresholds for the virality and acceleration indicators. Read from t
 environment so a deployment can retune them without a code change; the defaults are
 the production values. Composite and acceleration weights must each sum to 1.
 """
-# Composite virality score weights (must sum to 1)
-COMPOSITE_ENGAGEMENT_WEIGHT = float(os.environ.get("COMPOSITE_ENGAGEMENT_WEIGHT", "0.50"))
-COMPOSITE_REACH_WEIGHT = float(os.environ.get("COMPOSITE_REACH_WEIGHT", "0.30"))
-COMPOSITE_VELOCITY_WEIGHT = float(os.environ.get("COMPOSITE_VELOCITY_WEIGHT", "0.20"))
+# Raw virality score parameters. These shape the two state signals themselves, before
+# any ranking. They live here rather than in the service because both the service and
+# the bulk cohort query in the repository need them, and a formula that exists twice
+# eventually disagrees with itself.
+VIRALITY_SCORE_LIKES_WEIGHT = int(os.environ.get("VIRALITY_SCORE_LIKES_WEIGHT", "1"))
+VIRALITY_SCORE_COMMENTS_WEIGHT = int(os.environ.get("VIRALITY_SCORE_COMMENTS_WEIGHT", "5"))
+VIRALITY_SCORE_REACH_CAP_LIMIT = int(os.environ.get("VIRALITY_SCORE_REACH_CAP_LIMIT", "10"))
 
-# Acceleration rate score weights (must sum to 1)
-ACCELERATION_ENGAGEMENT_WEIGHT = float(os.environ.get("ACCELERATION_ENGAGEMENT_WEIGHT", "0.40"))
+# Composite virality score weights (must sum to 1).
+#
+# Composite is the SPREAD-STATE axis: how far a narrative has spread, right now. Every
+# term on it must be a level, never a change — `velocity` used to sit here and was
+# dropped, because a growth term on the state axis double-counts the growth that the
+# acceleration axis exists to measure. See D6 in docs/narrative-alert-redesign.md.
+# 0.625/0.375 is the old 0.50/0.30 rescaled proportionally once velocity's 0.20 left.
+COMPOSITE_ENGAGEMENT_WEIGHT = float(os.environ.get("COMPOSITE_ENGAGEMENT_WEIGHT", "0.625"))
+COMPOSITE_REACH_WEIGHT = float(os.environ.get("COMPOSITE_REACH_WEIGHT", "0.375"))
+
+# Acceleration rate score weights (must sum to 1).
+#
+# Acceleration is the CHANGE-IN-SPREAD axis, and it measures speed of distribution;
+# engagement change is a MODIFIER on that and must not be able to overturn it. The one
+# hard constraint is ACCELERATION_ENGAGEMENT_WEIGHT < ACCELERATION_VIEWS_WEIGHT — the
+# old 0.40/0.35/0.25 broke it, so a narrative whose views grew while its engagement
+# ratio dipped scored a *negative* rate and was floored to zero. Measured against
+# 2026-07-16 (n=2237), the old weights erased 679 genuine growers; these erase 43.
+ACCELERATION_ENGAGEMENT_WEIGHT = float(os.environ.get("ACCELERATION_ENGAGEMENT_WEIGHT", "0.10"))
 ACCELERATION_VIDEO_VOLUME_WEIGHT = float(os.environ.get("ACCELERATION_VIDEO_VOLUME_WEIGHT", "0.35"))
-ACCELERATION_VIEWS_WEIGHT = float(os.environ.get("ACCELERATION_VIEWS_WEIGHT", "0.25"))
+ACCELERATION_VIEWS_WEIGHT = float(os.environ.get("ACCELERATION_VIEWS_WEIGHT", "0.55"))
 
-# Hard cap on individual change_* components inside acceleration_rate.
-# Without it, a single video going from 1 → 10k views (change=9999) drowns
-# the weighted sum and makes the per-dimension weights meaningless.
-ACCELERATION_CHANGE_CAP = float(os.environ.get("ACCELERATION_CHANGE_CAP", "5.0"))
+# A baseline older than this many days cannot anchor a rate (D4). Per-day
+# normalisation would otherwise launder an old surge into today's number: a video last
+# seen three months ago contributes a quarter's growth, divided down but anchored to a
+# baseline that means nothing now. Measured 2026-07-15: 96.8% of the cohort is within 7
+# days, 99.2% within 14, so this excludes ~1% of videos. Set to 0 to disable the bound.
+ACCELERATION_MAX_BASELINE_AGE_DAYS = int(os.environ.get("ACCELERATION_MAX_BASELINE_AGE_DAYS", "14"))
 
-# Alert-level percentile thresholds. Both indicators are classified by their
-# PERCENT_RANK within the run's cohort, never by their raw values, so each threshold
-# means a knowable fraction of that cohort. See
-# NarrativeService.update_narrative_alert_levels for the classification.
-COMPOSITE_PERCENTILE_VIRAL = float(os.environ.get("COMPOSITE_PERCENTILE_VIRAL", "0.95"))
-COMPOSITE_PERCENTILE_EARLY_SURGE_MAX = float(os.environ.get("COMPOSITE_PERCENTILE_EARLY_SURGE_MAX", "0.50"))
-COMPOSITE_PERCENTILE_WATCH_MIN = float(os.environ.get("COMPOSITE_PERCENTILE_WATCH_MIN", "0.70"))
-ACCELERATION_PERCENTILE_SURGE = float(os.environ.get("ACCELERATION_PERCENTILE_SURGE", "0.95"))
-ACCELERATION_PERCENTILE_WATCH_MIN = float(os.environ.get("ACCELERATION_PERCENTILE_WATCH_MIN", "0.70"))
+# Alert-level percentile thresholds. Both axes are classified by their PERCENT_RANK
+# within their own cohort, never by raw values, so each threshold means a knowable
+# fraction of that cohort — and a rank is self-calibrating against a scraper whose
+# coverage drifts, which an absolute bar is not (D2).
+#
+# The four labels are RECTANGLES on the percentile plane, not quadrants, so there are
+# six thresholds and not two, and there is a no-badge region (small AND flat) in the
+# bottom-left. See D1 for the geometry and NarrativeService._classify for the order.
+ALERT_COMPOSITE_LO = float(os.environ.get("ALERT_COMPOSITE_LO", "0.40"))   # early_surge ceiling / trending floor
+ALERT_COMPOSITE_MID = float(os.environ.get("ALERT_COMPOSITE_MID", "0.50"))  # consolidated floor
+ALERT_COMPOSITE_HI = float(os.environ.get("ALERT_COMPOSITE_HI", "0.80"))   # viral floor
+ALERT_ACCEL_LO = float(os.environ.get("ALERT_ACCEL_LO", "0.40"))           # consolidated ceiling / trending floor
+ALERT_ACCEL_MID = float(os.environ.get("ALERT_ACCEL_MID", "0.50"))         # early_surge floor
+ALERT_ACCEL_HI = float(os.environ.get("ALERT_ACCEL_HI", "0.80"))           # viral floor
 
 """internationalisation"""
 i18n.set("file_format", "json")

@@ -129,9 +129,15 @@ class NarrativeStats(BaseModel):
 
 
 class NarrativeViralityScoreType(str, Enum):
+    """
+    The two spread-STATE signals. `velocity_score` was a third, and was dropped: it
+    measures change, and change belongs on the acceleration axis. Historical rows still
+    carry it, but nothing parses score_type back into this enum — the percentile query
+    keys on the raw column — so an old value simply matches nothing.
+    """
+
     ENGAGEMENT_SCORE = "engagement_score"
     REACH_SCORE = "reach_score"
-    VELOCITY_SCORE = "velocity_score"
 
 
 class NarrativeAnalysisIndicatorType(str, Enum):

@@ -5,60 +5,63 @@ from typing import Any, AsyncContextManager, Callable
 from uuid import UUID
 
 from core.config import (
-    ACCELERATION_CHANGE_CAP,
     ACCELERATION_ENGAGEMENT_WEIGHT,
-    ACCELERATION_PERCENTILE_SURGE,
-    ACCELERATION_PERCENTILE_WATCH_MIN,
+    ACCELERATION_MAX_BASELINE_AGE_DAYS,
     ACCELERATION_VIDEO_VOLUME_WEIGHT,
     ACCELERATION_VIEWS_WEIGHT,
+    ALERT_ACCEL_HI,
+    ALERT_ACCEL_LO,
+    ALERT_ACCEL_MID,
+    ALERT_COMPOSITE_HI,
+    ALERT_COMPOSITE_LO,
+    ALERT_COMPOSITE_MID,
     COMPOSITE_ENGAGEMENT_WEIGHT,
-    COMPOSITE_PERCENTILE_EARLY_SURGE_MAX,
-    COMPOSITE_PERCENTILE_VIRAL,
-    COMPOSITE_PERCENTILE_WATCH_MIN,
     COMPOSITE_REACH_WEIGHT,
-    COMPOSITE_VELOCITY_WEIGHT,
+    VIRALITY_SCORE_COMMENTS_WEIGHT,
+    VIRALITY_SCORE_LIKES_WEIGHT,
 )
 from core.entities.service import EntityService
 from core.models import Claim, Narrative, NarrativeAlertLevel, Video
+from core.narratives.api import NarrativesApiClient
 from core.narratives.models import (
     AnalysisIndicator,
-    NarrativeAnalysisIndicatorType,
     NarrativeAnalysisIndicatorsResponse,
+    NarrativeAnalysisIndicatorType,
     NarrativeDetail,
     NarrativeInput,
     NarrativeListItem,
     NarrativePatchInput,
     NarrativeStats,
     NarrativeSummary,
+    NarrativeViralityScoreType,
     ViralNarrativeSummary,
 )
 from core.narratives.repo import NarrativeRepository
-from core.narratives.api import NarrativesApiClient
-from core.narratives.models import NarrativeViralityScoreType
 from core.uow import ConnectionFactory, uow
 
 logger = logging.getLogger(__name__)
 
 _api = NarrativesApiClient()
 
-# Virality score weights and parameters
-VIRALITY_SCORE_LIKES_WEIGHT = 1        # weight of likes relative to comments
-VIRALITY_SCORE_COMMENTS_WEIGHT = 5     # weight of comments relative to likes
-VIRALITY_SCORE_REACH_CAP_LIMIT = 10    # cap reach score at 10x the average views
-VIRALITY_SCORE_VELOCITY_DAYS_BACK = 2  # window (days) used for velocity score
-
-# Composite virality and acceleration weights, the acceleration change cap, and the
-# alert-level percentile thresholds are read from the environment (see core.config for
-# the values, their defaults, and the tuning notes) and imported at the top of this
-# module.
+# The weights, the baseline age bound and the six region boundaries are read from the
+# environment (see core.config for values, defaults and tuning notes) and imported at
+# the top of this module.
 #
-# Alert levels compare BOTH indicators by their PERCENT_RANK within the cohort scored
-# on the same run, never by their raw values. The two are not on comparable scales:
-# composite_virality is a bounded, bell-shaped blend of percentile ranks (in
-# production it reaches only 0.90, 99th percentile 0.81), while acceleration_rate is a
-# raw capped ratio whose median is 0 and whose tail saturates ACCELERATION_CHANGE_CAP.
-# Ranking both puts them on one scale and makes each threshold a knowable fraction of
-# the cohort.
+# THE WHOLE DESIGN IN TWO SENTENCES (docs/narrative-alert-redesign.md):
+#
+#   C1  We only rank what we measured. A narrative we did not look at is *unmeasured*,
+#       not *quiet*; it is excluded from the ranking, never ranked as the least-active
+#       one. This is why the two axes have different cohorts.
+#   C2  We measure exactly two things: how far a narrative has spread (a STATE, on
+#       composite) and how fast that spread is changing (a RATE, on acceleration).
+#       Every state signal on composite, every change signal on acceleration, nothing
+#       straddling. `velocity` used to straddle, and that mixing is what made movers
+#       look like noise.
+#
+# Both axes are compared by their PERCENT_RANK within their own cohort, never by raw
+# values. The two are not on comparable scales — composite is a bounded blend of
+# percentile ranks, acceleration is an unbounded ratio whose median is near zero — and
+# a rank is self-calibrating against a scraper whose coverage drifts over time.
 
 def _merge_narrative_context(
     existing: str | None, new: str | None
@@ -437,75 +440,45 @@ class NarrativeService:
                 limit=limit, offset=offset, hours=hours
             )
 
-    async def get_average_views_for_all_narratives(self) -> float:
-        async with self.repo() as repo:
-            return await repo.get_average_views_for_all_narratives()
-
-    async def calculate_narrative_virality_scores(
-        self, narrative_id: UUID, average_views: float | None = None, calc_date: date | None = None
-    ) -> tuple[float, float, float]:
+    async def calculate_narrative_virality_scores(self, calc_date: date) -> int:
         """
-        Calculate and store virality scores for a single narrative.
-            - engagement_score: based on likes and comments relative to views
-            - reach_score: based on views relative to average views for all narratives
-            - velocity_score: based on recent views relative to total views
-         The average_views parameter can be provided to avoid redundant calculations when processing multiple narratives in a batch
+        Score the spread-state axis for every measured narrative, in one pass.
+
+        Writes an engagement_score and a reach_score row per narrative. `velocity_score`
+        is no longer computed: it is a *change* measure, and C2 puts every change signal
+        on the acceleration axis. Keeping it on the level axis double-counted growth —
+        which is precisely what made the two axes look independent when they were not.
+
+        Returns the number of narratives scored.
         """
-
         async with self.repo() as repo:
-            average_views_for_all_narratives = average_views if average_views is not None else await repo.get_average_views_for_all_narratives()
-            narrative_stats = await self.get_narrative_stats(narrative_id)
-            if not narrative_stats:
-                raise ValueError("narrative not found")
-            narrative_total_stats = narrative_stats.totals
-            # calculate engagement_score
-            engagement_score = (narrative_total_stats.likes * VIRALITY_SCORE_LIKES_WEIGHT + narrative_total_stats.comments * VIRALITY_SCORE_COMMENTS_WEIGHT) / narrative_total_stats.views if narrative_total_stats.views > 0 else 0
-
-            await repo.insert_narrative_virality_score(
-                narrative_id=narrative_id,
-                score_value=engagement_score,
-                score_type=NarrativeViralityScoreType.ENGAGEMENT_SCORE,
-                calc_date=calc_date,
-                metadata={
-                    "likes": narrative_total_stats.likes,
-                    "comments": narrative_total_stats.comments,
-                    "views": narrative_total_stats.views,
-                    "likes_weight": VIRALITY_SCORE_LIKES_WEIGHT,
-                    "comments_weight": VIRALITY_SCORE_COMMENTS_WEIGHT,
-                },
-            )
-
-            # calculate reach_score
-            reach_score = min(narrative_total_stats.views / average_views_for_all_narratives, VIRALITY_SCORE_REACH_CAP_LIMIT) / VIRALITY_SCORE_REACH_CAP_LIMIT if average_views_for_all_narratives > 0 else 0
-            await repo.insert_narrative_virality_score(
-                narrative_id=narrative_id,
-                score_value=reach_score,
-                score_type=NarrativeViralityScoreType.REACH_SCORE,
-                calc_date=calc_date,
-                metadata={
-                    "views": narrative_total_stats.views,
-                    "average_views_for_all_narratives": average_views_for_all_narratives,
-                    "reach_cap_limit": VIRALITY_SCORE_REACH_CAP_LIMIT,
-                },
-            )
-
-            # calculate velocity_score
-            last_days_stats = await repo.get_narrative_stats_delta_for_period(narrative_id=narrative_id, days_back=VIRALITY_SCORE_VELOCITY_DAYS_BACK)
-            velocity_score = last_days_stats.views / (narrative_total_stats.views) if narrative_total_stats.views > 0 else 0
-
-            await repo.insert_narrative_virality_score(
-                narrative_id=narrative_id,
-                score_value=velocity_score,
-                score_type=NarrativeViralityScoreType.VELOCITY_SCORE,
-                calc_date=calc_date,
-                metadata={
-                    "views_last_days": last_days_stats.views,
-                    "total_views": narrative_total_stats.views,
-                    "velocity_days_back": VIRALITY_SCORE_VELOCITY_DAYS_BACK,
-                },
-            )
-
-            return engagement_score, reach_score, velocity_score
+            cohort = await repo.get_composite_cohort(calc_date)
+            records: list[tuple[UUID, float, NarrativeViralityScoreType, dict[str, Any] | None]] = []
+            for row in cohort:
+                records.append((
+                    row["narrative_id"],
+                    row["engagement_score"],
+                    NarrativeViralityScoreType.ENGAGEMENT_SCORE,
+                    {
+                        "likes": row["likes"],
+                        "comments": row["comments"],
+                        "views": row["views"],
+                        "likes_weight": VIRALITY_SCORE_LIKES_WEIGHT,
+                        "comments_weight": VIRALITY_SCORE_COMMENTS_WEIGHT,
+                    },
+                ))
+                records.append((
+                    row["narrative_id"],
+                    row["reach_score"],
+                    NarrativeViralityScoreType.REACH_SCORE,
+                    {
+                        "views": row["views"],
+                        "video_count": row["video_count"],
+                    },
+                ))
+            if records:
+                await repo.bulk_insert_narrative_virality_scores(records, calc_date=calc_date)
+            return len(cohort)
 
     @staticmethod
     def _percent_ranks(values: list[float]) -> list[float]:
@@ -542,65 +515,80 @@ class NarrativeService:
                 composite = (
                     percentiles.get(NarrativeViralityScoreType.ENGAGEMENT_SCORE, 0) * COMPOSITE_ENGAGEMENT_WEIGHT
                     + percentiles.get(NarrativeViralityScoreType.REACH_SCORE, 0) * COMPOSITE_REACH_WEIGHT
-                    + percentiles.get(NarrativeViralityScoreType.VELOCITY_SCORE, 0) * COMPOSITE_VELOCITY_WEIGHT
                 )
                 metadata = {
                     "engagement_percentile": percentiles.get(NarrativeViralityScoreType.ENGAGEMENT_SCORE, 0),
                     "reach_percentile": percentiles.get(NarrativeViralityScoreType.REACH_SCORE, 0),
-                    "velocity_percentile": percentiles.get(NarrativeViralityScoreType.VELOCITY_SCORE, 0),
                     "engagement_weight": COMPOSITE_ENGAGEMENT_WEIGHT,
                     "reach_weight": COMPOSITE_REACH_WEIGHT,
-                    "velocity_weight": COMPOSITE_VELOCITY_WEIGHT,
                 }
                 records.append((narrative_id, composite, NarrativeAnalysisIndicatorType.COMPOSITE_VIRALITY, metadata))
             self._attach_percentiles(records)
             await repo.bulk_insert_narrative_analysis_indicators(records, calc_date=calc_date)
 
     async def calculate_acceleration_rate_for_date(self, calc_date: date) -> None:
+        """
+        Score the change-in-spread axis over the narratives we actually visited today.
+
+        Each component is a growth RATE — per elapsed day, per D4. The repository has
+        already divided each video's view gain by the days since that video was last
+        fetched, so a video last seen four days ago no longer contributes four days of
+        growth as if it were one and rank high for having gone unmeasured.
+
+        There is deliberately no cap on any component. The old ACCELERATION_CHANGE_CAP
+        existed because an unnormalised gain from a 1-view baseline could reach the
+        thousands; dividing by the elapsed gap and ranking the result (never the raw
+        value) removes the need for a magic clamp.
+        """
         async with self.repo() as repo:
-            stats_rows = await repo.get_bulk_narrative_stats_comparison(calc_date)
+            stats_rows = await repo.get_acceleration_cohort(
+                calc_date, max_baseline_age_days=ACCELERATION_MAX_BASELINE_AGE_DAYS
+            )
             records: list[tuple[UUID, float, NarrativeAnalysisIndicatorType, dict[str, Any] | None]] = []
             for row in stats_rows:
-                current_engagement = (
-                    row["current_likes"] * VIRALITY_SCORE_LIKES_WEIGHT
-                    + row["current_comments"] * VIRALITY_SCORE_COMMENTS_WEIGHT
-                ) / row["current_views"] if row["current_views"] > 0 else 0.0
+                baseline_views = row["baseline_views"]
+                mean_gap = row["mean_gap_days"]
 
+                # Views: per-day gain over the baseline it grew from. Both sides cover
+                # the same videos, so this is a true daily growth fraction.
+                change_views = (
+                    row["daily_view_gain"] / baseline_views if baseline_views > 0 else 0.0
+                )
+
+                # Engagement: a quality modifier, not a growth term. A narrative whose
+                # engagement is rising should rank above one whose engagement is falling,
+                # but it must never outweigh the views it modifies — hence its 0.10.
+                cur_views = row["cur_views"]
                 prev_engagement = (
-                    row["prev_likes"] * VIRALITY_SCORE_LIKES_WEIGHT
-                    + row["prev_comments"] * VIRALITY_SCORE_COMMENTS_WEIGHT
-                ) / row["prev_views"] if row["prev_views"] > 0 else 0.0
-
-                # When there is no previous-period baseline the percent-change
-                # is undefined; we treat it as 0 instead of the previous 1.0
-                # fallback, which was conflating "freshly observed" with "100%
-                # growth" and silently inflating accel for new narratives.
-                #
-                # The per-dimension change is capped at ACCELERATION_CHANGE_CAP
-                # so that a single video with a 1-view baseline can't push
-                # change_views into the thousands and drown the weighting.
-                change_engagement = min(
-                    (current_engagement - prev_engagement) / prev_engagement
-                    if prev_engagement > 0 else 0.0,
-                    ACCELERATION_CHANGE_CAP,
+                    (row["prev_likes"] * VIRALITY_SCORE_LIKES_WEIGHT
+                     + row["prev_comments"] * VIRALITY_SCORE_COMMENTS_WEIGHT) / baseline_views
+                    if baseline_views > 0 else 0.0
                 )
-                change_video_count = min(
-                    (row["current_video_count"] - row["prev_video_count"]) / row["prev_video_count"]
-                    if row["prev_video_count"] > 0 else 0.0,
-                    ACCELERATION_CHANGE_CAP,
+                cur_engagement = (
+                    (row["cur_likes"] * VIRALITY_SCORE_LIKES_WEIGHT
+                     + row["cur_comments"] * VIRALITY_SCORE_COMMENTS_WEIGHT) / cur_views
+                    if cur_views > 0 else 0.0
                 )
-                change_views = min(
-                    (row["current_views"] - row["prev_views"]) / row["prev_views"]
-                    if row["prev_views"] > 0 else 0.0,
-                    ACCELERATION_CHANGE_CAP,
+                change_engagement = (
+                    ((cur_engagement - prev_engagement) / prev_engagement) / mean_gap
+                    if prev_engagement > 0 and mean_gap > 0 else 0.0
                 )
 
-                # Acceleration measures how fast a narrative is *growing*, so it is
-                # floored at 0: a declining narrative is not "negatively accelerating"
-                # for alerting purposes, it is simply not surging. Without the floor,
-                # decliners produce negative rates, and percent-ranking those pushes a
-                # merely-flat (0.0) narrative into a high acceleration percentile — the
-                # noise-as-signal that mislabels flat narratives as EARLY_SURGE.
+                # Video count: already a one-day window (linked today vs linked
+                # yesterday), so it needs no gap division. A gained video counts as
+                # growth whether it was uploaded this morning or is an old one the
+                # scraper only just found — we are not claiming to have watched the
+                # video appear, only that the narrative's footprint in our corpus grew,
+                # and we have two honest observations of that count.
+                prev_videos = row["prev_videos"]
+                change_video_count = (
+                    (row["cur_videos"] - prev_videos) / prev_videos if prev_videos > 0 else 0.0
+                )
+
+                # The floor keeps decliners from ranking above the genuinely flat. It is
+                # not the load-bearing part it once was: with engagement demoted to 0.10
+                # it now touches ~43 narratives rather than 679 (measured 2026-07-16).
+                # It still merges "shrinking" with "flat", which is a real open question.
                 acceleration_rate = max(
                     0.0,
                     change_engagement * ACCELERATION_ENGAGEMENT_WEIGHT
@@ -618,41 +606,76 @@ class NarrativeService:
                         "engagement_weight": ACCELERATION_ENGAGEMENT_WEIGHT,
                         "video_volume_weight": ACCELERATION_VIDEO_VOLUME_WEIGHT,
                         "views_weight": ACCELERATION_VIEWS_WEIGHT,
+                        "refreshed_videos": row["refreshed_videos"],
+                        "mean_gap_days": mean_gap,
                     },
                 ))
             self._attach_percentiles(records)
             await repo.bulk_insert_narrative_analysis_indicators(records, calc_date=calc_date)
 
+    @staticmethod
+    def _classify(composite: float, acceleration: float) -> NarrativeAlertLevel | None:
+        """
+        Place a narrative on the percentile plane. Returns None for the no-badge region.
+
+        The four regions are RECTANGLES, not quadrants, and two consequences of that are
+        easy to get wrong:
+
+          - `early_surge` is for SMALL narratives only. It is not "anything climbing":
+            a large climber is `viral` if it clears the top of both axes and `trending`
+            otherwise. The composite ceiling is the whole point of the label.
+          - The labels do not tile the plane. Small AND flat — the bottom-left — gets no
+            badge at all.
+
+        Order matters: `viral` is carved out of the `trending` box, so it is tested
+        first. Every boundary compares one axis to a constant on that same axis, never
+        to the other axis's percentile, which is what lets the two axes rank over
+        different cohorts without needing a shared denominator.
+        """
+        if composite >= ALERT_COMPOSITE_HI and acceleration >= ALERT_ACCEL_HI:
+            return NarrativeAlertLevel.VIRAL
+        if composite <= ALERT_COMPOSITE_LO and acceleration >= ALERT_ACCEL_MID:
+            return NarrativeAlertLevel.EARLY_SURGE
+        if composite >= ALERT_COMPOSITE_MID and acceleration <= ALERT_ACCEL_LO:
+            return NarrativeAlertLevel.CONSOLIDATED
+        if composite >= ALERT_COMPOSITE_LO and acceleration >= ALERT_ACCEL_LO:
+            return NarrativeAlertLevel.TRENDING
+        return None
+
     async def update_narrative_alert_levels(self, calc_date: date) -> int:
         """
-        Classify each narrative on the percentile ranks of BOTH indicators within the
-        run's cohort, and persist the result in the alert_level column.
+        Classify each narrative on the percentile ranks of BOTH axes and persist the
+        result in the alert_level column.
 
-            VIRAL        composite >= 0.95                          (any acceleration)
-            EARLY_SURGE  composite <= 0.50  and acceleration >= 0.95
-            ALERT        0.50 < composite < 0.95 and acceleration >= 0.95
-            WATCH        0.70 <= composite < 0.95
-                         and 0.70 <= acceleration < 0.95
-            NONE         otherwise
+            viral         composite >= 0.80  and  acceleration >= 0.80
+            early_surge   composite <= 0.40  and  acceleration >= 0.50
+            consolidated  composite >= 0.50  and  acceleration <= 0.40
+            trending      composite >= 0.40  and  acceleration >= 0.40
+            (no badge)    everything else — small and flat
 
-        The regions are disjoint as written — every pair differs on at least one axis
-        — so evaluation order does not decide the answer. VIRAL owns the top of the
-        composite axis outright: a narrative that large is viral whether or not it is
-        still climbing, which is what the old "plateaued-but-popular" branch was
-        reaching for when it emitted WATCH for exactly this condition.
+        Only the acceleration cohort is classifiable. Every label makes a claim about
+        today ("climbing", "flat"), and we cannot make that claim about a narrative we
+        did not look at. Composite's much larger pool exists to give a *stable rank*,
+        not to badge more narratives: ranking size against the whole corpus is what
+        stops a narrative's "how big am I" answer from swinging with whoever else
+        happened to get scraped.
 
-        A narrative is classified only when it has *both* indicators. Previously a
-        missing composite was read as 0.0, which satisfied `composite < 0.65` and made
-        an unscored narrative eligible for EARLY_SURGE on acceleration alone — absence
-        of data masquerading as a signal. Narratives that cannot be scored have their
-        alert_level cleared, rather than left holding a stale badge.
+        A narrative that was visited but did not grow stays in, ranked at an honest
+        zero — that is required rather than tolerated, because `consolidated` means big
+        *and flat*, so a large narrative that genuinely stopped growing must be able to
+        reach it. What is excluded is the *unmeasured*, which merely wears a zero
+        because its carried-forward snapshot is identical on both days.
 
-        Returns the number of narratives classified.
+        Narratives in the no-badge region, and any that cannot be scored, have their
+        alert_level cleared rather than left holding a stale badge.
+
+        Returns the number of narratives classified (badged or explicitly cleared).
         """
 
         async with self.repo() as repo:
             indicators = await repo.get_bulk_analysis_indicators_for_date(calc_date)
-            records: list[tuple[UUID, NarrativeAlertLevel]] = []
+            badged: list[tuple[UUID, NarrativeAlertLevel]] = []
+            scored: list[UUID] = []
             for narrative_id, values in indicators.items():
                 composite_indicator = values.get("composite_virality")
                 acceleration_indicator = values.get("acceleration_rate")
@@ -664,32 +687,18 @@ class NarrativeService:
                 if composite is None or acceleration is None:
                     continue
 
-                if composite >= COMPOSITE_PERCENTILE_VIRAL:
-                    level = NarrativeAlertLevel.VIRAL
-                elif (
-                    composite <= COMPOSITE_PERCENTILE_EARLY_SURGE_MAX
-                    and acceleration >= ACCELERATION_PERCENTILE_SURGE
-                ):
-                    level = NarrativeAlertLevel.EARLY_SURGE
-                elif (
-                    COMPOSITE_PERCENTILE_EARLY_SURGE_MAX < composite < COMPOSITE_PERCENTILE_VIRAL
-                    and acceleration >= ACCELERATION_PERCENTILE_SURGE
-                ):
-                    level = NarrativeAlertLevel.ALERT
-                elif (
-                    COMPOSITE_PERCENTILE_WATCH_MIN <= composite < COMPOSITE_PERCENTILE_VIRAL
-                    and ACCELERATION_PERCENTILE_WATCH_MIN <= acceleration < ACCELERATION_PERCENTILE_SURGE
-                ):
-                    level = NarrativeAlertLevel.WATCH
-                else:
-                    level = NarrativeAlertLevel.NONE
+                scored.append(narrative_id)
+                level = self._classify(composite, acceleration)
+                if level is not None:
+                    badged.append((narrative_id, level))
 
-                records.append((narrative_id, level))
-
-            if records:
-                await repo.bulk_update_narrative_alert_levels(records)
-                await repo.clear_alert_levels_except([narrative_id for narrative_id, _ in records])
-            return len(records)
+            if badged:
+                await repo.bulk_update_narrative_alert_levels(badged)
+            if scored:
+                # Everything outside the badged set loses its badge — including the
+                # no-badge region, which is an absence rather than a level.
+                await repo.clear_alert_levels_except([narrative_id for narrative_id, _ in badged])
+            return len(scored)
 
     async def run_narrative_analysis_indicators_pipeline(
         self,
@@ -700,59 +709,52 @@ class NarrativeService:
     ) -> tuple[int, int]:
         """
         Run the full narrative analysis indicators pipeline:
-          1. Calculate per-narrative virality scores (engagement, reach, velocity) in batches.
+          1. Score the spread-state axis for every measured narrative.
           2. Compute composite virality and acceleration rate indicators for the day.
-          3. Classify and persist alert levels for every narrative.
+          3. Classify and persist alert levels.
 
         Args:
-            batch_size: Number of narratives to process per batch.
-            hours: Time window used to scope which narratives are considered.
+            batch_size: Retained for API compatibility; phase 1 is a single bulk query
+                        and no longer paginates. The per-narrative loop it replaced
+                        opened two nested transactions and issued three inserts per
+                        narrative, which the expanded composite cohort (~22k rather than
+                        the ~2k the dashboard query returned) would have turned into
+                        ~44k transactions per run.
+            hours: Retained for API compatibility; no longer used. The old pipeline
+                   scoped phase 1 with the dashboard's pagination query, whose `NOW()`
+                   anchor and 24-hour window made the composite cohort a function of
+                   when the job ran. Composite now ranks over every narrative measured
+                   at least once, which is both the design and a cheaper query.
             calc_date: Date to use for indicator/alert calculations. Defaults to
-                       yesterday — the last *completed* scraping day. The acceleration
-                       indicator compares the carried-forward video stats "as of
-                       calc_date" against "as of calc_date - 1", so the difference is
-                       driven entirely by videos scraped on calc_date itself. Defaulting
-                       to today would run against a day that has barely been scraped
-                       (the job fires just after midnight UTC), leaving current == prev
-                       and acceleration == 0 for almost every narrative. Scoring the last
-                       completed day gives a full day of scraping on both sides.
-            on_progress: Optional callback invoked after each batch with
-                         (total_processed, errors) so callers can report progress.
+                       yesterday — the last *completed* scraping day. Acceleration
+                       compares carried-forward stats "as of calc_date" against "as of
+                       calc_date - 1", so the difference is driven entirely by videos
+                       scraped on calc_date itself. Defaulting to today would run
+                       against a day that has barely been scraped (the job fires just
+                       after midnight UTC), leaving current == prev and acceleration
+                       == 0 for almost every narrative.
+            on_progress: Optional callback invoked once with (total_processed, errors).
 
         Returns:
             (total_processed, errors) counts from phase 1.
         """
         target_date = calc_date or (date.today() - timedelta(days=1))
 
-        average_views = await self.get_average_views_for_all_narratives()
-
-        # Phase 1 — per-narrative virality scores
-        offset = 0
+        # Phase 1 — spread-state scores over every measured narrative
         total_processed = 0
         errors = 0
-        while True:
-            narratives = await self.get_prevalent_narratives_summary(
-                limit=batch_size, offset=offset, hours=hours
+        try:
+            total_processed = await self.calculate_narrative_virality_scores(
+                calc_date=target_date
             )
-            if not narratives:
-                break
+        except Exception as e:
+            logger.error(f"Error calculating virality scores for {target_date}: {e}")
+            errors = 1
 
-            for narrative in narratives:
-                try:
-                    await self.calculate_narrative_virality_scores(
-                        narrative.id, average_views=average_views, calc_date=target_date
-                    )
-                    total_processed += 1
-                except Exception as e:
-                    logger.error(f"Error calculating virality for narrative {narrative.id}: {e}")
-                    errors += 1
+        if on_progress:
+            on_progress(total_processed, errors)
 
-            if on_progress:
-                on_progress(total_processed, errors)
-
-            offset += batch_size
-
-        # Phase 2 — composite indicators
+        # Phase 2 — the two axes
         await self.calculate_composite_virality_for_date(calc_date=target_date)
         await self.calculate_acceleration_rate_for_date(calc_date=target_date)
 
