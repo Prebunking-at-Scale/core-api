@@ -175,7 +175,7 @@ async def test_acceleration_divides_each_video_by_its_own_gap(conn_factory):
         )
 
         repo = NarrativeRepository(conn.cursor())
-        rows = await repo.get_acceleration_cohort(calc_date, max_baseline_age_days=0)
+        rows = await repo.get_acceleration_cohort(calc_date)
 
     row = next(r for r in rows if r["narrative_id"] == narrative_id)
     assert row["refreshed_videos"] == 2
@@ -183,17 +183,24 @@ async def test_acceleration_divides_each_video_by_its_own_gap(conn_factory):
     assert row["baseline_views"] == 200.0
 
 
-async def test_acceleration_drops_a_baseline_older_than_the_bound(conn_factory):
-    """The same fixture with a 2-day bound: B's 4-day-old baseline cannot anchor a rate.
+async def test_acceleration_keeps_an_old_baseline_and_divides_by_its_gap(conn_factory):
+    """A baseline's age never disqualifies it. Growth per day is the whole normalisation.
 
-    Per-day division would otherwise launder an old surge into today's number.
+    A 30-day-old baseline is divided by 30, exactly as a 1-day gap is divided by 1. An
+    earlier draft dropped baselines older than 14 days, which did not remove the
+    narrative from the cohort — it handed it a rate of 0.0, asserting "this stopped
+    growing" about a narrative that had in fact grown 30x and simply gone unvisited.
+
+        A: 100 -> 200 across  1 day   -> 100/day
+        B: 100 -> 3100 across 30 days -> 100/day
+        daily_view_gain = 200 over a baseline of 200
     """
-    calc_date = date(2025, 1, 5)
+    calc_date = date(2025, 1, 31)
     async with conn_factory() as conn:
         cur = conn.cursor()
         narrative_id = await _make_narrative(cur)
-        a = await _insert_video(cur, views_by_date={"2025-01-04": 100, "2025-01-05": 200})
-        b = await _insert_video(cur, views_by_date={"2025-01-01": 100, "2025-01-05": 200})
+        a = await _insert_video(cur, views_by_date={"2025-01-30": 100, "2025-01-31": 200})
+        b = await _insert_video(cur, views_by_date={"2025-01-01": 100, "2025-01-31": 3100})
         await _link_videos_to_narrative(cur, narrative_id, [a, b])
         await cur.execute(
             "UPDATE videos SET updated_at = %(d)s WHERE id = ANY(%(ids)s)",
@@ -201,12 +208,12 @@ async def test_acceleration_drops_a_baseline_older_than_the_bound(conn_factory):
         )
 
         repo = NarrativeRepository(conn.cursor())
-        rows = await repo.get_acceleration_cohort(calc_date, max_baseline_age_days=2)
+        rows = await repo.get_acceleration_cohort(calc_date)
 
     row = next(r for r in rows if r["narrative_id"] == narrative_id)
-    assert row["refreshed_videos"] == 1
-    assert row["daily_view_gain"] == 100.0
-    assert row["baseline_views"] == 100.0
+    assert row["refreshed_videos"] == 2
+    assert row["daily_view_gain"] == 200.0
+    assert row["baseline_views"] == 200.0
 
 
 async def test_acceleration_excludes_narratives_born_on_calc_date(conn_factory):
@@ -230,7 +237,7 @@ async def test_acceleration_excludes_narratives_born_on_calc_date(conn_factory):
         )
 
         repo = NarrativeRepository(conn.cursor())
-        rows = await repo.get_acceleration_cohort(calc_date, max_baseline_age_days=0)
+        rows = await repo.get_acceleration_cohort(calc_date)
 
     ids = {r["narrative_id"] for r in rows}
     assert established in ids
@@ -263,7 +270,7 @@ async def test_acceleration_excludes_the_unvisited(conn_factory):
         )
 
         repo = NarrativeRepository(conn.cursor())
-        rows = await repo.get_acceleration_cohort(calc_date, max_baseline_age_days=0)
+        rows = await repo.get_acceleration_cohort(calc_date)
 
     ids = {r["narrative_id"] for r in rows}
     assert visited in ids
@@ -288,7 +295,7 @@ async def test_visited_but_flat_stays_in_the_cohort(conn_factory):
         )
 
         repo = NarrativeRepository(conn.cursor())
-        rows = await repo.get_acceleration_cohort(calc_date, max_baseline_age_days=0)
+        rows = await repo.get_acceleration_cohort(calc_date)
 
     row = next(r for r in rows if r["narrative_id"] == narrative_id)
     assert row["daily_view_gain"] == 0.0

@@ -1875,9 +1875,7 @@ class NarrativeRepository:
         )
         return await self._session.fetchall()
 
-    async def get_acceleration_cohort(
-        self, calc_date: date, max_baseline_age_days: int = 0
-    ) -> list[dict]:
+    async def get_acceleration_cohort(self, calc_date: date) -> list[dict]:
         """
         The CHANGE-IN-SPREAD cohort and its per-day change components (D0 + D4).
 
@@ -1908,9 +1906,14 @@ class NarrativeRepository:
         that turns out to prioritise active videos, the fix is to divide by every
         video's baseline rather than only the refreshed ones — this CTE, not a rewrite.
 
-        `max_baseline_age_days` drops videos whose baseline is older than that, so an
-        old surge cannot be laundered into today's rate through the per-day division.
-        0 disables the bound.
+        A baseline's AGE does not disqualify it. Growth per day is the whole point of
+        the per-day division: a video last seen twenty days ago contributes its twenty
+        days of growth as one day's worth, which is the same treatment a four-day gap
+        gets, and there is no age at which that stops being the right arithmetic. An
+        earlier draft dropped baselines older than 14 days; that bound is gone, because
+        it did not exclude the narrative — the LEFT JOIN below handed it a rate of
+        exactly 0.0 instead, turning "the baseline is too old to say" into the positive
+        claim "this stopped growing", which is the C1 error one level down.
 
         Narratives that had no videos the day before are excluded by the inner join to
         the previous day's state: a narrative with none was *created* on calc_date, and
@@ -1981,7 +1984,6 @@ class NarrativeRepository:
                 FROM cur c
                 JOIN prev p ON p.narrative_id = c.narrative_id AND p.video_id = c.video_id
                 WHERE c.recorded_on > p.recorded_on
-                  AND (%(max_age)s = 0 OR c.recorded_on - p.recorded_on <= %(max_age)s)
             ),
             -- The clean aggregation: sum the per-day gains, sum the baselines they came
             -- from, divide once. Averaging per-video ratios would let a video with a
@@ -2038,11 +2040,7 @@ class NarrativeRepository:
             LEFT JOIN growth g ON g.narrative_id = co.narrative_id
             WHERE co.prev_videos > 0
             """,
-            {
-                "calc_date": calc_date,
-                "prev_date": prev_date,
-                "max_age": max_baseline_age_days,
-            },
+            {"calc_date": calc_date, "prev_date": prev_date},
         )
         return await self._session.fetchall()
 

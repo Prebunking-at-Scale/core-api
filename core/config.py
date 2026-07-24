@@ -88,13 +88,6 @@ ACCELERATION_ENGAGEMENT_WEIGHT = float(os.environ.get("ACCELERATION_ENGAGEMENT_W
 ACCELERATION_VIDEO_VOLUME_WEIGHT = float(os.environ.get("ACCELERATION_VIDEO_VOLUME_WEIGHT", "0.35"))
 ACCELERATION_VIEWS_WEIGHT = float(os.environ.get("ACCELERATION_VIEWS_WEIGHT", "0.55"))
 
-# A baseline older than this many days cannot anchor a rate (D4). Per-day
-# normalisation would otherwise launder an old surge into today's number: a video last
-# seen three months ago contributes a quarter's growth, divided down but anchored to a
-# baseline that means nothing now. Measured 2026-07-15: 96.8% of the cohort is within 7
-# days, 99.2% within 14, so this excludes ~1% of videos. Set to 0 to disable the bound.
-ACCELERATION_MAX_BASELINE_AGE_DAYS = int(os.environ.get("ACCELERATION_MAX_BASELINE_AGE_DAYS", "14"))
-
 # Alert-level percentile thresholds. Both axes are classified by their PERCENT_RANK
 # within their own cohort, never by raw values, so each threshold means a knowable
 # fraction of that cohort — and a rank is self-calibrating against a scraper whose

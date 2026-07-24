@@ -6,7 +6,6 @@ from uuid import UUID
 
 from core.config import (
     ACCELERATION_ENGAGEMENT_WEIGHT,
-    ACCELERATION_MAX_BASELINE_AGE_DAYS,
     ACCELERATION_VIDEO_VOLUME_WEIGHT,
     ACCELERATION_VIEWS_WEIGHT,
     ALERT_ACCEL_HI,
@@ -539,11 +538,13 @@ class NarrativeService:
         existed because an unnormalised gain from a 1-view baseline could reach the
         thousands; dividing by the elapsed gap and ranking the result (never the raw
         value) removes the need for a magic clamp.
+
+        Nor is there a bound on how old a baseline may be. Growth per day is the whole
+        normalisation: a twenty-day gap is divided by twenty exactly as a four-day gap
+        is divided by four.
         """
         async with self.repo() as repo:
-            stats_rows = await repo.get_acceleration_cohort(
-                calc_date, max_baseline_age_days=ACCELERATION_MAX_BASELINE_AGE_DAYS
-            )
+            stats_rows = await repo.get_acceleration_cohort(calc_date)
             records: list[tuple[UUID, float, NarrativeAnalysisIndicatorType, dict[str, Any] | None]] = []
             for row in stats_rows:
                 baseline_views = row["baseline_views"]

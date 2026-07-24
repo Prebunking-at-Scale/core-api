@@ -377,12 +377,13 @@ class TestCalculateAccelerationRateForDate:
         assert meta["change_views"] == pytest.approx(100.0)
         assert acceleration == pytest.approx(55.0)
 
-    async def test_baseline_age_bound_is_passed_to_the_repository(
+    async def test_the_cohort_is_asked_for_by_date_alone(
         self, narrative_service: NarrativeService
     ):
         """
-        The staleness bound has to reach the query: per-day division would otherwise
-        launder an old surge into today's rate.
+        Nothing narrows the cohort but the date. There is no baseline-age bound: growth
+        per day is the whole normalisation, and an old baseline is divided by its own
+        gap rather than discarded.
         """
         mock_repo = AsyncMock()
         mock_repo.get_acceleration_cohort.return_value = []
@@ -391,8 +392,8 @@ class TestCalculateAccelerationRateForDate:
             await narrative_service.calculate_acceleration_rate_for_date(calc_date)
 
         args, kwargs = mock_repo.get_acceleration_cohort.call_args
-        assert args[0] == calc_date
-        assert kwargs["max_baseline_age_days"] > 0
+        assert args == (calc_date,)
+        assert kwargs == {}
 
 
 # ---------------------------------------------------------------------------
