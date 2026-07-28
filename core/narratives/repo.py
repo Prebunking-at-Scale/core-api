@@ -9,7 +9,6 @@ from psycopg.types.json import Jsonb
 from core.config import (
     VIRALITY_SCORE_COMMENTS_WEIGHT,
     VIRALITY_SCORE_LIKES_WEIGHT,
-    VIRALITY_SCORE_REACH_CAP_LIMIT,
 )
 from core.errors import ConflictError
 from core.models import Claim, Entity, Narrative, NarrativeAlertLevel, Topic, Video
@@ -1805,10 +1804,14 @@ class NarrativeRepository:
         revisited narratives made "how big am I" swing day to day depending on who else
         got scraped, which is scraper noise injected straight into the level axis.
 
-        Both sides of reach_score come from video_stats here. Production divided a
-        video_stats numerator by a videos-table denominator, so the ratio mixed two
-        sources that drift apart; computing the average in the same CTE that produces
-        the numerator makes that class of defect unrepresentable.
+        `reach_score` is the narrative's summed views, raw. It used to be
+        `min(views / avg_views, 10) / 10`; both halves of that are gone, and the corpus
+        average with them. The caller percent-ranks this column, and a rank does not
+        change under a monotonic transform, so dividing by a per-run constant sorted
+        nobody differently — while the clip flattened the entire top of the axis into a
+        tie. Production had a second defect here that the removal also settles: it
+        divided a video_stats numerator by a videos-table denominator, two sources that
+        drift apart. There is now no denominator to get wrong.
 
         Returns one row per narrative with engagement_score and reach_score ready to be
         percent-ranked. Narratives with no snapshot on or before `calc_date` are absent,
@@ -1844,11 +1847,6 @@ class NarrativeRepository:
                     COALESCE(SUM(comments), 0) AS comments
                 FROM latest
                 GROUP BY narrative_id
-            ),
-            corpus AS (
-                SELECT AVG(views)::float AS avg_views
-                FROM narrative_state
-                WHERE views > 0
             )
             SELECT
                 ns.narrative_id,
@@ -1860,17 +1858,13 @@ class NarrativeRepository:
                      THEN (ns.likes * %(likes_weight)s + ns.comments * %(comments_weight)s) / ns.views
                      ELSE 0.0
                 END::float AS engagement_score,
-                CASE WHEN (SELECT avg_views FROM corpus) > 0
-                     THEN LEAST(ns.views / (SELECT avg_views FROM corpus), %(reach_cap)s) / %(reach_cap)s
-                     ELSE 0.0
-                END::float AS reach_score
+                ns.views::float AS reach_score
             FROM narrative_state ns
             """,
             {
                 "calc_date": calc_date,
                 "likes_weight": VIRALITY_SCORE_LIKES_WEIGHT,
                 "comments_weight": VIRALITY_SCORE_COMMENTS_WEIGHT,
-                "reach_cap": VIRALITY_SCORE_REACH_CAP_LIMIT,
             },
         )
         return await self._session.fetchall()

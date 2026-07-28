@@ -150,6 +150,30 @@ async def test_composite_cohort_excludes_the_never_measured(conn_factory):
     assert unmeasured not in ids
 
 
+async def test_reach_score_is_raw_views_with_no_ceiling(conn_factory):
+    """Reach is summed views, unscaled and unclipped.
+
+    The old `min(views / avg_views, 10) / 10` tied every narrative past 10× the corpus
+    average, and the tie landed at the top of the axis — the band `viral` reads. Two
+    narratives 60× apart must come back as two different numbers, not one shared 1.0.
+    """
+    async with conn_factory() as conn:
+        cur = conn.cursor()
+        small = await _make_narrative(cur)
+        huge = await _make_narrative(cur)
+        a = await _insert_video(cur, views_by_date={"2025-01-01": 1_000})
+        b = await _insert_video(cur, views_by_date={"2025-01-01": 60_000})
+        await _link_videos_to_narrative(cur, small, [a])
+        await _link_videos_to_narrative(cur, huge, [b])
+
+        repo = NarrativeRepository(conn.cursor())
+        rows = await repo.get_composite_cohort(date(2025, 1, 5))
+
+    scores = {r["narrative_id"]: r["reach_score"] for r in rows}
+    assert scores[small] == 1_000
+    assert scores[huge] == 60_000
+
+
 async def test_acceleration_divides_each_video_by_its_own_gap(conn_factory):
     """Two videos gain 100 views each, but over gaps of 1 and 4 days.
 

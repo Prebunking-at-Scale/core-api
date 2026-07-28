@@ -38,7 +38,7 @@ Everything else is a derivation:
 | **D3** — the two axes rank over different pools | C1 + C2 | state needs one measurement ever; a rate needs one today |
 | **D4** — acceleration is growth *per day* | C2 | a rate is per unit time or it is not a rate |
 | **D5** — `viral` is a conjunction | C2 | big *and* still climbing = both axes at once |
-| **D6** — all change moves to the acceleration axis | C2 | evict velocity from composite; reweight so the rate axis can carry growth |
+| **D6** — all change moves to the acceleration axis | C2 | evict velocity from composite and let reach lead it (uncapped); reweight so the rate axis can carry growth |
 
 **Still open** — none of them alert conditions, all downstream of the two cores:
 - **O5.3 / O5.6** — denominator scope and aggregation. One decision, gated on O6.
@@ -67,9 +67,15 @@ from the last time we looked):
 
 ```
 engagement_score = (likes×1 + comments×5) / views      # quality of spread — a state
-reach_score      = min(views / avg_views_all, 10) / 10 # size of spread — a state
-composite        = engagement_pct×0.625 + reach_pct×0.375
+reach_score      = views                               # size of spread — a state, uncapped
+composite        = reach_pct×0.625 + engagement_pct×0.375
 ```
+
+`reach_score` used to be `min(views / avg_views_all, 10) / 10`. The clip is gone (D6), and once
+it is gone the rest of that expression cannot survive either: `avg_views_all` is a per-run
+constant and `PERCENT_RANK` is invariant under any monotonic transform, so dividing by it — or
+by 10 — moves no narrative relative to another. `reach_pct` is simply the rank of raw views.
+The normalisation existed to bound the score; the rank already does that.
 
 Each component is `PERCENT_RANK`-ed across the cohort, blended, and the blend ranked again
 to give `composite_pct`.
@@ -421,7 +427,8 @@ The exact boundary is D1's.
 ### D6 — All change-measurement moves to the acceleration axis  *(from C2)*
 
 ```
-composite    = engagement_pct×0.625 + reach_pct×0.375     (velocity dropped)
+composite    = reach_pct×0.625 + engagement_pct×0.375     (velocity dropped; reach leads)
+                    (was 0.30)          (was 0.50)
 acceleration = 0.10×change_engagement + 0.35×change_video_count + 0.55×change_views
                     (was 0.40)                                         (was 0.25)
 ```
@@ -432,10 +439,56 @@ acceleration's engagement weight still cancels growth would leave the system mea
 on *neither* axis. The result is two axes that mean cleanly different things — **composite is
 pure state, acceleration is pure rate** — which is C2.
 
-**Half one — composite drops `velocity`.** Velocity is a change measure; C2 forbids it on the
-state axis; the current double-counting of growth is what makes the axes *look* independent
-(see the C2-broken section). The 0.625/0.375 weights are the current 0.50/0.30 rescaled
-proportionally — the exact split is a free choice, not a finding.
+**Half one — composite drops `velocity`, and reach overtakes engagement.** Velocity is a
+change measure; C2 forbids it on the state axis; the current double-counting of growth is what
+makes the axes *look* independent (see the C2-broken section). Dropping it frees 0.20, and the
+remaining two are also **swapped**: reach 0.625, engagement 0.375, where today's pipeline has
+engagement 0.50 over reach 0.30.
+
+The swap is not taste — it follows from what the axis is *for*. Composite answers "how far has
+this spread", and reach is the only term that answers it: `engagement_score` is a per-view
+ratio, size-neutral by construction, so a 2k-view narrative with dense comments scores the same
+as a 2M-view one at the same density. Leading with engagement means the spread axis is mostly
+*not* measuring spread. Engagement is quality of spread — a genuine signal, and the right
+tiebreak between two narratives of comparable size, but a modifier on reach rather than the
+thing itself.
+
+This also makes the two axes consistent. Half two demotes engagement below views on the rate
+axis for its own reason (it was cancelling the growth it modified); with this swap the rule
+holds system-wide: **engagement modifies on both axes and leads on neither.** The 0.625/0.375
+magnitudes are still a free choice — the *ordering* is the finding.
+
+**And the 10× reach cap goes with it.** `reach_score` clipped at 10× average views, which ties
+every narrative above the ceiling; `PERCENT_RANK` collapses tied rows to one value. So above the
+cap reach contributed *nothing* to the ordering and engagement decided the sort outright.
+
+**How much it actually touched** (local dev database, n=2242 narratives with stats — indicative
+only; the production corpus is ~10× larger and the share may differ):
+
+| | |
+|---|---|
+| avg views across the cohort | 2,352,150 |
+| narratives at or above 10× that | **23** |
+| of those, inside the top reach quintile | **23** (all of them) |
+| size of that quintile | 449 |
+
+So the cap was not mangling the axis wholesale — 23 narratives, ~1% of the corpus, 5% of the
+top quintile. But it flattened them *at the top*, and the 23 largest narratives in the corpus
+are precisely the ones an alert system exists to rank. Every one of them landed on an identical
+reach rank, leaving engagement — a size-neutral ratio — to order the biggest narratives we have.
+That is a small blast radius aimed at the most important rows. Leading with reach while capping
+reach is not coherent, so the clip goes.
+
+Nothing is lost by dropping it. The cap's job was to keep `reach_score` bounded, and the
+`PERCENT_RANK` that follows already guarantees a bounded, outlier-immune `[0,1]` — that is
+D2's whole argument, applied here. A 500× narrative and a 12× narrative both land near rank
+1.0; they are simply no longer *tied*, which is the point. The tail cannot distort the axis
+because ranks do not care how far the tail extends.
+
+**Consequence for anything reading `reach_score` raw:** it is now unbounded (raw views), not
+`[0,1]`. `reach_pct` and `indicator_value` are unaffected — both are built from ranks. Nothing
+in this frontend reads the raw score, but a backend consumer that assumed a fraction will now
+see values in the millions.
 
 **Half two — acceleration is reweighted; engagement is demoted to a modifier.** Engagement
 *change* is a real quality signal (a narrative whose engagement is rising should rank above

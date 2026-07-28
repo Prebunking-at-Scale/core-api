@@ -185,7 +185,7 @@ class TestCalculateNarrativeViralityScores:
 # ---------------------------------------------------------------------------
 
 class TestCalculateCompositeViralityForDate:
-    """Weights: engagement=0.625, reach=0.375 — velocity evicted, the rest rescaled."""
+    """Weights: reach=0.625, engagement=0.375 — velocity evicted, reach leads the rest."""
 
     async def _composite(self, narrative_service, percentiles: dict) -> list:
         mock_repo = AsyncMock()
@@ -208,7 +208,7 @@ class TestCalculateCompositeViralityForDate:
         assert indicator_type == NarrativeAnalysisIndicatorType.COMPOSITE_VIRALITY
 
     async def test_composite_weighted_combination(self, narrative_service: NarrativeService):
-        # 0.6*0.625 + 0.4*0.375 = 0.375 + 0.15 = 0.525
+        # 0.6*0.375 + 0.4*0.625 = 0.225 + 0.25 = 0.475
         inserted = await self._composite(narrative_service, {
             uuid.uuid4(): {
                 NarrativeViralityScoreType.ENGAGEMENT_SCORE: 0.6,
@@ -216,7 +216,7 @@ class TestCalculateCompositeViralityForDate:
             }
         })
         _, composite, _, _ = inserted[0]
-        assert composite == pytest.approx(0.525)
+        assert composite == pytest.approx(0.475)
 
     async def test_a_velocity_percentile_cannot_move_composite(
         self, narrative_service: NarrativeService
@@ -242,12 +242,12 @@ class TestCalculateCompositeViralityForDate:
         assert without[0][1] == pytest.approx(with_velocity[0][1])
 
     async def test_composite_partial_percentiles(self, narrative_service: NarrativeService):
-        # engagement=0.8 alone → 0.8 * 0.625 = 0.5
+        # engagement=0.8 alone → 0.8 * 0.375 = 0.3
         inserted = await self._composite(narrative_service, {
             uuid.uuid4(): {NarrativeViralityScoreType.ENGAGEMENT_SCORE: 0.8}
         })
         _, composite, _, _ = inserted[0]
-        assert composite == pytest.approx(0.5)
+        assert composite == pytest.approx(0.3)
 
     async def test_composite_empty_percentiles(self, narrative_service: NarrativeService):
         assert await self._composite(narrative_service, {}) == []
@@ -766,13 +766,13 @@ class TestGetNarrativeAnalysisIndicators:
             "id": uuid.uuid4(),
             "narrative_id": narrative_id,
             "indicator_type": NarrativeAnalysisIndicatorType.COMPOSITE_VIRALITY,
-            "indicator_value": 0.62,
+            "indicator_value": 0.58,
             "calculated_at": stamped,
             "metadata": {
                 "engagement_percentile": 0.7,
                 "reach_percentile": 0.5,
-                "engagement_weight": 0.625,
-                "reach_weight": 0.375,
+                "engagement_weight": 0.375,
+                "reach_weight": 0.625,
                 "percentile": 0.83,
             },
         }]
@@ -849,7 +849,7 @@ class TestGetNarrativeAnalysisIndicators:
         )
 
         assert response is not None
-        assert response.composite_virality.indicator_value == pytest.approx(0.62)
+        assert response.composite_virality.indicator_value == pytest.approx(0.58)
         assert response.acceleration_rate is None
 
     async def test_returns_none_when_nothing_was_ever_measured(

@@ -64,7 +64,18 @@ the production values. Composite and acceleration weights must each sum to 1.
 # eventually disagrees with itself.
 VIRALITY_SCORE_LIKES_WEIGHT = int(os.environ.get("VIRALITY_SCORE_LIKES_WEIGHT", "1"))
 VIRALITY_SCORE_COMMENTS_WEIGHT = int(os.environ.get("VIRALITY_SCORE_COMMENTS_WEIGHT", "5"))
-VIRALITY_SCORE_REACH_CAP_LIMIT = int(os.environ.get("VIRALITY_SCORE_REACH_CAP_LIMIT", "10"))
+
+# There is deliberately no reach cap. `reach_score` used to be
+# `min(views / avg_views, 10) / 10`, tunable through VIRALITY_SCORE_REACH_CAP_LIMIT; the
+# whole expression is gone. Everything downstream reads the PERCENT_RANK of the score,
+# and a rank is invariant under any monotonic transform, so dividing by a per-run
+# constant never moved a narrative relative to another. The clip did — it tied every
+# narrative above the ceiling into one indistinguishable block, and it did so at the top
+# of the axis, which is exactly the band `viral` and `consolidated` read. Measured on a
+# dev database (n=2242), that was 23 narratives — ~1% of the corpus, but all 23 inside the
+# top reach quintile, i.e. the largest narratives we have, left to be ordered by a
+# size-neutral ratio. D2's ranking already delivers the bounded, outlier-immune [0, 1] the
+# cap was there to provide.
 
 # Composite virality score weights (must sum to 1).
 #
@@ -72,9 +83,17 @@ VIRALITY_SCORE_REACH_CAP_LIMIT = int(os.environ.get("VIRALITY_SCORE_REACH_CAP_LI
 # term on it must be a level, never a change — `velocity` used to sit here and was
 # dropped, because a growth term on the state axis double-counts the growth that the
 # acceleration axis exists to measure. See D6 in docs/narrative-alert-redesign.md.
-# 0.625/0.375 is the old 0.50/0.30 rescaled proportionally once velocity's 0.20 left.
-COMPOSITE_ENGAGEMENT_WEIGHT = float(os.environ.get("COMPOSITE_ENGAGEMENT_WEIGHT", "0.625"))
-COMPOSITE_REACH_WEIGHT = float(os.environ.get("COMPOSITE_REACH_WEIGHT", "0.375"))
+#
+# Reach LEADS the blend. The axis asks how far a narrative has spread, and reach is the
+# only term that answers it: engagement_score is a per-view ratio, so it is size-neutral
+# by construction and a 2k-view narrative with dense comments scores what a 2M-view one
+# does at the same density. Engagement is quality of spread — the right tiebreak between
+# narratives of comparable size, a modifier rather than the thing itself. That mirrors
+# ACCELERATION_ENGAGEMENT_WEIGHT below: engagement modifies on both axes and leads on
+# neither. The magnitudes are a free choice; the ordering is not. Production ran the
+# reverse (engagement 0.50, reach 0.30, velocity 0.20).
+COMPOSITE_ENGAGEMENT_WEIGHT = float(os.environ.get("COMPOSITE_ENGAGEMENT_WEIGHT", "0.375"))
+COMPOSITE_REACH_WEIGHT = float(os.environ.get("COMPOSITE_REACH_WEIGHT", "0.625"))
 
 # Acceleration rate score weights (must sum to 1).
 #
