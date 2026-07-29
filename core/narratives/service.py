@@ -51,8 +51,8 @@ _api = NarrativesApiClient()
 #   C1  We only rank what we measured. A narrative we did not look at is *unmeasured*,
 #       not *quiet*; it is excluded from the ranking, never ranked as the least-active
 #       one. This is why the two axes have different cohorts.
-#   C2  We measure exactly two things: how far a narrative has spread (a STATE, on
-#       composite) and how fast that spread is changing (a RATE, on acceleration).
+#   C2  We measure exactly two things: how viral a narrative already is (a STATE, on
+#       composite) and how fast that virality is changing (a RATE, on acceleration).
 #       Every state signal on composite, every change signal on acceleration, nothing
 #       straddling. `velocity` used to straddle, and that mixing is what made movers
 #       look like noise.
@@ -441,7 +441,7 @@ class NarrativeService:
 
     async def calculate_narrative_virality_scores(self, calc_date: date) -> int:
         """
-        Score the spread-state axis for every measured narrative, in one pass.
+        Score the virality-state axis for every measured narrative, in one pass.
 
         Writes an engagement_score and a reach_score row per narrative. `velocity_score`
         is no longer computed: it is a *change* measure, and C2 puts every change signal
@@ -527,7 +527,7 @@ class NarrativeService:
 
     async def calculate_acceleration_rate_for_date(self, calc_date: date) -> None:
         """
-        Score the change-in-spread axis over the narratives we actually visited today.
+        Score the change-in-virality axis over the narratives we actually visited today.
 
         Each component is a growth RATE — per elapsed day, per D4. The repository has
         already divided each video's view gain by the days since that video was last
@@ -710,7 +710,7 @@ class NarrativeService:
     ) -> tuple[int, int]:
         """
         Run the full narrative analysis indicators pipeline:
-          1. Score the spread-state axis for every measured narrative.
+          1. Score the virality-state axis for every measured narrative.
           2. Compute composite virality and acceleration rate indicators for the day.
           3. Classify and persist spread levels.
 
@@ -741,7 +741,7 @@ class NarrativeService:
         """
         target_date = calc_date or (date.today() - timedelta(days=1))
 
-        # Phase 1 — spread-state scores over every measured narrative
+        # Phase 1 — virality-state scores over every measured narrative
         total_processed = 0
         errors = 0
         try:

@@ -79,15 +79,15 @@ VIRALITY_SCORE_COMMENTS_WEIGHT = int(os.environ.get("VIRALITY_SCORE_COMMENTS_WEI
 
 # Composite virality score weights (must sum to 1).
 #
-# Composite is the SPREAD-STATE axis: how far a narrative has spread, right now. Every
+# Composite is the VIRALITY-STATE axis: how viral a narrative already is, right now. Every
 # term on it must be a level, never a change — `velocity` used to sit here and was
 # dropped, because a growth term on the state axis double-counts the growth that the
 # acceleration axis exists to measure. See D6 in docs/narrative-spread-level-redesign.md.
 #
-# Reach LEADS the blend. The axis asks how far a narrative has spread, and reach is the
+# Reach LEADS the blend. The axis asks how viral a narrative already is, and reach is the
 # only term that answers it: engagement_score is a per-view ratio, so it is size-neutral
 # by construction and a 2k-view narrative with dense comments scores what a 2M-view one
-# does at the same density. Engagement is quality of spread — the right tiebreak between
+# does at the same density. Engagement is quality of virality — the right tiebreak between
 # narratives of comparable size, a modifier rather than the thing itself. That mirrors
 # ACCELERATION_ENGAGEMENT_WEIGHT below: engagement modifies on both axes and leads on
 # neither. The magnitudes are a free choice; the ordering is not. Production ran the
@@ -97,7 +97,7 @@ COMPOSITE_REACH_WEIGHT = float(os.environ.get("COMPOSITE_REACH_WEIGHT", "0.625")
 
 # Acceleration rate score weights (must sum to 1).
 #
-# Acceleration is the CHANGE-IN-SPREAD axis, and it measures speed of distribution;
+# Acceleration is the CHANGE-IN-VIRALITY axis, and it measures speed of distribution;
 # engagement change is a MODIFIER on that and must not be able to overturn it. The one
 # hard constraint is ACCELERATION_ENGAGEMENT_WEIGHT < ACCELERATION_VIEWS_WEIGHT — the
 # old 0.40/0.35/0.25 broke it, so a narrative whose views grew while its engagement

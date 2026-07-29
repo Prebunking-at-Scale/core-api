@@ -1794,7 +1794,7 @@ class NarrativeRepository:
 
     async def get_composite_cohort(self, calc_date: date) -> list[dict]:
         """
-        The SPREAD-STATE cohort and its raw scores, in one pass (D0 + D3).
+        The VIRALITY-STATE cohort and its raw scores, in one pass (D0 + D3).
 
         Every narrative with at least one video that has ever been measured is in, with
         its state carried forward from the last snapshot on or before `calc_date`. A
@@ -1871,7 +1871,7 @@ class NarrativeRepository:
 
     async def get_acceleration_cohort(self, calc_date: date) -> list[dict]:
         """
-        The CHANGE-IN-SPREAD cohort and its per-day change components (D0 + D4).
+        The CHANGE-IN-VIRALITY cohort and its per-day change components (D0 + D4).
 
         A rate needs two observations bracketing the interval, so only narratives we
         provably visited on `calc_date` are in. Visits are evidenced two ways, because

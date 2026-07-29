@@ -9,7 +9,7 @@ what these tests are really guarding:
 
     C1  we only rank what we measured — an unmeasured narrative is excluded, never
         ranked as the least-active one
-    C2  composite carries the spread STATE, acceleration carries the RATE, and nothing
+    C2  composite carries the virality STATE, acceleration carries the RATE, and nothing
         straddles
 
 Patrón de mock para el repo (async context manager):
@@ -118,7 +118,7 @@ def _accel_row(
 
 
 # ---------------------------------------------------------------------------
-# Section 1 — calculate_narrative_virality_scores (the spread-state axis)
+# Section 1 — calculate_narrative_virality_scores (the virality-state axis)
 # ---------------------------------------------------------------------------
 
 class TestCalculateNarrativeViralityScores:
@@ -254,7 +254,7 @@ class TestCalculateCompositeViralityForDate:
 
 
 # ---------------------------------------------------------------------------
-# Section 3 — calculate_acceleration_rate_for_date (the change-in-spread axis)
+# Section 3 — calculate_acceleration_rate_for_date (the change-in-virality axis)
 # ---------------------------------------------------------------------------
 
 class TestCalculateAccelerationRateForDate:
