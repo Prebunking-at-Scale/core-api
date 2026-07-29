@@ -6,13 +6,13 @@ from uuid import UUID
 from pydantic import BaseModel
 
 from core.entities.models import EntityInput
-from core.models import Claim, Entity, NarrativeAlertLevel, Topic, Video
+from core.models import Claim, Entity, NarrativeSpreadLevel, Topic, Video
 
 class IndicatorPayload(TypedDict):
     """
     One analysis indicator as carried by get_bulk_analysis_indicators_for_date:
     the raw indicator_value plus its free-form metadata blob (JSONB), which holds
-    the percentile rank the alert-level classification compares on.
+    the percentile rank the spread-level classification compares on.
     """
 
     value: float
@@ -63,7 +63,7 @@ class NarrativeSummary(BaseModel):
     average_score: float | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
-    alert_level: NarrativeAlertLevel | None = None
+    spread_level: NarrativeSpreadLevel | None = None
 
 
 # Alias for backwards compatibility
@@ -94,7 +94,7 @@ class NarrativeDetail(BaseModel):
     metadata: dict[str, Any] = {}
     created_at: datetime | None = None
     updated_at: datetime | None = None
-    alert_level: NarrativeAlertLevel | None = None
+    spread_level: NarrativeSpreadLevel | None = None
 
 
 class NarrativeStatsDataPoint(BaseModel):

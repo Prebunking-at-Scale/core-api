@@ -4,7 +4,7 @@ Mock-only tests for the virality scoring pipeline in NarrativeService.
 No database is used. Repo and service sub-methods are replaced with AsyncMocks so
 that every input is fully controlled and every expected output can be derived by hand.
 
-The design under test is docs/narrative-alert-redesign.md. Its two core decisions are
+The design under test is docs/narrative-spread-level-redesign.md. Its two core decisions are
 what these tests are really guarding:
 
     C1  we only rank what we measured — an unmeasured narrative is excluded, never
@@ -29,7 +29,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.models import NarrativeAlertLevel
+from core.models import NarrativeSpreadLevel
 from core.narratives.models import (
     NarrativeAnalysisIndicatorType,
     NarrativeViralityScoreType,
@@ -397,10 +397,10 @@ class TestCalculateAccelerationRateForDate:
 
 
 # ---------------------------------------------------------------------------
-# Section 4 — update_narrative_alert_levels
+# Section 4 — update_narrative_spread_levels
 # ---------------------------------------------------------------------------
 
-class TestUpdateNarrativeAlertLevels:
+class TestUpdateNarrativeSpreadLevels:
     """
     The four labels are RECTANGLES on the percentile plane, not quadrants:
 
@@ -425,11 +425,11 @@ class TestUpdateNarrativeAlertLevels:
         mock_repo.get_bulk_analysis_indicators_for_date.return_value = indicators
 
         with patch.object(narrative_service, "repo", return_value=_make_repo_cm(mock_repo)):
-            count = await narrative_service.update_narrative_alert_levels(date.today())
+            count = await narrative_service.update_narrative_spread_levels(date.today())
 
-        if not mock_repo.bulk_update_narrative_alert_levels.called:
+        if not mock_repo.bulk_update_narrative_spread_levels.called:
             return [], count, mock_repo
-        return mock_repo.bulk_update_narrative_alert_levels.call_args[0][0], count, mock_repo
+        return mock_repo.bulk_update_narrative_spread_levels.call_args[0][0], count, mock_repo
 
     async def _level(self, narrative_service, composite, acceleration):
         nid = uuid.uuid4()
@@ -439,14 +439,14 @@ class TestUpdateNarrativeAlertLevels:
         return records[0][1] if records else None
 
     async def test_viral_is_big_and_still_climbing(self, narrative_service: NarrativeService):
-        assert await self._level(narrative_service, 0.90, 0.90) == NarrativeAlertLevel.VIRAL
+        assert await self._level(narrative_service, 0.90, 0.90) == NarrativeSpreadLevel.VIRAL
 
     async def test_viral_requires_both_axes(self, narrative_service: NarrativeService):
         """
         `viral` is a conjunction. A narrative that is large but no longer growing is
         precisely `consolidated` — that is what gives the new label a reason to exist.
         """
-        assert await self._level(narrative_service, 0.90, 0.10) == NarrativeAlertLevel.CONSOLIDATED
+        assert await self._level(narrative_service, 0.90, 0.10) == NarrativeSpreadLevel.CONSOLIDATED
 
     async def test_early_surge_is_for_small_narratives_only(
         self, narrative_service: NarrativeService
@@ -455,14 +455,14 @@ class TestUpdateNarrativeAlertLevels:
         The composite ceiling is the whole point of the label. A *large* climber that
         misses the viral floor is `trending`, never `early_surge`.
         """
-        assert await self._level(narrative_service, 0.20, 0.90) == NarrativeAlertLevel.EARLY_SURGE
-        assert await self._level(narrative_service, 0.70, 0.60) == NarrativeAlertLevel.TRENDING
+        assert await self._level(narrative_service, 0.20, 0.90) == NarrativeSpreadLevel.EARLY_SURGE
+        assert await self._level(narrative_service, 0.70, 0.60) == NarrativeSpreadLevel.TRENDING
 
     async def test_consolidated_is_big_and_flat(self, narrative_service: NarrativeService):
-        assert await self._level(narrative_service, 0.85, 0.05) == NarrativeAlertLevel.CONSOLIDATED
+        assert await self._level(narrative_service, 0.85, 0.05) == NarrativeSpreadLevel.CONSOLIDATED
 
     async def test_trending_is_the_broad_middle(self, narrative_service: NarrativeService):
-        assert await self._level(narrative_service, 0.60, 0.60) == NarrativeAlertLevel.TRENDING
+        assert await self._level(narrative_service, 0.60, 0.60) == NarrativeSpreadLevel.TRENDING
 
     async def test_small_and_flat_gets_no_badge(self, narrative_service: NarrativeService):
         """
@@ -476,28 +476,28 @@ class TestUpdateNarrativeAlertLevels:
         The regions overlap by construction, so evaluation order decides the answer.
         A point inside both boxes must resolve to the more specific one.
         """
-        assert await self._level(narrative_service, 0.95, 0.95) == NarrativeAlertLevel.VIRAL
+        assert await self._level(narrative_service, 0.95, 0.95) == NarrativeSpreadLevel.VIRAL
 
     async def test_boundaries_are_inclusive_where_documented(
         self, narrative_service: NarrativeService
     ):
-        assert await self._level(narrative_service, 0.80, 0.80) == NarrativeAlertLevel.VIRAL
-        assert await self._level(narrative_service, 0.40, 0.50) == NarrativeAlertLevel.EARLY_SURGE
-        assert await self._level(narrative_service, 0.50, 0.40) == NarrativeAlertLevel.CONSOLIDATED
-        assert await self._level(narrative_service, 0.40, 0.40) == NarrativeAlertLevel.TRENDING
+        assert await self._level(narrative_service, 0.80, 0.80) == NarrativeSpreadLevel.VIRAL
+        assert await self._level(narrative_service, 0.40, 0.50) == NarrativeSpreadLevel.EARLY_SURGE
+        assert await self._level(narrative_service, 0.50, 0.40) == NarrativeSpreadLevel.CONSOLIDATED
+        assert await self._level(narrative_service, 0.40, 0.40) == NarrativeSpreadLevel.TRENDING
         # just under the viral floor on one axis, still large and moving -> trending
-        assert await self._level(narrative_service, 0.7999, 0.99) == NarrativeAlertLevel.TRENDING
+        assert await self._level(narrative_service, 0.7999, 0.99) == NarrativeSpreadLevel.TRENDING
 
     async def test_the_grid_agrees_with_the_geometry(self, narrative_service: NarrativeService):
         expectations = [
-            (0.99, 0.99, NarrativeAlertLevel.VIRAL),
-            (0.85, 0.85, NarrativeAlertLevel.VIRAL),
-            (0.10, 0.99, NarrativeAlertLevel.EARLY_SURGE),
-            (0.35, 0.55, NarrativeAlertLevel.EARLY_SURGE),
-            (0.99, 0.00, NarrativeAlertLevel.CONSOLIDATED),
-            (0.55, 0.35, NarrativeAlertLevel.CONSOLIDATED),
-            (0.60, 0.60, NarrativeAlertLevel.TRENDING),
-            (0.45, 0.99, NarrativeAlertLevel.TRENDING),
+            (0.99, 0.99, NarrativeSpreadLevel.VIRAL),
+            (0.85, 0.85, NarrativeSpreadLevel.VIRAL),
+            (0.10, 0.99, NarrativeSpreadLevel.EARLY_SURGE),
+            (0.35, 0.55, NarrativeSpreadLevel.EARLY_SURGE),
+            (0.99, 0.00, NarrativeSpreadLevel.CONSOLIDATED),
+            (0.55, 0.35, NarrativeSpreadLevel.CONSOLIDATED),
+            (0.60, 0.60, NarrativeSpreadLevel.TRENDING),
+            (0.45, 0.99, NarrativeSpreadLevel.TRENDING),
             (0.10, 0.10, None),   # small and flat: the no-badge region
             (0.20, 0.45, None),   # small, moving a little, but under the surge floor
             (0.45, 0.20, None),   # middling size, flat, under the consolidated floor
@@ -511,7 +511,7 @@ class TestUpdateNarrativeAlertLevels:
         self, narrative_service: NarrativeService
     ):
         """`alert` and `watch` survive in the enum for consumers, not for the pipeline."""
-        retired = {NarrativeAlertLevel.ALERT, NarrativeAlertLevel.WATCH, NarrativeAlertLevel.NONE}
+        retired = {NarrativeSpreadLevel.ALERT, NarrativeSpreadLevel.WATCH, NarrativeSpreadLevel.NONE}
         for i in range(0, 101, 5):
             for j in range(0, 101, 5):
                 level = narrative_service._classify(i / 100, j / 100)
@@ -573,7 +573,7 @@ class TestUpdateNarrativeAlertLevels:
         )
         assert records == []
         assert count == 1, "it was scored, it just earned no badge"
-        mock_repo.clear_alert_levels_except.assert_awaited_once_with([])
+        mock_repo.clear_spread_levels_except.assert_awaited_once_with([])
 
     async def test_badged_narratives_are_kept_and_the_rest_cleared(
         self, narrative_service: NarrativeService
@@ -585,7 +585,7 @@ class TestUpdateNarrativeAlertLevels:
             unbadged: self._indicators(0.10, 0.10),
         })
         assert count == 2
-        mock_repo.clear_alert_levels_except.assert_awaited_once_with([badged])
+        mock_repo.clear_spread_levels_except.assert_awaited_once_with([badged])
 
     async def test_returns_count_of_scored_narratives(self, narrative_service: NarrativeService):
         indicators = {uuid.uuid4(): self._indicators(0.60, 0.60) for _ in range(5)}
@@ -598,11 +598,11 @@ class TestUpdateNarrativeAlertLevels:
         mock_repo.get_bulk_analysis_indicators_for_date.return_value = {}
 
         with patch.object(narrative_service, "repo", return_value=_make_repo_cm(mock_repo)):
-            count = await narrative_service.update_narrative_alert_levels(date.today())
+            count = await narrative_service.update_narrative_spread_levels(date.today())
 
-        mock_repo.bulk_update_narrative_alert_levels.assert_not_called()
+        mock_repo.bulk_update_narrative_spread_levels.assert_not_called()
         # An empty cohort means the run found nothing, not that every badge is stale.
-        mock_repo.clear_alert_levels_except.assert_not_called()
+        mock_repo.clear_spread_levels_except.assert_not_called()
         assert count == 0
 
 
@@ -664,7 +664,7 @@ class TestRunNarrativeAnalysisIndicatorsPipeline:
             "calculate_narrative_virality_scores": AsyncMock(return_value=scored),
             "calculate_composite_virality_for_date": AsyncMock(),
             "calculate_acceleration_rate_for_date": AsyncMock(),
-            "update_narrative_alert_levels": AsyncMock(return_value=scored),
+            "update_narrative_spread_levels": AsyncMock(return_value=scored),
         }
 
     async def test_pipeline_returns_the_scored_count(self, narrative_service: NarrativeService):
@@ -706,7 +706,7 @@ class TestRunNarrativeAnalysisIndicatorsPipeline:
         assert (total, errors) == (0, 1)
         mocks["calculate_composite_virality_for_date"].assert_called_once_with(calc_date=calc_date)
         mocks["calculate_acceleration_rate_for_date"].assert_called_once_with(calc_date=calc_date)
-        mocks["update_narrative_alert_levels"].assert_called_once_with(calc_date=calc_date)
+        mocks["update_narrative_spread_levels"].assert_called_once_with(calc_date=calc_date)
 
     async def test_pipeline_on_progress_callback(self, narrative_service: NarrativeService):
         mocks = self._patch_sub_methods(scored=7)
@@ -729,7 +729,7 @@ class TestRunNarrativeAnalysisIndicatorsPipeline:
         mocks["calculate_narrative_virality_scores"].assert_called_once_with(calc_date=calc_date)
         mocks["calculate_composite_virality_for_date"].assert_called_once_with(calc_date=calc_date)
         mocks["calculate_acceleration_rate_for_date"].assert_called_once_with(calc_date=calc_date)
-        mocks["update_narrative_alert_levels"].assert_called_once_with(calc_date=calc_date)
+        mocks["update_narrative_spread_levels"].assert_called_once_with(calc_date=calc_date)
 
     async def test_pipeline_uses_yesterday_when_no_calc_date(
         self, narrative_service: NarrativeService
@@ -742,7 +742,7 @@ class TestRunNarrativeAnalysisIndicatorsPipeline:
             await narrative_service.run_narrative_analysis_indicators_pipeline()
 
         mocks["calculate_composite_virality_for_date"].assert_called_once_with(calc_date=yesterday)
-        mocks["update_narrative_alert_levels"].assert_called_once_with(calc_date=yesterday)
+        mocks["update_narrative_spread_levels"].assert_called_once_with(calc_date=yesterday)
 
 
 # ---------------------------------------------------------------------------

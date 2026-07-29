@@ -82,7 +82,7 @@ VIRALITY_SCORE_COMMENTS_WEIGHT = int(os.environ.get("VIRALITY_SCORE_COMMENTS_WEI
 # Composite is the SPREAD-STATE axis: how far a narrative has spread, right now. Every
 # term on it must be a level, never a change — `velocity` used to sit here and was
 # dropped, because a growth term on the state axis double-counts the growth that the
-# acceleration axis exists to measure. See D6 in docs/narrative-alert-redesign.md.
+# acceleration axis exists to measure. See D6 in docs/narrative-spread-level-redesign.md.
 #
 # Reach LEADS the blend. The axis asks how far a narrative has spread, and reach is the
 # only term that answers it: engagement_score is a per-view ratio, so it is size-neutral
@@ -107,7 +107,7 @@ ACCELERATION_ENGAGEMENT_WEIGHT = float(os.environ.get("ACCELERATION_ENGAGEMENT_W
 ACCELERATION_VIDEO_VOLUME_WEIGHT = float(os.environ.get("ACCELERATION_VIDEO_VOLUME_WEIGHT", "0.35"))
 ACCELERATION_VIEWS_WEIGHT = float(os.environ.get("ACCELERATION_VIEWS_WEIGHT", "0.55"))
 
-# Alert-level percentile thresholds. Both axes are classified by their PERCENT_RANK
+# Spread-level percentile thresholds. Both axes are classified by their PERCENT_RANK
 # within their own cohort, never by raw values, so each threshold means a knowable
 # fraction of that cohort — and a rank is self-calibrating against a scraper whose
 # coverage drifts, which an absolute bar is not (D2).
@@ -115,12 +115,12 @@ ACCELERATION_VIEWS_WEIGHT = float(os.environ.get("ACCELERATION_VIEWS_WEIGHT", "0
 # The four labels are RECTANGLES on the percentile plane, not quadrants, so there are
 # six thresholds and not two, and there is a no-badge region (small AND flat) in the
 # bottom-left. See D1 for the geometry and NarrativeService._classify for the order.
-ALERT_COMPOSITE_LO = float(os.environ.get("ALERT_COMPOSITE_LO", "0.40"))   # early_surge ceiling / trending floor
-ALERT_COMPOSITE_MID = float(os.environ.get("ALERT_COMPOSITE_MID", "0.50"))  # consolidated floor
-ALERT_COMPOSITE_HI = float(os.environ.get("ALERT_COMPOSITE_HI", "0.80"))   # viral floor
-ALERT_ACCEL_LO = float(os.environ.get("ALERT_ACCEL_LO", "0.40"))           # consolidated ceiling / trending floor
-ALERT_ACCEL_MID = float(os.environ.get("ALERT_ACCEL_MID", "0.50"))         # early_surge floor
-ALERT_ACCEL_HI = float(os.environ.get("ALERT_ACCEL_HI", "0.80"))           # viral floor
+SPREAD_COMPOSITE_LO = float(os.environ.get("SPREAD_COMPOSITE_LO", "0.40"))   # early_surge ceiling / trending floor
+SPREAD_COMPOSITE_MID = float(os.environ.get("SPREAD_COMPOSITE_MID", "0.50"))  # consolidated floor
+SPREAD_COMPOSITE_HI = float(os.environ.get("SPREAD_COMPOSITE_HI", "0.80"))   # viral floor
+SPREAD_ACCEL_LO = float(os.environ.get("SPREAD_ACCEL_LO", "0.40"))           # consolidated ceiling / trending floor
+SPREAD_ACCEL_MID = float(os.environ.get("SPREAD_ACCEL_MID", "0.50"))         # early_surge floor
+SPREAD_ACCEL_HI = float(os.environ.get("SPREAD_ACCEL_HI", "0.80"))           # viral floor
 
 """internationalisation"""
 i18n.set("file_format", "json")

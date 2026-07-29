@@ -8,19 +8,19 @@ from core.config import (
     ACCELERATION_ENGAGEMENT_WEIGHT,
     ACCELERATION_VIDEO_VOLUME_WEIGHT,
     ACCELERATION_VIEWS_WEIGHT,
-    ALERT_ACCEL_HI,
-    ALERT_ACCEL_LO,
-    ALERT_ACCEL_MID,
-    ALERT_COMPOSITE_HI,
-    ALERT_COMPOSITE_LO,
-    ALERT_COMPOSITE_MID,
+    SPREAD_ACCEL_HI,
+    SPREAD_ACCEL_LO,
+    SPREAD_ACCEL_MID,
+    SPREAD_COMPOSITE_HI,
+    SPREAD_COMPOSITE_LO,
+    SPREAD_COMPOSITE_MID,
     COMPOSITE_ENGAGEMENT_WEIGHT,
     COMPOSITE_REACH_WEIGHT,
     VIRALITY_SCORE_COMMENTS_WEIGHT,
     VIRALITY_SCORE_LIKES_WEIGHT,
 )
 from core.entities.service import EntityService
-from core.models import Claim, Narrative, NarrativeAlertLevel, Video
+from core.models import Claim, Narrative, NarrativeSpreadLevel, Video
 from core.narratives.api import NarrativesApiClient
 from core.narratives.models import (
     AnalysisIndicator,
@@ -46,7 +46,7 @@ _api = NarrativesApiClient()
 # environment (see core.config for values, defaults and tuning notes) and imported at
 # the top of this module.
 #
-# THE WHOLE DESIGN IN TWO SENTENCES (docs/narrative-alert-redesign.md):
+# THE WHOLE DESIGN IN TWO SENTENCES (docs/narrative-spread-level-redesign.md):
 #
 #   C1  We only rank what we measured. A narrative we did not look at is *unmeasured*,
 #       not *quiet*; it is excluded from the ranking, never ranked as the least-active
@@ -232,7 +232,7 @@ class NarrativeService:
         first_content_start: datetime | None = None,
         first_content_end: datetime | None = None,
         language: str | None = None,
-        alert_levels: list[str] | None = None,
+        spread_levels: list[str] | None = None,
         sort: str | None = None,
     ) -> tuple[list[NarrativeListItem], int]:
         async with self.repo() as repo:
@@ -247,7 +247,7 @@ class NarrativeService:
                 first_content_start=first_content_start,
                 first_content_end=first_content_end,
                 language=language,
-                alert_levels=alert_levels,
+                spread_levels=spread_levels,
                 sort=sort,
             )
             total = await repo.count_all_narratives(
@@ -259,7 +259,7 @@ class NarrativeService:
                 first_content_start=first_content_start,
                 first_content_end=first_content_end,
                 language=language,
-                alert_levels=alert_levels,
+                spread_levels=spread_levels,
             )
             return narratives, total
 
@@ -615,7 +615,7 @@ class NarrativeService:
             await repo.bulk_insert_narrative_analysis_indicators(records, calc_date=calc_date)
 
     @staticmethod
-    def _classify(composite: float, acceleration: float) -> NarrativeAlertLevel | None:
+    def _classify(composite: float, acceleration: float) -> NarrativeSpreadLevel | None:
         """
         Place a narrative on the percentile plane. Returns None for the no-badge region.
 
@@ -633,20 +633,20 @@ class NarrativeService:
         to the other axis's percentile, which is what lets the two axes rank over
         different cohorts without needing a shared denominator.
         """
-        if composite >= ALERT_COMPOSITE_HI and acceleration >= ALERT_ACCEL_HI:
-            return NarrativeAlertLevel.VIRAL
-        if composite <= ALERT_COMPOSITE_LO and acceleration >= ALERT_ACCEL_MID:
-            return NarrativeAlertLevel.EARLY_SURGE
-        if composite >= ALERT_COMPOSITE_MID and acceleration <= ALERT_ACCEL_LO:
-            return NarrativeAlertLevel.CONSOLIDATED
-        if composite >= ALERT_COMPOSITE_LO and acceleration >= ALERT_ACCEL_LO:
-            return NarrativeAlertLevel.TRENDING
+        if composite >= SPREAD_COMPOSITE_HI and acceleration >= SPREAD_ACCEL_HI:
+            return NarrativeSpreadLevel.VIRAL
+        if composite <= SPREAD_COMPOSITE_LO and acceleration >= SPREAD_ACCEL_MID:
+            return NarrativeSpreadLevel.EARLY_SURGE
+        if composite >= SPREAD_COMPOSITE_MID and acceleration <= SPREAD_ACCEL_LO:
+            return NarrativeSpreadLevel.CONSOLIDATED
+        if composite >= SPREAD_COMPOSITE_LO and acceleration >= SPREAD_ACCEL_LO:
+            return NarrativeSpreadLevel.TRENDING
         return None
 
-    async def update_narrative_alert_levels(self, calc_date: date) -> int:
+    async def update_narrative_spread_levels(self, calc_date: date) -> int:
         """
         Classify each narrative on the percentile ranks of BOTH axes and persist the
-        result in the alert_level column.
+        result in the spread_level column.
 
             viral         composite >= 0.80  and  acceleration >= 0.80
             early_surge   composite <= 0.40  and  acceleration >= 0.50
@@ -668,14 +668,14 @@ class NarrativeService:
         because its carried-forward snapshot is identical on both days.
 
         Narratives in the no-badge region, and any that cannot be scored, have their
-        alert_level cleared rather than left holding a stale badge.
+        spread_level cleared rather than left holding a stale badge.
 
         Returns the number of narratives classified (badged or explicitly cleared).
         """
 
         async with self.repo() as repo:
             indicators = await repo.get_bulk_analysis_indicators_for_date(calc_date)
-            badged: list[tuple[UUID, NarrativeAlertLevel]] = []
+            badged: list[tuple[UUID, NarrativeSpreadLevel]] = []
             scored: list[UUID] = []
             for narrative_id, values in indicators.items():
                 composite_indicator = values.get("composite_virality")
@@ -694,11 +694,11 @@ class NarrativeService:
                     badged.append((narrative_id, level))
 
             if badged:
-                await repo.bulk_update_narrative_alert_levels(badged)
+                await repo.bulk_update_narrative_spread_levels(badged)
             if scored:
                 # Everything outside the badged set loses its badge — including the
                 # no-badge region, which is an absence rather than a level.
-                await repo.clear_alert_levels_except([narrative_id for narrative_id, _ in badged])
+                await repo.clear_spread_levels_except([narrative_id for narrative_id, _ in badged])
             return len(scored)
 
     async def run_narrative_analysis_indicators_pipeline(
@@ -712,7 +712,7 @@ class NarrativeService:
         Run the full narrative analysis indicators pipeline:
           1. Score the spread-state axis for every measured narrative.
           2. Compute composite virality and acceleration rate indicators for the day.
-          3. Classify and persist alert levels.
+          3. Classify and persist spread levels.
 
         Args:
             batch_size: Retained for API compatibility; phase 1 is a single bulk query
@@ -759,8 +759,8 @@ class NarrativeService:
         await self.calculate_composite_virality_for_date(calc_date=target_date)
         await self.calculate_acceleration_rate_for_date(calc_date=target_date)
 
-        # Phase 3 — alert level classification
-        await self.update_narrative_alert_levels(calc_date=target_date)
+        # Phase 3 — spread level classification
+        await self.update_narrative_spread_levels(calc_date=target_date)
 
         return total_processed, errors
 

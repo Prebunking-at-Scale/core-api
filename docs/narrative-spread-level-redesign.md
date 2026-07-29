@@ -573,7 +573,7 @@ narratives, which is the class of merge C1 forbids — and under D0 a flat narra
 rank above a shrinking one (`consolidated` above a loser, not tied with it). Decide it
 explicitly rather than inheriting it (`core/narratives/service.py:598-603`).
 
-**O4 — Frontend and API impact.** `narrative_alert_level` is a Postgres enum and the labels
+**O4 — Frontend and API impact.** `narrative_spread_level` is a Postgres enum and the labels
 are user-facing. Renaming `alert`/`watch` to `trending`/`consolidated` needs a migration and
 coordination with consumers.
 
