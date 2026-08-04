@@ -1771,13 +1771,21 @@ class NarrativeRepository:
 
         Mirrors insert_narrative_virality_score: the wall-clock time is kept so reruns
         on the same day still order newest-last. Defaults to the current timestamp.
+
+        The time comes from statement_timestamp(), not LOCALTIME, because LOCALTIME is
+        frozen at transaction start: two writes sharing a transaction would get an
+        identical stamp, and get_bulk_analysis_indicators_for_date's
+        `ORDER BY calculated_at DESC` has no tiebreaker to fall back on (the PK is a
+        random uuid), so the winner would be whichever row the scan happened to reach
+        first. statement_timestamp() advances per statement, so the later write is
+        always the later stamp.
         """
         await self._session.executemany(
             """
             INSERT INTO narrative_analysis_indicators (narrative_id, indicator_value, indicator_type, metadata, calculated_at)
             VALUES (
                 %(narrative_id)s, %(indicator_value)s, %(indicator_type)s, %(metadata)s,
-                COALESCE(%(calc_date)s::date, CURRENT_DATE) + LOCALTIME
+                COALESCE(%(calc_date)s::date, CURRENT_DATE) + statement_timestamp()::time
             )
             """,
             [
@@ -2046,7 +2054,10 @@ class NarrativeRepository:
         """
         Bulk form of insert_narrative_virality_score, with the same `calculated_at`
         semantics: the row is stamped with the day it *describes*, keeping the wall-clock
-        time so reruns on the same day still order newest-last.
+        time so reruns on the same day still order newest-last. As in
+        bulk_insert_narrative_analysis_indicators the time is statement_timestamp(),
+        which advances per statement, rather than LOCALTIME, which is frozen for the
+        whole transaction and would tie two writes that share one.
 
         The per-narrative form opened two nested transactions and issued three inserts
         each. At the composite cohort's real size (~22k narratives under D3, not the
@@ -2058,7 +2069,7 @@ class NarrativeRepository:
             INSERT INTO narrative_virality_scores (narrative_id, score_value, score_type, metadata, calculated_at)
             VALUES (
                 %(narrative_id)s, %(score_value)s, %(score_type)s, %(metadata)s,
-                COALESCE(%(calc_date)s::date, CURRENT_DATE) + LOCALTIME
+                COALESCE(%(calc_date)s::date, CURRENT_DATE) + statement_timestamp()::time
             )
             """,
             [
