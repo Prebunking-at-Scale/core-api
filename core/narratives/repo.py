@@ -23,6 +23,7 @@ from core.narratives.models import (
     NarrativeSummary,
     NarrativeViralityScoreType,
     TopicSummary,
+    ViralityScoreRank,
     ViralNarrativeSummary,
 )
 
@@ -1714,11 +1715,16 @@ class NarrativeRepository:
 
     async def get_all_virality_percentiles_for_date(
         self, calc_date: date
-    ) -> dict[UUID, dict[str, float]]:
+    ) -> dict[UUID, dict[str, ViralityScoreRank]]:
         """
-        Get the percentile rank of every narrative's virality scores for a given date.
-        Computes all percentiles in a single query.
-        Returns a dict keyed by narrative_id, each value being a dict of score_type → percentile.
+        Get the percentile rank AND the raw score of every narrative's virality scores
+        for a given date. Computes all percentiles in a single query.
+
+        Returns a dict keyed by narrative_id, each value being a dict of
+        score_type → (percentile, score). The raw score comes back alongside the rank
+        because the detail view headlines the narrative's own magnitude — how many views
+        it has — and only puts the rank on the line beneath it; a rank on its own cannot
+        answer "how large is this", only "larger than whom".
         """
         await self._session.execute(
             """
@@ -1735,21 +1741,25 @@ class NarrativeRepository:
                 SELECT
                     narrative_id,
                     score_type,
+                    score_value,
                     PERCENT_RANK() OVER (
                         PARTITION BY score_type
                         ORDER BY score_value
                     ) AS percentile
                 FROM day_scores
             )
-            SELECT narrative_id, score_type, percentile
+            SELECT narrative_id, score_type, score_value, percentile
             FROM ranked
             """,
             {"calc_date": calc_date},
         )
         rows = await self._session.fetchall()
-        result: dict[UUID, dict[str, float]] = {}
+        result: dict[UUID, dict[str, ViralityScoreRank]] = {}
         for row in rows:
-            result.setdefault(row["narrative_id"], {})[row["score_type"]] = row["percentile"]
+            result.setdefault(row["narrative_id"], {})[row["score_type"]] = ViralityScoreRank(
+                percentile=row["percentile"],
+                score=row["score_value"],
+            )
         return result
 
     async def bulk_insert_narrative_analysis_indicators(

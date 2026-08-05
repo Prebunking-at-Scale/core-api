@@ -33,6 +33,7 @@ from core.models import NarrativeSpreadLevel
 from core.narratives.models import (
     NarrativeAnalysisIndicatorType,
     NarrativeViralityScoreType,
+    ViralityScoreRank,
 )
 from core.narratives.service import NarrativeService
 
@@ -46,6 +47,19 @@ def _make_repo_cm(mock_repo: AsyncMock) -> AsyncMock:
     cm.__aenter__.return_value = mock_repo
     cm.__aexit__.return_value = None
     return cm
+
+
+def _ranks(scores: dict) -> dict:
+    """
+    Wrap the bare percentiles a test wants to reason about in the (percentile, score)
+    pairs the repo actually returns. A pair may be given explicitly when the raw score
+    matters; otherwise the score mirrors the percentile, since no assertion reads it.
+    """
+    return {
+        score_type: value if isinstance(value, ViralityScoreRank)
+        else ViralityScoreRank(percentile=value, score=value)
+        for score_type, value in scores.items()
+    }
 
 
 def _cohort_row(
@@ -189,7 +203,9 @@ class TestCalculateCompositeViralityForDate:
 
     async def _composite(self, narrative_service, percentiles: dict) -> list:
         mock_repo = AsyncMock()
-        mock_repo.get_all_virality_percentiles_for_date.return_value = percentiles
+        mock_repo.get_all_virality_percentiles_for_date.return_value = {
+            narrative_id: _ranks(scores) for narrative_id, scores in percentiles.items()
+        }
         with patch.object(narrative_service, "repo", return_value=_make_repo_cm(mock_repo)):
             await narrative_service.calculate_composite_virality_for_date(date.today())
         return mock_repo.bulk_insert_narrative_analysis_indicators.call_args[0][0]
@@ -251,6 +267,36 @@ class TestCalculateCompositeViralityForDate:
 
     async def test_composite_empty_percentiles(self, narrative_service: NarrativeService):
         assert await self._composite(narrative_service, {}) == []
+
+    async def test_composite_metadata_carries_the_raw_scores(
+        self, narrative_service: NarrativeService
+    ):
+        """
+        The detail view headlines the narrative's own reach and keeps the rank as the
+        line beneath it, so the raw score has to travel with the percentile. A rank
+        answers "larger than whom", never "how large".
+        """
+        inserted = await self._composite(narrative_service, {
+            uuid.uuid4(): {
+                NarrativeViralityScoreType.ENGAGEMENT_SCORE: ViralityScoreRank(0.6, 0.0325),
+                NarrativeViralityScoreType.REACH_SCORE: ViralityScoreRank(0.4, 77_000_000),
+            }
+        })
+        _, _, _, metadata = inserted[0]
+        assert metadata["reach_score"] == 77_000_000
+        assert metadata["engagement_score"] == pytest.approx(0.0325)
+        assert metadata["reach_percentile"] == pytest.approx(0.4)
+
+    async def test_composite_metadata_scores_are_none_when_a_side_is_missing(
+        self, narrative_service: NarrativeService
+    ):
+        """A missing score is absent, not zero — the same distinction C1 draws."""
+        inserted = await self._composite(narrative_service, {
+            uuid.uuid4(): {NarrativeViralityScoreType.ENGAGEMENT_SCORE: 0.8}
+        })
+        _, _, _, metadata = inserted[0]
+        assert metadata["reach_score"] is None
+        assert metadata["reach_percentile"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -636,8 +682,8 @@ class TestPercentileRanking:
         self, narrative_service: NarrativeService
     ):
         percentiles = {
-            uuid.uuid4(): {NarrativeViralityScoreType.ENGAGEMENT_SCORE: p,
-                           NarrativeViralityScoreType.REACH_SCORE: p}
+            uuid.uuid4(): _ranks({NarrativeViralityScoreType.ENGAGEMENT_SCORE: p,
+                                  NarrativeViralityScoreType.REACH_SCORE: p})
             for p in (0.1, 0.5, 0.9)
         }
         mock_repo = AsyncMock()

@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from enum import Enum
-from typing import Any, Generic, TypedDict, TypeVar
+from typing import Any, Generic, NamedTuple, TypedDict, TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -17,6 +17,20 @@ class IndicatorPayload(TypedDict):
 
     value: float
     metadata: dict[str, Any]
+
+
+class ViralityScoreRank(NamedTuple):
+    """
+    One virality score as ranked within its run: where the narrative sits in the cohort,
+    and what it actually scored.
+
+    Both travel together because they answer different questions and the detail view
+    shows both — `score` is the narrative's own magnitude (reach is a view count,
+    engagement a per-view ratio), `percentile` is only its position relative to the rest.
+    """
+
+    percentile: float
+    score: float
 
 
 class NarrativeInput(BaseModel):
@@ -160,6 +174,13 @@ class CompositeViralityMetadata(BaseModel):
 
     `velocity_percentile`/`velocity_weight` were dropped with the velocity term (D6);
     rows written before that still carry them and are simply ignored here.
+
+    `reach_score` and `engagement_score` are the RAW scores the two percentiles were
+    ranked from — reach is the narrative's summed view count, engagement its
+    (likes + 5×comments) / views ratio. They are what the detail view headlines, because
+    a percentile answers "larger than whom" and never "how large". Optional: rows written
+    before this was recorded carry only the ranks, and the client falls back to showing
+    the percentile in the headline as it did before.
     """
 
     engagement_percentile: float
@@ -167,6 +188,8 @@ class CompositeViralityMetadata(BaseModel):
     engagement_weight: float
     reach_weight: float
     percentile: float | None = None
+    reach_score: float | None = None
+    engagement_score: float | None = None
 
 
 class AccelerationRateMetadata(BaseModel):

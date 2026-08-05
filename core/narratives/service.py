@@ -510,16 +510,23 @@ class NarrativeService:
         async with self.repo() as repo:
             all_percentiles = await repo.get_all_virality_percentiles_for_date(calc_date)
             records: list[tuple[UUID, float, NarrativeAnalysisIndicatorType, dict[str, Any] | None]] = []
-            for narrative_id, percentiles in all_percentiles.items():
+            for narrative_id, ranks in all_percentiles.items():
+                engagement = ranks.get(NarrativeViralityScoreType.ENGAGEMENT_SCORE)
+                reach = ranks.get(NarrativeViralityScoreType.REACH_SCORE)
                 composite = (
-                    percentiles.get(NarrativeViralityScoreType.ENGAGEMENT_SCORE, 0) * COMPOSITE_ENGAGEMENT_WEIGHT
-                    + percentiles.get(NarrativeViralityScoreType.REACH_SCORE, 0) * COMPOSITE_REACH_WEIGHT
+                    (engagement.percentile if engagement else 0) * COMPOSITE_ENGAGEMENT_WEIGHT
+                    + (reach.percentile if reach else 0) * COMPOSITE_REACH_WEIGHT
                 )
+                # The raw scores ride along with the ranks: the detail view headlines the
+                # narrative's own size and keeps the rank as the line beneath it, which a
+                # percentile alone cannot support.
                 metadata = {
-                    "engagement_percentile": percentiles.get(NarrativeViralityScoreType.ENGAGEMENT_SCORE, 0),
-                    "reach_percentile": percentiles.get(NarrativeViralityScoreType.REACH_SCORE, 0),
+                    "engagement_percentile": engagement.percentile if engagement else 0,
+                    "reach_percentile": reach.percentile if reach else 0,
                     "engagement_weight": COMPOSITE_ENGAGEMENT_WEIGHT,
                     "reach_weight": COMPOSITE_REACH_WEIGHT,
+                    "engagement_score": engagement.score if engagement else None,
+                    "reach_score": reach.score if reach else None,
                 }
                 records.append((narrative_id, composite, NarrativeAnalysisIndicatorType.COMPOSITE_VIRALITY, metadata))
             self._attach_percentiles(records)
