@@ -11,7 +11,7 @@ from core.config import (
     VIRALITY_SCORE_LIKES_WEIGHT,
 )
 from core.errors import ConflictError
-from core.models import Claim, Entity, Narrative, NarrativeSpreadLevel, Topic, Video
+from core.models import Claim, Entity, Narrative, NarrativeSpreadPattern, Topic, Video
 from core.narratives.models import (
     IndicatorPayload,
     NarrativeAnalysisIndicatorType,
@@ -233,7 +233,7 @@ class NarrativeRepository:
         end_date: datetime | None = None,
         first_content_start: datetime | None = None,
         first_content_end: datetime | None = None,
-        spread_levels: list[str] | None = None,
+        spread_patterns: list[str] | None = None,
     ) -> int:
         query = """
             SELECT COUNT(DISTINCT n.id) FROM narratives n
@@ -247,7 +247,7 @@ class NarrativeRepository:
             end_date=end_date,
             first_content_start=first_content_start,
             first_content_end=first_content_end,
-            spread_levels=spread_levels,
+            spread_patterns=spread_patterns,
         )
         query += where_statement
 
@@ -265,7 +265,7 @@ class NarrativeRepository:
         end_date: datetime | None = None,
         first_content_start: datetime | None = None,
         first_content_end: datetime | None = None,
-        spread_levels: list[str] | None = None,
+        spread_patterns: list[str] | None = None,
     ) -> tuple[str, dict[str, Any]]:
         query = ""
         where_conditions = []
@@ -305,9 +305,9 @@ class NarrativeRepository:
             where_conditions.append("n.created_at <= %(end_date)s")
             params["end_date"] = end_date
 
-        if spread_levels:
-            where_conditions.append("n.spread_level = ANY(%(spread_levels)s)")
-            params["spread_levels"] = spread_levels
+        if spread_patterns:
+            where_conditions.append("n.spread_pattern = ANY(%(spread_patterns)s)")
+            params["spread_patterns"] = spread_patterns
 
         if first_content_start or first_content_end:
             oldest_video_filter = """
@@ -356,7 +356,7 @@ class NarrativeRepository:
         first_content_start: datetime | None = None,
         first_content_end: datetime | None = None,
         language: str | None = None,
-        spread_levels: list[str] | None = None,
+        spread_patterns: list[str] | None = None,
         sort: str | None = None,
     ) -> list[NarrativeListItem]:
         """
@@ -407,9 +407,9 @@ class NarrativeRepository:
             filter_conditions.append("n.created_at <= %(end_date)s")
             params["end_date"] = end_date
 
-        if spread_levels:
-            filter_conditions.append("n.spread_level = ANY(%(spread_levels)s)")
-            params["spread_levels"] = spread_levels
+        if spread_patterns:
+            filter_conditions.append("n.spread_pattern = ANY(%(spread_patterns)s)")
+            params["spread_patterns"] = spread_patterns
 
         if first_content_start or first_content_end:
             oldest_video_filter = """
@@ -446,7 +446,7 @@ class NarrativeRepository:
             where_clause = "WHERE " + " AND ".join(filter_conditions)
 
         # Optional ranking by latest composite virality score. Used by the
-        # overview to surface the top-scoring narratives per spread level. The
+        # overview to surface the top-scoring narratives per spread pattern. The
         # LATERAL join picks each narrative's most recent indicator value.
         sort_indicators = {
             "composite": "composite_virality",
@@ -474,7 +474,7 @@ class NarrativeRepository:
 
         query = f"""
             WITH filtered_narratives AS (
-                SELECT DISTINCT n.id, n.title, n.description, n.created_at, n.updated_at, n.spread_level{sort_select}
+                SELECT DISTINCT n.id, n.title, n.description, n.created_at, n.updated_at, n.spread_pattern{sort_select}
                 FROM narratives n
                 {filter_joins}
                 {sort_join}
@@ -561,7 +561,7 @@ class NarrativeRepository:
                 fn.description,
                 fn.created_at,
                 fn.updated_at,
-                fn.spread_level,
+                fn.spread_pattern,
                 COALESCE(nta.topics, '[]'::json) as topics,
                 COALESCE(nc.claim_count, 0) as claim_count,
                 COALESCE(nv.video_count, 0) as video_count,
@@ -610,7 +610,7 @@ class NarrativeRepository:
                     average_score=row["average_score"],
                     created_at=row["created_at"],
                     updated_at=row["updated_at"],
-                    spread_level=row["spread_level"],
+                    spread_pattern=row["spread_pattern"],
                 )
             )
 
@@ -957,7 +957,7 @@ class NarrativeRepository:
         """
         query = """
             WITH narrative_base AS (
-                SELECT id, title, description, narrative_context, metadata, created_at, updated_at, spread_level
+                SELECT id, title, description, narrative_context, metadata, created_at, updated_at, spread_pattern
                 FROM narratives
                 WHERE id = %(narrative_id)s
             ),
@@ -1005,7 +1005,7 @@ class NarrativeRepository:
                 COALESCE(vs.total_comments, 0) as total_comments,
                 COALESCE(vs.platforms, ARRAY[]::text[]) as platforms,
                 COALESCE(ls.language_count, 0) as language_count,
-                nb.spread_level
+                nb.spread_pattern
             FROM narrative_base nb
             CROSS JOIN claim_stats cs
             CROSS JOIN video_stats vs
@@ -1050,7 +1050,7 @@ class NarrativeRepository:
             metadata=row["metadata"] or {},
             created_at=row["created_at"],
             updated_at=row["updated_at"],
-            spread_level=row["spread_level"],
+            spread_pattern=row["spread_pattern"],
         )
 
     async def _get_narrative_claims_paginated(
@@ -2128,13 +2128,13 @@ class NarrativeRepository:
             }
         return result
 
-    async def clear_spread_levels_except(self, narrative_ids: list[UUID]) -> None:
+    async def clear_spread_patterns_except(self, narrative_ids: list[UUID]) -> None:
         """
-        Null out spread_level for every narrative outside `narrative_ids`.
+        Null out spread_pattern for every narrative outside `narrative_ids`.
 
         A narrative that could not be scored this run — missing either indicator —
         must not keep yesterday's badge. NULL means "not scoreable", which is distinct
-        from the NONE level meaning "scored, nothing notable". Callers must not pass an
+        from the NONE pattern meaning "scored, nothing notable". Callers must not pass an
         empty list: that would clear every badge in the table, which is what a failed
         run looks like.
         """
@@ -2143,29 +2143,29 @@ class NarrativeRepository:
         await self._session.execute(
             """
             UPDATE narratives
-            SET spread_level = NULL, updated_at = NOW()
-            WHERE spread_level IS NOT NULL
+            SET spread_pattern = NULL, updated_at = NOW()
+            WHERE spread_pattern IS NOT NULL
               AND NOT (id = ANY(%(narrative_ids)s))
             """,
             {"narrative_ids": narrative_ids},
         )
 
-    async def bulk_update_narrative_spread_levels(
-        self, records: list[tuple[UUID, NarrativeSpreadLevel]]
+    async def bulk_update_narrative_spread_patterns(
+        self, records: list[tuple[UUID, NarrativeSpreadPattern]]
     ) -> None:
         """
-        Bulk update spread_level for multiple narratives.
-        Each record is a (narrative_id, spread_level) tuple.
+        Bulk update spread_pattern for multiple narratives.
+        Each record is a (narrative_id, spread_pattern) tuple.
         """
         await self._session.executemany(
             """
             UPDATE narratives
-            SET spread_level = %(spread_level)s, updated_at = NOW()
+            SET spread_pattern = %(spread_pattern)s, updated_at = NOW()
             WHERE id = %(narrative_id)s
             """,
             [
-                {"narrative_id": narrative_id, "spread_level": spread_level.value}
-                for narrative_id, spread_level in records
+                {"narrative_id": narrative_id, "spread_pattern": spread_pattern.value}
+                for narrative_id, spread_pattern in records
             ],
         )
 

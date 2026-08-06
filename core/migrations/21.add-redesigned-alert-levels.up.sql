@@ -1,6 +1,6 @@
 BEGIN;
 
--- The redesigned alert taxonomy (see docs/narrative-alert-redesign.md, D1).
+-- The redesigned alert taxonomy (see docs/narrative-spread-pattern-redesign.md, D1).
 --
 -- The two axes give four corners of meaning:
 --   viral         big AND still climbing   (composite >= 0.80 AND accel >= 0.80)

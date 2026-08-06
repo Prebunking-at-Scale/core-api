@@ -1,7 +1,7 @@
 """DB-backed tests for the analysis-indicator write/read round-trip.
 
 Phase 2 of the pipeline writes composite/acceleration indicators and phase 3 reads
-them back to classify spread levels. They agree on one thing only: `calculated_at`
+them back to classify spread patterns. They agree on one thing only: `calculated_at`
 holds the day the indicator *describes*, which is what
 get_bulk_analysis_indicators_for_date filters on.
 

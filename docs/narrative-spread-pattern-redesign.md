@@ -1,6 +1,6 @@
-# Narrative alert system — redesign
+# Narrative spread patterns — redesign
 
-**Status: alert conditions CLOSED (2026-07-17); reframed as a philosophy (2026-07-20).**
+**Status: classification conditions CLOSED (2026-07-17); reframed as a philosophy (2026-07-20).**
 No implementation yet.
 
 The whole design falls out of **two core decisions**. Everything below — the axes, the
@@ -40,7 +40,7 @@ Everything else is a derivation:
 | **D5** — `viral` is a conjunction | C2 | big *and* still climbing = both axes at once |
 | **D6** — all change moves to the acceleration axis | C2 | evict velocity from composite and let reach lead it (uncapped); reweight so the rate axis can carry growth |
 
-**Still open** — none of them alert conditions, all downstream of the two cores:
+**Still open** — none of them classification conditions, all downstream of the two cores:
 - **O5.3 / O5.6** — denominator scope and aggregation. One decision, gated on O6.
 - **O6** — the scraper's revisit strategy. *Not answerable from this database; the critical
   path; belongs to whoever owns the scraper.*
@@ -526,7 +526,7 @@ video-count weight was never the problem, the engagement weight was.
 
 ## Open questions
 
-Five remain, none of them alert conditions. The numbering is not contiguous: closed questions
+Five remain, none of them classification conditions. The numbering is not contiguous: closed questions
 have been deleted and their content moved into the decision that now owns it — **O2/O3** into
 D1 (volume and boundaries are the region geometry), **O5.4** into D4 (the 7–14 day baseline
 cap), **O5.5** into D0 (birth is not acceleration), **O5.1/O5.2** into C2's rejected-adjustments
@@ -573,7 +573,7 @@ narratives, which is the class of merge C1 forbids — and under D0 a flat narra
 rank above a shrinking one (`consolidated` above a loser, not tied with it). Decide it
 explicitly rather than inheriting it (`core/narratives/service.py:598-603`).
 
-**O4 — Frontend and API impact.** `narrative_spread_level` is a Postgres enum and the labels
+**O4 — Frontend and API impact.** `narrative_spread_pattern` is a Postgres enum and the labels
 are user-facing. Renaming `alert`/`watch` to `trending`/`consolidated` needs a migration and
 coordination with consumers.
 

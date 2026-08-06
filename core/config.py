@@ -82,7 +82,7 @@ VIRALITY_SCORE_COMMENTS_WEIGHT = int(os.environ.get("VIRALITY_SCORE_COMMENTS_WEI
 # Composite is the VIRALITY-STATE axis: how viral a narrative already is, right now. Every
 # term on it must be a level, never a change — `velocity` used to sit here and was
 # dropped, because a growth term on the state axis double-counts the growth that the
-# acceleration axis exists to measure. See D6 in docs/narrative-spread-level-redesign.md.
+# acceleration axis exists to measure. See D6 in docs/narrative-spread-pattern-redesign.md.
 #
 # Reach LEADS the blend. The axis asks how viral a narrative already is, and reach is the
 # only term that answers it: engagement_score is a per-view ratio, so it is size-neutral
@@ -107,7 +107,7 @@ ACCELERATION_ENGAGEMENT_WEIGHT = float(os.environ.get("ACCELERATION_ENGAGEMENT_W
 ACCELERATION_VIDEO_VOLUME_WEIGHT = float(os.environ.get("ACCELERATION_VIDEO_VOLUME_WEIGHT", "0.35"))
 ACCELERATION_VIEWS_WEIGHT = float(os.environ.get("ACCELERATION_VIEWS_WEIGHT", "0.55"))
 
-# Spread-level percentile thresholds. Both axes are classified by their PERCENT_RANK
+# Spread-pattern percentile thresholds. Both axes are classified by their PERCENT_RANK
 # within their own cohort, never by raw values, so each threshold means a knowable
 # fraction of that cohort — and a rank is self-calibrating against a scraper whose
 # coverage drifts, which an absolute bar is not (D2).

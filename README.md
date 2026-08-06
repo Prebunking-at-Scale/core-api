@@ -19,7 +19,7 @@ The database values there match `compose.yaml`; keep the two in step. Note that
 `JWT_SECRET` and the `GEMINI_*` variables have no defaults and the app will not start
 without them.
 
-If you are updating an `.env` written before the spread-level redesign, read the
+If you are updating an `.env` written before the spread-pattern redesign, read the
 MIGRATING section at the bottom of `.env.example` — several virality tuning variables
 were deleted and four changed meaning while keeping their names. Nothing validates
 them at runtime, so a stale value is obeyed silently.
