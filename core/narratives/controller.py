@@ -8,7 +8,7 @@ from litestar.exceptions import NotFoundException
 
 from core.auth.guards import super_admin
 from core.errors import ConflictError
-from core.models import Claim, Narrative, NarrativeAlertLevel, Video
+from core.models import Claim, Narrative, NarrativeSpreadPattern, Video
 from core.narratives.models import (
     NarrativeAnalysisIndicatorsResponse,
     NarrativeDetail,
@@ -140,10 +140,10 @@ class NarrativeController(Controller):
         first_content_start: datetime | None = None,
         first_content_end: datetime | None = None,
         language: str | None = None,
-        alert_level: list[NarrativeAlertLevel] | None = None,
+        spread_pattern: list[NarrativeSpreadPattern] | None = None,
         sort: str | None = None,
     ) -> PaginatedJSON[list[NarrativeSummary]]:
-        # `alert_level` is repeatable: ?alert_level=viral&alert_level=alert
+        # `spread_pattern` is repeatable: ?spread_pattern=viral&spread_pattern=alert
         # `sort=composite` ranks by latest composite virality score (top first).
         narratives, total = await narrative_service.get_all_narratives_list(
             limit=limit,
@@ -156,7 +156,7 @@ class NarrativeController(Controller):
             first_content_start=first_content_start,
             first_content_end=first_content_end,
             language=language,
-            alert_levels=[al.value for al in alert_level] if alert_level else None,
+            spread_patterns=[sp.value for sp in spread_pattern] if spread_pattern else None,
             sort=sort,
         )
         page = (offset // limit) + 1 if limit > 0 else 1

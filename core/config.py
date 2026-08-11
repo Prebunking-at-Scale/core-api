@@ -58,30 +58,69 @@ Weights and thresholds for the virality and acceleration indicators. Read from t
 environment so a deployment can retune them without a code change; the defaults are
 the production values. Composite and acceleration weights must each sum to 1.
 """
-# Composite virality score weights (must sum to 1)
-COMPOSITE_ENGAGEMENT_WEIGHT = float(os.environ.get("COMPOSITE_ENGAGEMENT_WEIGHT", "0.50"))
-COMPOSITE_REACH_WEIGHT = float(os.environ.get("COMPOSITE_REACH_WEIGHT", "0.30"))
-COMPOSITE_VELOCITY_WEIGHT = float(os.environ.get("COMPOSITE_VELOCITY_WEIGHT", "0.20"))
+# Raw virality score parameters. These shape the two state signals themselves, before
+# any ranking. They live here rather than in the service because both the service and
+# the bulk cohort query in the repository need them, and a formula that exists twice
+# eventually disagrees with itself.
+VIRALITY_SCORE_LIKES_WEIGHT = int(os.environ.get("VIRALITY_SCORE_LIKES_WEIGHT", "1"))
+VIRALITY_SCORE_COMMENTS_WEIGHT = int(os.environ.get("VIRALITY_SCORE_COMMENTS_WEIGHT", "5"))
 
-# Acceleration rate score weights (must sum to 1)
-ACCELERATION_ENGAGEMENT_WEIGHT = float(os.environ.get("ACCELERATION_ENGAGEMENT_WEIGHT", "0.40"))
+# There is deliberately no reach cap. `reach_score` used to be
+# `min(views / avg_views, 10) / 10`, tunable through VIRALITY_SCORE_REACH_CAP_LIMIT; the
+# whole expression is gone. Everything downstream reads the PERCENT_RANK of the score,
+# and a rank is invariant under any monotonic transform, so dividing by a per-run
+# constant never moved a narrative relative to another. The clip did — it tied every
+# narrative above the ceiling into one indistinguishable block, and it did so at the top
+# of the axis, which is exactly the band `viral` and `consolidated` read. Measured on a
+# dev database (n=2242), that was 23 narratives — ~1% of the corpus, but all 23 inside the
+# top reach quintile, i.e. the largest narratives we have, left to be ordered by a
+# size-neutral ratio. D2's ranking already delivers the bounded, outlier-immune [0, 1] the
+# cap was there to provide.
+
+# Composite virality score weights (must sum to 1).
+#
+# Composite is the VIRALITY-STATE axis: how viral a narrative already is, right now. Every
+# term on it must be a level, never a change — `velocity` used to sit here and was
+# dropped, because a growth term on the state axis double-counts the growth that the
+# acceleration axis exists to measure. See D6 in docs/narrative-spread-pattern-redesign.md.
+#
+# Reach LEADS the blend. The axis asks how viral a narrative already is, and reach is the
+# only term that answers it: engagement_score is a per-view ratio, so it is size-neutral
+# by construction and a 2k-view narrative with dense comments scores what a 2M-view one
+# does at the same density. Engagement is quality of virality — the right tiebreak between
+# narratives of comparable size, a modifier rather than the thing itself. That mirrors
+# ACCELERATION_ENGAGEMENT_WEIGHT below: engagement modifies on both axes and leads on
+# neither. The magnitudes are a free choice; the ordering is not. Production ran the
+# reverse (engagement 0.50, reach 0.30, velocity 0.20).
+COMPOSITE_ENGAGEMENT_WEIGHT = float(os.environ.get("COMPOSITE_ENGAGEMENT_WEIGHT", "0.375"))
+COMPOSITE_REACH_WEIGHT = float(os.environ.get("COMPOSITE_REACH_WEIGHT", "0.625"))
+
+# Acceleration rate score weights (must sum to 1).
+#
+# Acceleration is the CHANGE-IN-VIRALITY axis, and it measures speed of distribution;
+# engagement change is a MODIFIER on that and must not be able to overturn it. The one
+# hard constraint is ACCELERATION_ENGAGEMENT_WEIGHT < ACCELERATION_VIEWS_WEIGHT — the
+# old 0.40/0.35/0.25 broke it, so a narrative whose views grew while its engagement
+# ratio dipped scored a *negative* rate and was floored to zero. Measured against
+# 2026-07-16 (n=2237), the old weights erased 679 genuine growers; these erase 43.
+ACCELERATION_ENGAGEMENT_WEIGHT = float(os.environ.get("ACCELERATION_ENGAGEMENT_WEIGHT", "0.10"))
 ACCELERATION_VIDEO_VOLUME_WEIGHT = float(os.environ.get("ACCELERATION_VIDEO_VOLUME_WEIGHT", "0.35"))
-ACCELERATION_VIEWS_WEIGHT = float(os.environ.get("ACCELERATION_VIEWS_WEIGHT", "0.25"))
+ACCELERATION_VIEWS_WEIGHT = float(os.environ.get("ACCELERATION_VIEWS_WEIGHT", "0.55"))
 
-# Hard cap on individual change_* components inside acceleration_rate.
-# Without it, a single video going from 1 → 10k views (change=9999) drowns
-# the weighted sum and makes the per-dimension weights meaningless.
-ACCELERATION_CHANGE_CAP = float(os.environ.get("ACCELERATION_CHANGE_CAP", "5.0"))
-
-# Alert-level percentile thresholds. Both indicators are classified by their
-# PERCENT_RANK within the run's cohort, never by their raw values, so each threshold
-# means a knowable fraction of that cohort. See
-# NarrativeService.update_narrative_alert_levels for the classification.
-COMPOSITE_PERCENTILE_VIRAL = float(os.environ.get("COMPOSITE_PERCENTILE_VIRAL", "0.95"))
-COMPOSITE_PERCENTILE_EARLY_SURGE_MAX = float(os.environ.get("COMPOSITE_PERCENTILE_EARLY_SURGE_MAX", "0.50"))
-COMPOSITE_PERCENTILE_WATCH_MIN = float(os.environ.get("COMPOSITE_PERCENTILE_WATCH_MIN", "0.70"))
-ACCELERATION_PERCENTILE_SURGE = float(os.environ.get("ACCELERATION_PERCENTILE_SURGE", "0.95"))
-ACCELERATION_PERCENTILE_WATCH_MIN = float(os.environ.get("ACCELERATION_PERCENTILE_WATCH_MIN", "0.70"))
+# Spread-pattern percentile thresholds. Both axes are classified by their PERCENT_RANK
+# within their own cohort, never by raw values, so each threshold means a knowable
+# fraction of that cohort — and a rank is self-calibrating against a scraper whose
+# coverage drifts, which an absolute bar is not (D2).
+#
+# The four labels are RECTANGLES on the percentile plane, not quadrants, so there are
+# six thresholds and not two, and there is a no-badge region (small AND flat) in the
+# bottom-left. See D1 for the geometry and NarrativeService._classify for the order.
+SPREAD_COMPOSITE_LO = float(os.environ.get("SPREAD_COMPOSITE_LO", "0.40"))   # early_surge ceiling / trending floor
+SPREAD_COMPOSITE_MID = float(os.environ.get("SPREAD_COMPOSITE_MID", "0.50"))  # consolidated floor
+SPREAD_COMPOSITE_HI = float(os.environ.get("SPREAD_COMPOSITE_HI", "0.80"))   # viral floor
+SPREAD_ACCEL_LO = float(os.environ.get("SPREAD_ACCEL_LO", "0.40"))           # consolidated ceiling / trending floor
+SPREAD_ACCEL_MID = float(os.environ.get("SPREAD_ACCEL_MID", "0.50"))         # early_surge floor
+SPREAD_ACCEL_HI = float(os.environ.get("SPREAD_ACCEL_HI", "0.80"))           # viral floor
 
 """internationalisation"""
 i18n.set("file_format", "json")

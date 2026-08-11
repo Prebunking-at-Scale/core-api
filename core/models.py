@@ -6,10 +6,24 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, Field
 
 
-class NarrativeAlertLevel(str, Enum):
+class NarrativeSpreadPattern(str, Enum):
+    """
+    The two axes of docs/narrative-spread-pattern-redesign.md give four corners of meaning:
+    VIRAL is big and still climbing, EARLY_SURGE is small but climbing, CONSOLIDATED is
+    big and flat, TRENDING is the broad middle. They do not tile the plane — a narrative
+    that is small *and* flat gets no badge at all, which is `spread_pattern IS NULL` rather
+    than NONE.
+
+    ALERT and WATCH are retired: the classifier no longer emits them. They remain here
+    (and in the Postgres enum) only so consumers still filtering on them keep working
+    until they migrate.
+    """
+
     NONE = "none"
     VIRAL = "viral"
     EARLY_SURGE = "early_surge"
+    CONSOLIDATED = "consolidated"
+    TRENDING = "trending"
     ALERT = "alert"
     WATCH = "watch"
 
@@ -94,7 +108,7 @@ class Narrative(BaseModel):
     metadata: dict[str, Any] = {}
     created_at: datetime | None = None
     updated_at: datetime | None = None
-    alert_level: NarrativeAlertLevel | None = None
+    spread_pattern: NarrativeSpreadPattern | None = None
 
 
 class NarrativeFeedback(BaseModel):

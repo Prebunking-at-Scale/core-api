@@ -1,11 +1,17 @@
-"""DB-backed tests for the carry-forward behaviour of the narrative stats queries.
+"""DB-backed tests for the two cohort queries behind the alert system.
 
 video_stats is scraped sparsely: a video is not guaranteed to have a row on every
-calendar day. These tests build a tiny narrative with deliberately gappy snapshots
-and assert that the queries carry each video's last-known snapshot forward, rather
-than treating a missing day as zero engagement (the bug raised in PR review).
+calendar day. These tests build tiny narratives with deliberately gappy snapshots and
+assert two different things about that sparseness, one per axis:
+
+  - composite (a LEVEL) carries each video's last-known snapshot forward, because "how
+    big is this" does not become unknown just because we did not look today;
+  - acceleration (a RATE) refuses to answer at all unless we provably visited the
+    narrative on calc_date, and divides each video's gain by that video's own elapsed
+    gap so a long gap cannot masquerade as a fast day.
 """
 
+from datetime import date
 from uuid import UUID, uuid4
 
 from core.narratives.repo import NarrativeRepository
@@ -95,13 +101,15 @@ async def test_get_narrative_stats_carries_forward_across_gap_days(conn_factory)
     assert stats.totals.views == 350
 
 
-async def test_bulk_comparison_uses_last_snapshot_on_or_before_each_day(conn_factory):
-    """calc_date = day 5, prev_date = day 4, with the same gappy fixture.
+async def test_composite_cohort_carries_forward_to_calc_date(conn_factory):
+    """The same gappy fixture, scored for day 5.
 
-    Neither video was scraped on day 4, and B was not scraped on day 5. The exact-day
-    filter (`recorded_at::date = day`) would report prev_views = 0 and drop B from the
-    current day, inventing a huge acceleration. Carry-forward must give
-    current = 350 (A 300 + B carried 50) and prev = 150 (A carried 100 + B 50).
+    B was not scraped on day 5. The exact-day filter (`recorded_at::date = day`) would
+    drop it and make the narrative look like it shrank; carry-forward must count B's
+    day-3 value, giving 350 across 2 videos.
+
+    A level does not become unknown just because we did not look today — which is the
+    whole reason composite may rank over narratives nobody visited.
     """
     async with conn_factory() as conn:
         cur = conn.cursor()
@@ -111,50 +119,208 @@ async def test_bulk_comparison_uses_last_snapshot_on_or_before_each_day(conn_fac
         await _link_videos_to_narrative(cur, narrative_id, [a, b])
 
         repo = NarrativeRepository(conn.cursor())
-        from datetime import date
-
-        rows = await repo.get_bulk_narrative_stats_comparison(date(2025, 1, 5))
+        rows = await repo.get_composite_cohort(date(2025, 1, 5))
 
     row = next(r for r in rows if r["narrative_id"] == narrative_id)
-    assert row["current_views"] == 350
-    assert row["prev_views"] == 150
-    assert row["current_video_count"] == 2
-    assert row["prev_video_count"] == 2
+    assert row["views"] == 350  # A (300) + B (carried 50)
+    assert row["video_count"] == 2
 
 
-async def test_delta_for_period_baselines_on_pre_window_snapshot(conn_factory):
-    """Video C grows 100 -> 500 across the window boundary; video D is stale.
+async def test_composite_cohort_excludes_the_never_measured(conn_factory):
+    """A narrative with videos but no snapshot on or before calc_date is *unmeasured*.
 
-    C's only in-window snapshot is the 500 one, so the old "first vs last snapshot
-    inside the window" logic would report a delta of 0. The fix baselines on the last
-    snapshot *before* the window (100), yielding a delta of 400. Stale video D (single
-    old snapshot) carries forward to current == baseline, contributing 0.
+    It must be absent rather than present at zero: ranking it at the bottom would claim
+    we looked and found nothing, when we never looked at all.
     """
     async with conn_factory() as conn:
         cur = conn.cursor()
-        narrative_id = await _make_narrative(cur)
-        # recorded_at relative to NOW() so the days_back window is meaningful.
-        c = await _insert_video(cur, views_by_date={})
-        d = await _insert_video(cur, views_by_date={})
-        await cur.execute(
-            "INSERT INTO video_stats (video_id, views, likes, comments, recorded_at) "
-            "VALUES (%(v)s, 100, 100, 100, NOW() - INTERVAL '10 days')",
-            {"v": c},
-        )
-        await cur.execute(
-            "INSERT INTO video_stats (video_id, views, likes, comments, recorded_at) "
-            "VALUES (%(v)s, 500, 500, 500, NOW() - INTERVAL '1 day')",
-            {"v": c},
-        )
-        await cur.execute(
-            "INSERT INTO video_stats (video_id, views, likes, comments, recorded_at) "
-            "VALUES (%(v)s, 200, 200, 200, NOW() - INTERVAL '10 days')",
-            {"v": d},
-        )
-        await _link_videos_to_narrative(cur, narrative_id, [c, d])
+        measured = await _make_narrative(cur)
+        unmeasured = await _make_narrative(cur)
+        a = await _insert_video(cur, views_by_date={"2025-01-01": 100})
+        # snapshot lands *after* calc_date
+        b = await _insert_video(cur, views_by_date={"2025-01-09": 500})
+        await _link_videos_to_narrative(cur, measured, [a])
+        await _link_videos_to_narrative(cur, unmeasured, [b])
 
         repo = NarrativeRepository(conn.cursor())
-        totals = await repo.get_narrative_stats_delta_for_period(narrative_id, days_back=2)
+        rows = await repo.get_composite_cohort(date(2025, 1, 5))
 
-    assert totals.views == 400  # C: 500 - 100; D: 200 - 200 = 0
-    assert totals.video_count == 2
+    ids = {r["narrative_id"] for r in rows}
+    assert measured in ids
+    assert unmeasured not in ids
+
+
+async def test_reach_score_is_raw_views_with_no_ceiling(conn_factory):
+    """Reach is summed views, unscaled and unclipped.
+
+    The old `min(views / avg_views, 10) / 10` tied every narrative past 10× the corpus
+    average, and the tie landed at the top of the axis — the band `viral` reads. Two
+    narratives 60× apart must come back as two different numbers, not one shared 1.0.
+    """
+    async with conn_factory() as conn:
+        cur = conn.cursor()
+        small = await _make_narrative(cur)
+        huge = await _make_narrative(cur)
+        a = await _insert_video(cur, views_by_date={"2025-01-01": 1_000})
+        b = await _insert_video(cur, views_by_date={"2025-01-01": 60_000})
+        await _link_videos_to_narrative(cur, small, [a])
+        await _link_videos_to_narrative(cur, huge, [b])
+
+        repo = NarrativeRepository(conn.cursor())
+        rows = await repo.get_composite_cohort(date(2025, 1, 5))
+
+    scores = {r["narrative_id"]: r["reach_score"] for r in rows}
+    assert scores[small] == 1_000
+    assert scores[huge] == 60_000
+
+
+async def test_acceleration_divides_each_video_by_its_own_gap(conn_factory):
+    """Two videos gain 100 views each, but over gaps of 1 and 4 days.
+
+    A rate is per unit time or it is not a rate: the four-day video must contribute a
+    quarter as much per day, not the same. Before this, a video ranked high for having
+    gone *unmeasured* — the longer the gap, the bigger the apparent jump.
+
+        A: 100 -> 200 across 1 day   -> 100/day
+        B: 100 -> 200 across 4 days  ->  25/day
+        daily_view_gain = 125 over a baseline of 200
+    """
+    calc_date = date(2025, 1, 5)
+    async with conn_factory() as conn:
+        cur = conn.cursor()
+        narrative_id = await _make_narrative(cur)
+        a = await _insert_video(cur, views_by_date={"2025-01-04": 100, "2025-01-05": 200})
+        b = await _insert_video(cur, views_by_date={"2025-01-01": 100, "2025-01-05": 200})
+        await _link_videos_to_narrative(cur, narrative_id, [a, b])
+        # the visit predicate reads videos.updated_at as well as video_stats
+        await cur.execute(
+            "UPDATE videos SET updated_at = %(d)s WHERE id = ANY(%(ids)s)",
+            {"d": calc_date, "ids": [a, b]},
+        )
+
+        repo = NarrativeRepository(conn.cursor())
+        rows = await repo.get_acceleration_cohort(calc_date)
+
+    row = next(r for r in rows if r["narrative_id"] == narrative_id)
+    assert row["refreshed_videos"] == 2
+    assert row["daily_view_gain"] == 125.0
+    assert row["baseline_views"] == 200.0
+
+
+async def test_acceleration_keeps_an_old_baseline_and_divides_by_its_gap(conn_factory):
+    """A baseline's age never disqualifies it. Growth per day is the whole normalisation.
+
+    A 30-day-old baseline is divided by 30, exactly as a 1-day gap is divided by 1. An
+    earlier draft dropped baselines older than 14 days, which did not remove the
+    narrative from the cohort — it handed it a rate of 0.0, asserting "this stopped
+    growing" about a narrative that had in fact grown 30x and simply gone unvisited.
+
+        A: 100 -> 200 across  1 day   -> 100/day
+        B: 100 -> 3100 across 30 days -> 100/day
+        daily_view_gain = 200 over a baseline of 200
+    """
+    calc_date = date(2025, 1, 31)
+    async with conn_factory() as conn:
+        cur = conn.cursor()
+        narrative_id = await _make_narrative(cur)
+        a = await _insert_video(cur, views_by_date={"2025-01-30": 100, "2025-01-31": 200})
+        b = await _insert_video(cur, views_by_date={"2025-01-01": 100, "2025-01-31": 3100})
+        await _link_videos_to_narrative(cur, narrative_id, [a, b])
+        await cur.execute(
+            "UPDATE videos SET updated_at = %(d)s WHERE id = ANY(%(ids)s)",
+            {"d": calc_date, "ids": [a, b]},
+        )
+
+        repo = NarrativeRepository(conn.cursor())
+        rows = await repo.get_acceleration_cohort(calc_date)
+
+    row = next(r for r in rows if r["narrative_id"] == narrative_id)
+    assert row["refreshed_videos"] == 2
+    assert row["daily_view_gain"] == 200.0
+    assert row["baseline_views"] == 200.0
+
+
+async def test_acceleration_excludes_narratives_born_on_calc_date(conn_factory):
+    """A narrative whose videos all appeared today has no previous-day state.
+
+    That is birth, not acceleration, and there is no baseline to divide by. It must be
+    absent from the cohort entirely rather than arrive with an invented rate.
+    """
+    calc_date = date(2025, 1, 5)
+    async with conn_factory() as conn:
+        cur = conn.cursor()
+        established = await _make_narrative(cur)
+        newborn = await _make_narrative(cur)
+        a = await _insert_video(cur, views_by_date={"2025-01-04": 100, "2025-01-05": 200})
+        b = await _insert_video(cur, views_by_date={"2025-01-05": 900})
+        await _link_videos_to_narrative(cur, established, [a])
+        await _link_videos_to_narrative(cur, newborn, [b])
+        await cur.execute(
+            "UPDATE videos SET updated_at = %(d)s WHERE id = ANY(%(ids)s)",
+            {"d": calc_date, "ids": [a, b]},
+        )
+
+        repo = NarrativeRepository(conn.cursor())
+        rows = await repo.get_acceleration_cohort(calc_date)
+
+    ids = {r["narrative_id"] for r in rows}
+    assert established in ids
+    assert newborn not in ids
+
+
+async def test_acceleration_excludes_the_unvisited(conn_factory):
+    """A narrative nobody looked at on calc_date cannot have a rate computed.
+
+    Its carried-forward snapshot is identical on both days, so it would arrive wearing
+    a zero that means "unmeasured" rather than "flat" — exactly the conflation that put
+    93% of the axis at zero.
+    """
+    calc_date = date(2025, 1, 5)
+    async with conn_factory() as conn:
+        cur = conn.cursor()
+        visited = await _make_narrative(cur)
+        stale = await _make_narrative(cur)
+        a = await _insert_video(cur, views_by_date={"2025-01-04": 100, "2025-01-05": 200})
+        b = await _insert_video(cur, views_by_date={"2025-01-01": 100, "2025-01-02": 150})
+        await _link_videos_to_narrative(cur, visited, [a])
+        await _link_videos_to_narrative(cur, stale, [b])
+        await cur.execute(
+            "UPDATE videos SET updated_at = %(d)s WHERE id = %(id)s",
+            {"d": calc_date, "id": a},
+        )
+        await cur.execute(
+            "UPDATE videos SET updated_at = %(d)s WHERE id = %(id)s",
+            {"d": date(2025, 1, 2), "id": b},
+        )
+
+        repo = NarrativeRepository(conn.cursor())
+        rows = await repo.get_acceleration_cohort(calc_date)
+
+    ids = {r["narrative_id"] for r in rows}
+    assert visited in ids
+    assert stale not in ids
+
+
+async def test_visited_but_flat_stays_in_the_cohort(conn_factory):
+    """Visited, nothing changed: an honest zero, and it must survive.
+
+    `consolidated` means big *and flat*, so a large narrative that genuinely stopped
+    growing has to be able to reach it. Excluding zeros would delete that population.
+    """
+    calc_date = date(2025, 1, 5)
+    async with conn_factory() as conn:
+        cur = conn.cursor()
+        narrative_id = await _make_narrative(cur)
+        a = await _insert_video(cur, views_by_date={"2025-01-04": 100, "2025-01-05": 100})
+        await _link_videos_to_narrative(cur, narrative_id, [a])
+        await cur.execute(
+            "UPDATE videos SET updated_at = %(d)s WHERE id = %(id)s",
+            {"d": calc_date, "id": a},
+        )
+
+        repo = NarrativeRepository(conn.cursor())
+        rows = await repo.get_acceleration_cohort(calc_date)
+
+    row = next(r for r in rows if r["narrative_id"] == narrative_id)
+    assert row["daily_view_gain"] == 0.0
+    assert row["baseline_views"] == 100.0

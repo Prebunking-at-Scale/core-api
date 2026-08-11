@@ -196,6 +196,17 @@ cython_debug/
 postgresql/
 
 claude.md
+CLAUDE.md
+
+# JetBrains
+.idea/
+
+# Local-only docker overrides
+compose.override.yaml
+
+# Query dumps, simulation CSVs and screenshots from the alert redesign.
+# Kept on disk for reference, deliberately not in the repo.
+analysis/
 
 # macOS
 .DS_Store

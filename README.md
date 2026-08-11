@@ -10,17 +10,19 @@ You can bring up postgres using:
 ```bash
 docker compose up pas-postgres -d
 ```
-Once started, you'll need to create an `.env` file with the following contents:
+Once started, you'll need an `.env` file:
+```bash
+cp .env.example .env
 ```
-API_KEYS='["abc123"]'
-DATABASE_HOST=localhost
-DATABASE_PORT=5432
-DATABASE_USER=pas
-DATABASE_PASSWORD=s3cret
-DATABASE_NAME=pas
-VIDEO_STORAGE_BUCKET_NAME=local
-```
-These values should match those in `compose.yaml`.
+`.env.example` documents every variable the code reads, with the defaults it applies.
+The database values there match `compose.yaml`; keep the two in step. Note that
+`JWT_SECRET` and the `GEMINI_*` variables have no defaults and the app will not start
+without them.
+
+If you are updating an `.env` written before the spread-pattern redesign, read the
+MIGRATING section at the bottom of `.env.example` — several virality tuning variables
+were deleted and four changed meaning while keeping their names. Nothing validates
+them at runtime, so a stale value is obeyed silently.
 
 You'll need `uv` installed to start the actual API. Follow instructions to do [this here](https://docs.astral.sh/uv/getting-started/installation/).
 
