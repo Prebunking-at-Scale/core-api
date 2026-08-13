@@ -6,7 +6,6 @@ from uuid import UUID
 
 from core.config import (
     ACCELERATION_ENGAGEMENT_WEIGHT,
-    ACCELERATION_VIDEO_VOLUME_WEIGHT,
     ACCELERATION_VIEWS_WEIGHT,
     SPREAD_ACCEL_HI,
     SPREAD_ACCEL_LO,
@@ -549,73 +548,116 @@ class NarrativeService:
         Nor is there a bound on how old a baseline may be. Growth per day is the whole
         normalisation: a twenty-day gap is divided by twenty exactly as a four-day gap
         is divided by four.
+
+        The three components are RANKED across the cohort and the ranks are blended, not
+        the raw values. See the weights in config.py for why: a weighted sum of raw
+        components distributes influence by scale rather than by weight, and these three
+        do not share a scale. Ranking also retires the max(0.0, ...) floor that used to
+        sit on the blended rate — a decliner now ranks *below* the flat on the component
+        it declined in, instead of being merged with them, which is the open question the
+        floor's comment described.
         """
         async with self.repo() as repo:
             stats_rows = await repo.get_acceleration_cohort(calc_date)
-            records: list[tuple[UUID, float, NarrativeAnalysisIndicatorType, dict[str, Any] | None]] = []
+            components: list[dict[str, Any]] = []
             for row in stats_rows:
-                baseline_views = row["baseline_views"]
                 mean_gap = row["mean_gap_days"]
 
-                # Views: per-day gain over the baseline it grew from. Both sides cover
-                # the same videos, so this is a true daily growth fraction.
+                # Denominators are the BALANCED PANEL — every linked video seen on both
+                # days — while the numerator is the movement of the refreshed ones. The
+                # result is the narrative's own daily growth with unmeasured videos held
+                # flat, which is a lower bound rather than a sample extrapolated to the
+                # whole. See get_acceleration_cohort for the measurement that forced it.
+                panel_prev_views = row["panel_prev_views"]
+                panel_cur_views = row["panel_cur_views"]
                 change_views = (
-                    row["daily_view_gain"] / baseline_views if baseline_views > 0 else 0.0
+                    row["daily_view_gain"] / panel_prev_views if panel_prev_views > 0 else 0.0
                 )
 
-                # Engagement: a quality modifier, not a growth term. A narrative whose
-                # engagement is rising should rank above one whose engagement is falling,
-                # but it must never outweigh the views it modifies — hence its 0.10.
-                cur_views = row["cur_views"]
+                # Engagement: a quality modifier, not a growth term. Measured over the
+                # same panel as views, on both sides. Mixing the two populations here is
+                # the trap this rewrite exists to avoid — a panel denominator against a
+                # refreshed-subset numerator inflates the ratio by 1/coverage, which for
+                # a narrative covered at 0.62% turns a +11% engagement change into +180.
                 prev_engagement = (
-                    (row["prev_likes"] * VIRALITY_SCORE_LIKES_WEIGHT
-                     + row["prev_comments"] * VIRALITY_SCORE_COMMENTS_WEIGHT) / baseline_views
-                    if baseline_views > 0 else 0.0
+                    (row["panel_prev_likes"] * VIRALITY_SCORE_LIKES_WEIGHT
+                     + row["panel_prev_comments"] * VIRALITY_SCORE_COMMENTS_WEIGHT) / panel_prev_views
+                    if panel_prev_views > 0 else 0.0
                 )
                 cur_engagement = (
-                    (row["cur_likes"] * VIRALITY_SCORE_LIKES_WEIGHT
-                     + row["cur_comments"] * VIRALITY_SCORE_COMMENTS_WEIGHT) / cur_views
-                    if cur_views > 0 else 0.0
+                    (row["panel_cur_likes"] * VIRALITY_SCORE_LIKES_WEIGHT
+                     + row["panel_cur_comments"] * VIRALITY_SCORE_COMMENTS_WEIGHT) / panel_cur_views
+                    if panel_cur_views > 0 else 0.0
                 )
                 change_engagement = (
                     ((cur_engagement - prev_engagement) / prev_engagement) / mean_gap
                     if prev_engagement > 0 and mean_gap > 0 else 0.0
                 )
 
-                # Video count: already a one-day window (linked today vs linked
-                # yesterday), so it needs no gap division. A gained video counts as
-                # growth whether it was uploaded this morning or is an old one the
-                # scraper only just found — we are not claiming to have watched the
-                # video appear, only that the narrative's footprint in our corpus grew,
-                # and we have two honest observations of that count.
+                # Video count is DESCRIPTIVE ONLY — it is not a component of the rate.
+                # It measures how many videos we have linked to the narrative today
+                # against yesterday, which is the scraper's progress rather than the
+                # narrative's, and as a scored term it was the single largest source of
+                # wrong `viral` badges (see config.py for the measurements that retired
+                # it). It stays in the metadata because "2 → 3 videos" is a fact worth
+                # showing a reader beside the rate; it is simply not ranked on.
                 prev_videos = row["prev_videos"]
                 change_video_count = (
                     (row["cur_videos"] - prev_videos) / prev_videos if prev_videos > 0 else 0.0
                 )
 
-                # The floor keeps decliners from ranking above the genuinely flat. It is
-                # not the load-bearing part it once was: with engagement demoted to 0.10
-                # it now touches ~43 narratives rather than 679 (measured 2026-07-16).
-                # It still merges "shrinking" with "flat", which is a real open question.
-                acceleration_rate = max(
-                    0.0,
-                    change_engagement * ACCELERATION_ENGAGEMENT_WEIGHT
-                    + change_video_count * ACCELERATION_VIDEO_VOLUME_WEIGHT
-                    + change_views * ACCELERATION_VIEWS_WEIGHT,
+                refreshed_baseline = row["baseline_views"]
+                components.append({
+                    "narrative_id": row["narrative_id"],
+                    "change_engagement": change_engagement,
+                    "change_video_count": change_video_count,
+                    "change_views": change_views,
+                    "refreshed_videos": row["refreshed_videos"],
+                    "mean_gap_days": mean_gap,
+                    "panel_videos": prev_videos,
+                    "cur_videos": row["cur_videos"],
+                    "prev_videos": prev_videos,
+                    "panel_baseline_views": panel_prev_views,
+                    "refreshed_baseline_views": refreshed_baseline,
+                    # How much of the narrative the day's number actually saw. The one
+                    # figure a reader needs to weigh everything above, and the one the
+                    # old formula spent without ever reporting.
+                    "coverage": (
+                        refreshed_baseline / panel_prev_views if panel_prev_views > 0 else 0.0
+                    ),
+                })
+
+            # Ranks are only meaningful against the rest of the cohort, so every
+            # component is ranked once the whole cohort is scored — the same two-pass
+            # shape _attach_percentiles uses for the blended rate below.
+            ranks = {
+                key: self._percent_ranks([component[key] for component in components])
+                for key in ("change_views", "change_engagement")
+            }
+
+            records: list[tuple[UUID, float, NarrativeAnalysisIndicatorType, dict[str, Any] | None]] = []
+            for index, component in enumerate(components):
+                views_rank = ranks["change_views"][index]
+                engagement_rank = ranks["change_engagement"][index]
+                acceleration_rate = (
+                    engagement_rank * ACCELERATION_ENGAGEMENT_WEIGHT
+                    + views_rank * ACCELERATION_VIEWS_WEIGHT
                 )
+                narrative_id = component.pop("narrative_id")
                 records.append((
-                    row["narrative_id"],
+                    narrative_id,
                     acceleration_rate,
                     NarrativeAnalysisIndicatorType.ACCELERATION_RATE,
                     {
-                        "change_engagement": change_engagement,
-                        "change_video_count": change_video_count,
-                        "change_views": change_views,
+                        **component,
+                        # The raw components stay in the metadata beside their ranks: the
+                        # rank is what the badge read, the raw value is what the panel
+                        # can show a reader as a growth figure. change_video_count has a
+                        # raw value and no rank, because it is reported and not scored.
+                        "views_percentile": views_rank,
+                        "engagement_percentile": engagement_rank,
                         "engagement_weight": ACCELERATION_ENGAGEMENT_WEIGHT,
-                        "video_volume_weight": ACCELERATION_VIDEO_VOLUME_WEIGHT,
                         "views_weight": ACCELERATION_VIEWS_WEIGHT,
-                        "refreshed_videos": row["refreshed_videos"],
-                        "mean_gap_days": mean_gap,
                     },
                 ))
             self._attach_percentiles(records)

@@ -199,19 +199,35 @@ class AccelerationRateMetadata(BaseModel):
     not measure today is uncomputable rather than zero (D0/D3). The two percentiles are
     therefore never comparable to each other, only each to a constant on its own axis.
 
-    `refreshed_videos` and `mean_gap_days` describe how much of the narrative was
-    actually re-measured, which is what tells a reader how much weight the rate deserves.
+    `refreshed_videos`, `coverage` and `mean_gap_days` describe how much of the narrative
+    was actually re-measured, which is what tells a reader how much weight the rate
+    deserves. `coverage` is the share of the narrative's panel views that were re-fetched:
+    the rate is measured over the whole panel with unmeasured videos held flat, so a low
+    coverage means the number is a lower bound rather than a reading.
+
+    `change_video_count` and the raw counts are reported, never ranked — the video-volume
+    term was removed from the rate on 2026-08-13 (see config.py). Every field below that
+    the rate no longer uses is optional, because rows written by earlier versions of the
+    pipeline are still served: the endpoint returns the most recent row per type with no
+    recency bound.
     """
 
     change_engagement: float
     change_video_count: float
     change_views: float
     engagement_weight: float
-    video_volume_weight: float
     views_weight: float
     percentile: float | None = None
+    views_percentile: float | None = None
+    engagement_percentile: float | None = None
     refreshed_videos: int | None = None
     mean_gap_days: float | None = None
+    coverage: float | None = None
+    panel_videos: int | None = None
+    cur_videos: float | None = None
+    prev_videos: float | None = None
+    panel_baseline_views: float | None = None
+    refreshed_baseline_views: float | None = None
 
 
 class AnalysisIndicator(BaseModel, Generic[IndicatorMetadata]):

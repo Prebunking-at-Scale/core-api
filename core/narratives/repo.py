@@ -1909,14 +1909,21 @@ class NarrativeRepository:
         having gone unmeasured. Videos are aggregated the way that avoids averaging
         ratios:
 
-            change_views = SUM(per-video daily view gain) / SUM(baseline views)
+            change_views = SUM(per-video daily view gain) / SUM(PANEL baseline views)
 
-        Numerator and denominator cover the same videos — the ones actually refreshed on
-        calc_date. That is deliberate but *not* free: it is unbiased if refreshed videos
-        are representative and biased upward if the scraper prioritises active ones,
-        which is the open question about revisit strategy (O5.3/O5.6, gated on O6). If
-        that turns out to prioritise active videos, the fix is to divide by every
-        video's baseline rather than only the refreshed ones — this CTE, not a rewrite.
+        The numerator covers the videos actually refreshed on calc_date; the denominator
+        covers the whole balanced panel. That asymmetry is the point, and it is a change
+        from the original design, which divided by the refreshed videos' own baseline.
+
+        Same-videos-on-both-sides was unbiased only if the refreshed videos were
+        representative, and measured on 2026-08-12 they are not: median coverage across
+        the cohort is 5% of a narrative's panel views, and the median narrative *badged
+        viral* sat at 0.74% — a seventh of typical, because a thin unrepresentative
+        sample produces a large ratio and the ratio is what earns the badge. One
+        narrative reported +53% daily growth from 2 videos of 63 covering 0.62% of its
+        views, while its actual movement was +0.32%. Dividing by the panel makes the
+        number a narrative-level claim, at the price of holding unmeasured videos flat,
+        which understates rather than overstates (O5.3/O5.6, still gated on O6).
 
         A baseline's AGE does not disqualify it. Growth per day is the whole point of
         the per-day division: a video last seen twenty days ago contributes its twenty
@@ -1979,13 +1986,16 @@ class NarrativeRepository:
                 WHERE vs.recorded_at::date <= %(prev_date)s
                 ORDER BY l.narrative_id, l.video_id, vs.recorded_at DESC
             ),
-            -- Videos actually re-fetched in the window: their latest snapshot as of
-            -- calc_date is newer than their latest as of prev_date. Everything else
-            -- carried forward unchanged and contributes no growth.
-            refreshed AS (
+            -- The BALANCED PANEL: every linked video observed on both days. Videos that
+            -- were not re-fetched carry forward, so they sit on both sides identically
+            -- and move no ratio — they only enlarge the denominator, which is the point.
+            -- Videos with no prev-side observation at all are excluded: they are brand
+            -- new, and a growing footprint is what the video-count term measures.
+            panel AS (
                 SELECT
                     c.narrative_id,
                     c.video_id,
+                    (c.recorded_on > p.recorded_on)        AS was_refreshed,
                     (c.recorded_on - p.recorded_on)::float AS gap_days,
                     c.views    AS cur_views,
                     p.views    AS prev_views,
@@ -1995,7 +2005,28 @@ class NarrativeRepository:
                     p.comments AS prev_comments
                 FROM cur c
                 JOIN prev p ON p.narrative_id = c.narrative_id AND p.video_id = c.video_id
-                WHERE c.recorded_on > p.recorded_on
+            ),
+            -- Videos actually re-fetched in the window: their latest snapshot as of
+            -- calc_date is newer than their latest as of prev_date. They supply the
+            -- NUMERATOR — all observed movement comes from them — while the panel above
+            -- supplies the denominator.
+            refreshed AS (
+                SELECT * FROM panel WHERE was_refreshed
+            ),
+            -- Panel-wide state on both days. The service divides the refreshed videos'
+            -- movement by these, so a narrative whose scraper coverage was 2 videos out
+            -- of 63 reports the growth of the narrative rather than the growth of the 2.
+            totals AS (
+                SELECT
+                    narrative_id,
+                    SUM(prev_views)::float    AS panel_prev_views,
+                    SUM(cur_views)::float     AS panel_cur_views,
+                    SUM(prev_likes)::float    AS panel_prev_likes,
+                    SUM(cur_likes)::float     AS panel_cur_likes,
+                    SUM(prev_comments)::float AS panel_prev_comments,
+                    SUM(cur_comments)::float  AS panel_cur_comments
+                FROM panel
+                GROUP BY narrative_id
             ),
             -- The clean aggregation: sum the per-day gains, sum the baselines they came
             -- from, divide once. Averaging per-video ratios would let a video with a
@@ -2047,9 +2078,16 @@ class NarrativeRepository:
                 COALESCE(g.cur_likes, 0.0)       AS cur_likes,
                 COALESCE(g.cur_comments, 0.0)    AS cur_comments,
                 COALESCE(g.prev_likes, 0.0)      AS prev_likes,
-                COALESCE(g.prev_comments, 0.0)   AS prev_comments
+                COALESCE(g.prev_comments, 0.0)   AS prev_comments,
+                COALESCE(t.panel_prev_views, 0.0)    AS panel_prev_views,
+                COALESCE(t.panel_cur_views, 0.0)     AS panel_cur_views,
+                COALESCE(t.panel_prev_likes, 0.0)    AS panel_prev_likes,
+                COALESCE(t.panel_cur_likes, 0.0)     AS panel_cur_likes,
+                COALESCE(t.panel_prev_comments, 0.0) AS panel_prev_comments,
+                COALESCE(t.panel_cur_comments, 0.0)  AS panel_cur_comments
             FROM counts co
             LEFT JOIN growth g ON g.narrative_id = co.narrative_id
+            LEFT JOIN totals t ON t.narrative_id = co.narrative_id
             WHERE co.prev_videos > 0
             """,
             {"calc_date": calc_date, "prev_date": prev_date},

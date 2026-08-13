@@ -103,9 +103,38 @@ COMPOSITE_REACH_WEIGHT = float(os.environ.get("COMPOSITE_REACH_WEIGHT", "0.625")
 # old 0.40/0.35/0.25 broke it, so a narrative whose views grew while its engagement
 # ratio dipped scored a *negative* rate and was floored to zero. Measured against
 # 2026-07-16 (n=2237), the old weights erased 679 genuine growers; these erase 43.
-ACCELERATION_ENGAGEMENT_WEIGHT = float(os.environ.get("ACCELERATION_ENGAGEMENT_WEIGHT", "0.10"))
-ACCELERATION_VIDEO_VOLUME_WEIGHT = float(os.environ.get("ACCELERATION_VIDEO_VOLUME_WEIGHT", "0.35"))
-ACCELERATION_VIEWS_WEIGHT = float(os.environ.get("ACCELERATION_VIEWS_WEIGHT", "0.55"))
+#
+# These weight the PERCENT_RANK of each component, not the raw component. A weighted sum
+# of raw components gives influence in proportion to a component's SCALE rather than its
+# weight, and the components do not share a scale. Ranking first puts each on [0, 1] by
+# construction, which is the same reason composite blends ranks and not scores (D2), and
+# it is what makes these numbers mean the share of influence they claim.
+#
+# THE VIDEO-VOLUME TERM WAS REMOVED (2026-08-13), and there are now two components rather
+# than three. `change_video_count` — the day-over-day change in how many videos are linked
+# to the narrative — was 0.35 of the blend, and it measured the SCRAPER's progress, not the
+# narrative's. Three findings retired it:
+#
+#   - It is not a spread signal. A narrative going from 2 linked videos to 3 scored 0.175
+#     and ranked in the top 3.5% of the 2026-08-12 cohort with no view measurement behind
+#     it at all. What grew was our record of the narrative.
+#   - It is unnormalised, so the same single discovered video is +50% on a 2-video
+#     narrative and +0.5% on a 200-video one. Narratives whose only non-zero component was
+#     video count were 2.7x likelier to be badged viral than narratives with real view
+#     growth (45.0% of 685 against 16.4% of 1709), and made up 44% of the band.
+#   - It is near-binary: zero for ~70% of the cohort. Under rank blending that hands any
+#     narrative which gained a single video a rank near 0.7 — a quarter of the blend for
+#     one scraper event — so no weight short of zero contains it.
+#
+# A narrative that spreads by spawning new videos is not lost, only delayed: those videos
+# join the balanced panel the following day and their view growth counts from then on.
+# `change_video_count` and the raw counts are still recorded in the row's metadata, where
+# they belong — a fact worth showing a reader, not a component worth ranking on.
+#
+# The 0.35 went to views rather than being split. Engagement stays a modifier; the hard
+# constraint is still ACCELERATION_ENGAGEMENT_WEIGHT < ACCELERATION_VIEWS_WEIGHT.
+ACCELERATION_ENGAGEMENT_WEIGHT = float(os.environ.get("ACCELERATION_ENGAGEMENT_WEIGHT", "0.15"))
+ACCELERATION_VIEWS_WEIGHT = float(os.environ.get("ACCELERATION_VIEWS_WEIGHT", "0.85"))
 
 # Spread-pattern percentile thresholds. Both axes are classified by their PERCENT_RANK
 # within their own cohort, never by raw values, so each threshold means a knowable

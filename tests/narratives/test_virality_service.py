@@ -98,6 +98,12 @@ def _accel_row(
     cur_comments: float | None = None,
     prev_likes: float = 10.0,
     prev_comments: float = 2.0,
+    panel_prev_views: float | None = None,
+    panel_cur_views: float | None = None,
+    panel_prev_likes: float | None = None,
+    panel_cur_likes: float | None = None,
+    panel_prev_comments: float | None = None,
+    panel_cur_comments: float | None = None,
 ) -> dict:
     """
     One row of get_acceleration_cohort. The repository has already done the per-day
@@ -107,6 +113,12 @@ def _accel_row(
     The current-side totals default to whatever keeps the ENGAGEMENT RATIO unchanged,
     so a test that means to vary only view growth does not silently also vary
     engagement. Pass them explicitly to move engagement on purpose.
+
+    The `panel_*` totals cover every linked video seen on both days, refreshed or not,
+    and they are what the service divides by. They default to the refreshed totals —
+    i.e. FULL COVERAGE, every video re-fetched — so a test that is not about coverage
+    reads exactly as it did when the two populations were the same one. Pass them to
+    model a narrative whose refreshed videos are a slice of the whole.
     """
     if cur_views is None:
         cur_views = baseline_views + daily_view_gain * mean_gap_days
@@ -128,6 +140,14 @@ def _accel_row(
         "cur_comments": cur_comments,
         "prev_likes": prev_likes,
         "prev_comments": prev_comments,
+        "panel_prev_views": baseline_views if panel_prev_views is None else panel_prev_views,
+        "panel_cur_views": cur_views if panel_cur_views is None else panel_cur_views,
+        "panel_prev_likes": prev_likes if panel_prev_likes is None else panel_prev_likes,
+        "panel_cur_likes": cur_likes if panel_cur_likes is None else panel_cur_likes,
+        "panel_prev_comments": (
+            prev_comments if panel_prev_comments is None else panel_prev_comments
+        ),
+        "panel_cur_comments": cur_comments if panel_cur_comments is None else panel_cur_comments,
     }
 
 
@@ -321,71 +341,90 @@ class TestCalculateAccelerationRateForDate:
 
     async def test_acceleration_normal_growth(self, narrative_service: NarrativeService):
         """
-        A narrative whose refreshed videos gained 100 views/day over a 100-view
-        baseline, and which gained one video on top of two:
+        A narrative whose panel gained 100 views/day over a 100-view baseline, and which
+        gained one video on top of two, against a flat one:
 
-            change_views       = 100 / 100        = 1.0
-            change_video_count = (3 - 2) / 2      = 0.5
-            change_engagement  = 0 (engagement ratio unchanged)
-            acceleration       = 0*0.10 + 0.5*0.35 + 1.0*0.55 = 0.725
+            change_views       = 100 / 100          = 1.0
+            change_video_count = (3 - 2) / 2        = 0.5   (recorded, not scored)
+            change_engagement  = 0 (engagement ratio unchanged, and tied with the flat)
+            acceleration       = 0*0.15 + 1*0.85    = 0.85  (top rank on views)
         """
-        inserted = await self._accel(narrative_service, [_accel_row(
+        flat = _accel_row(daily_view_gain=0.0, baseline_views=100.0)
+        grower = _accel_row(
             daily_view_gain=100.0, baseline_views=100.0,
             cur_videos=3.0, prev_videos=2.0,
             cur_views=200.0, cur_likes=20.0, cur_comments=4.0,
             prev_likes=10.0, prev_comments=2.0,
-        )])
-        _, acceleration, indicator_type, _ = inserted[0]
+        )
+        inserted = await self._accel(narrative_service, [flat, grower])
+        _, acceleration, indicator_type, meta = inserted[1]
         assert indicator_type == NarrativeAnalysisIndicatorType.ACCELERATION_RATE
-        assert acceleration == pytest.approx(0.725)
+        assert meta["change_views"] == pytest.approx(1.0)
+        assert meta["change_video_count"] == pytest.approx(0.5)
+        assert acceleration == pytest.approx(0.85)
+        assert inserted[0][1] == pytest.approx(0.0)
 
     async def test_growth_is_divided_by_the_elapsed_gap(
         self, narrative_service: NarrativeService
     ):
         """
         D4: a rate is per unit time or it is not a rate. The same total gain spread over
-        four days must rank a quarter as high as one earned in a day — before this, a
-        video ranked high for having gone *unmeasured*.
+        four days must count as a quarter of one earned in a day — before this, a video
+        ranked high for having gone *unmeasured*.
 
         The repository does the division per video; what this asserts is that the
-        service consumes an already-per-day number rather than re-deriving a total.
+        service consumes an already-per-day number rather than re-deriving a total. The
+        blended rate is a rank and cannot carry the 1:4, so the component does.
         """
-        one_day = await self._accel(narrative_service, [_accel_row(
-            daily_view_gain=100.0, baseline_views=100.0, mean_gap_days=1.0,
-        )])
-        four_days = await self._accel(narrative_service, [_accel_row(
-            daily_view_gain=25.0, baseline_views=100.0, mean_gap_days=4.0,
-        )])
-        assert one_day[0][1] == pytest.approx(0.55)
-        assert four_days[0][1] == pytest.approx(0.1375)
-        assert four_days[0][1] == pytest.approx(one_day[0][1] / 4)
+        inserted = await self._accel(narrative_service, [
+            _accel_row(daily_view_gain=100.0, baseline_views=100.0, mean_gap_days=1.0),
+            _accel_row(daily_view_gain=25.0, baseline_views=100.0, mean_gap_days=4.0),
+        ])
+        one_day, four_days = (meta for _, _, _, meta in inserted)
+        assert one_day["change_views"] == pytest.approx(1.0)
+        assert four_days["change_views"] == pytest.approx(0.25)
+        assert four_days["change_views"] == pytest.approx(one_day["change_views"] / 4)
+        assert inserted[0][1] > inserted[1][1]
 
     async def test_no_baseline_views_yields_no_view_growth(
         self, narrative_service: NarrativeService
     ):
         """A rate with no denominator is undefined, not infinite — and not 100%."""
         inserted = await self._accel(narrative_service, [_accel_row(
-            daily_view_gain=500.0, baseline_views=0.0, refreshed_videos=0,
-            cur_videos=2.0, prev_videos=2.0,
+            daily_view_gain=500.0, baseline_views=0.0, panel_prev_views=0.0,
+            refreshed_videos=0, cur_videos=2.0, prev_videos=2.0,
         )])
-        _, acceleration, _, meta = inserted[0]
+        _, _, _, meta = inserted[0]
         assert meta["change_views"] == 0.0
-        assert acceleration == pytest.approx(0.0)
 
     async def test_engagement_cannot_outweigh_views(self, narrative_service: NarrativeService):
         """
         The defect this design exists to fix: a narrative whose views grew while its
-        engagement ratio dipped must still register as growing.
+        engagement ratio dipped must still register as growing. In rank space the
+        constraint is finally exact — top views and bottom engagement scores 0.85,
+        bottom views and top engagement scores 0.15 — because the weights now describe
+        shares of influence rather than shares of whatever scale the inputs happened to
+        have.
         """
-        inserted = await self._accel(narrative_service, [_accel_row(
+        grew_engagement_fell = _accel_row(
             daily_view_gain=100.0, baseline_views=100.0,
             cur_views=200.0, cur_likes=10.0, cur_comments=2.0,   # engagement halved
             prev_likes=10.0, prev_comments=2.0,
-        )])
-        _, acceleration, _, meta = inserted[0]
-        assert meta["change_engagement"] < 0, "engagement ratio fell"
-        assert meta["change_views"] == pytest.approx(1.0)
-        assert acceleration > 0, "real view growth must survive an engagement dip"
+        )
+        flat_engagement_rose = _accel_row(
+            daily_view_gain=0.0, baseline_views=100.0,
+            cur_views=100.0, cur_likes=40.0, cur_comments=8.0,   # engagement quadrupled
+            prev_likes=10.0, prev_comments=2.0,
+        )
+        inserted = await self._accel(
+            narrative_service, [grew_engagement_fell, flat_engagement_rose]
+        )
+        (_, grower_rate, _, grower_meta), (_, other_rate, _, _) = inserted
+        assert grower_meta["change_engagement"] < 0, "engagement ratio fell"
+        assert grower_meta["change_views"] == pytest.approx(1.0)
+        assert grower_rate == pytest.approx(0.85)
+        assert other_rate == pytest.approx(0.15)
+        assert grower_rate > other_rate, "real view growth must survive an engagement dip"
 
     async def test_flat_narrative_stays_in_the_cohort_at_zero(
         self, narrative_service: NarrativeService
@@ -402,12 +441,22 @@ class TestCalculateAccelerationRateForDate:
         assert len(inserted) == 1
         assert inserted[0][1] == pytest.approx(0.0)
 
-    async def test_decline_is_floored_at_zero(self, narrative_service: NarrativeService):
-        """A shrinking narrative is not 'negatively accelerating', it is not surging."""
-        inserted = await self._accel(narrative_service, [_accel_row(
-            daily_view_gain=-500.0, baseline_views=1000.0,
-        )])
-        assert inserted[0][1] == pytest.approx(0.0)
+    async def test_decline_ranks_below_flat_rather_than_being_floored(
+        self, narrative_service: NarrativeService
+    ):
+        """
+        The max(0.0, ...) floor is gone with raw blending, and with it the defect its own
+        comment described: it merged "shrinking" with "genuinely flat", which cost the
+        `consolidated` label its meaning. A decliner now ranks strictly below a flat
+        narrative on the component it declined in.
+        """
+        inserted = await self._accel(narrative_service, [
+            _accel_row(daily_view_gain=-500.0, baseline_views=1000.0),
+            _accel_row(daily_view_gain=0.0, baseline_views=1000.0),
+            _accel_row(daily_view_gain=500.0, baseline_views=1000.0),
+        ])
+        decliner, flat, grower = (rate for _, rate, _, _ in inserted)
+        assert decliner < flat < grower
 
     async def test_there_is_no_magnitude_cap(self, narrative_service: NarrativeService):
         """
@@ -415,13 +464,124 @@ class TestCalculateAccelerationRateForDate:
         normalisation plus ranking removes the need for a magic clamp, and the clamp
         cost real signal: everything above it was tied.
         """
-        inserted = await self._accel(narrative_service, [_accel_row(
-            daily_view_gain=10_000.0, baseline_views=100.0,   # 100x in a day
-            cur_videos=2.0, prev_videos=2.0,
-        )])
-        _, acceleration, _, meta = inserted[0]
+        inserted = await self._accel(narrative_service, [
+            _accel_row(daily_view_gain=10_000.0, baseline_views=100.0),   # 100x in a day
+            _accel_row(daily_view_gain=100.0, baseline_views=100.0),
+        ])
+        _, _, _, meta = inserted[0]
         assert meta["change_views"] == pytest.approx(100.0)
-        assert acceleration == pytest.approx(55.0)
+        assert inserted[0][1] > inserted[1][1]
+
+    async def test_denominators_are_the_panel_not_the_refreshed_slice(
+        self, narrative_service: NarrativeService
+    ):
+        """
+        Narrative 887c8e30 on 2026-08-12: 2 of 63 videos refreshed, those two holding
+        64,583 of the narrative's 10,490,748 views and gaining 33,971 in a day. Divided
+        by their own baseline that reads +53% and headlines a panel next to a chart that
+        visibly did not move; divided by the panel it reads +0.32%, which is what the
+        chart shows.
+        """
+        inserted = await self._accel(narrative_service, [_accel_row(
+            refreshed_videos=2, cur_videos=63.0, prev_videos=63.0,
+            daily_view_gain=33_971.0, baseline_views=64_583.0,
+            cur_views=98_554.0,
+            panel_prev_views=10_456_777.0, panel_cur_views=10_490_748.0,
+        )])
+        _, _, _, meta = inserted[0]
+        assert meta["change_views"] == pytest.approx(0.00325, abs=1e-5)
+        assert meta["coverage"] == pytest.approx(0.00618, abs=1e-5)
+
+    async def test_engagement_uses_the_panel_on_both_sides(
+        self, narrative_service: NarrativeService
+    ):
+        """
+        The trap that makes a half-done version of this change worse than none: a panel
+        denominator against a refreshed-subset numerator inflates the engagement ratio by
+        1/coverage. At 887c8e30's 0.62% that turns a real +11% into roughly +180, and at
+        a 0.10 weight it would still lead the axis. Both sides must be the panel.
+        """
+        inserted = await self._accel(narrative_service, [_accel_row(
+            refreshed_videos=2, cur_videos=63.0, prev_videos=63.0,
+            daily_view_gain=33_971.0, baseline_views=64_583.0,
+            cur_views=98_554.0, cur_likes=9_000.0, cur_comments=200.0,
+            prev_likes=6_000.0, prev_comments=120.0,
+            panel_prev_views=10_456_777.0, panel_cur_views=10_490_748.0,
+            panel_prev_likes=600_000.0, panel_prev_comments=12_000.0,
+            panel_cur_likes=603_000.0, panel_cur_comments=12_080.0,
+        )])
+        _, _, _, meta = inserted[0]
+        assert abs(meta["change_engagement"]) < 0.05, (
+            "an engagement change of the order of the panel's own movement, not 1/coverage of it"
+        )
+
+    async def test_video_count_is_reported_but_not_scored(
+        self, narrative_service: NarrativeService
+    ):
+        """
+        The video-volume term was removed on 2026-08-13: linking more videos is the
+        scraper's progress, not the narrative's. The ratio survives in the metadata
+        because "2 → 3 videos" is worth showing a reader — with no floor, since nothing
+        ranks on it — but it buys no rank and gets no percentile of its own.
+        """
+        inserted = await self._accel(narrative_service, [
+            _accel_row(cur_videos=3.0, prev_videos=2.0),
+            _accel_row(cur_videos=201.0, prev_videos=200.0),
+        ])
+        small, large = (meta for _, _, _, meta in inserted)
+        assert small["change_video_count"] == pytest.approx(0.5)
+        assert large["change_video_count"] == pytest.approx(0.005)
+        assert "video_count_percentile" not in small
+        assert "video_volume_weight" not in small
+        # Both were flat on views and engagement, so both sit at the bottom together
+        # however many videos either of them gained.
+        assert [rate for _, rate, _, _ in inserted] == pytest.approx([0.0, 0.0])
+
+    async def test_video_growth_alone_earns_nothing(self, narrative_service: NarrativeService):
+        """
+        Narrative 7f0fa45f, the case that started this: 2 linked videos became 3, nothing
+        was re-fetched, and it ranked in the top 3.5% of the cohort. Under a rate built
+        only from what was measured, a narrative that gained videos and no observed views
+        ranks at the bottom — where the evidence puts it — and the badge gate becomes a
+        second line of defence rather than the only one.
+        """
+        enormous_video_growth = _accel_row(
+            daily_view_gain=0.0, baseline_views=100.0,
+            cur_videos=1_000.0, prev_videos=2.0,
+        )
+        modest_view_growth = _accel_row(
+            daily_view_gain=1.0, baseline_views=100.0,
+            cur_videos=2.0, prev_videos=2.0,
+        )
+        inserted = await self._accel(
+            narrative_service, [enormous_video_growth, modest_view_growth]
+        )
+        video_led, views_led = (rate for _, rate, _, _ in inserted)
+        # Engagement is a rounding artefact of the fixture's derived totals here, so it
+        # is left free: whichever row takes it, 0.15 alone still loses to 0.85.
+        assert video_led <= 0.15
+        assert views_led >= 0.85
+        assert views_led > video_led
+
+    async def test_the_metadata_carries_the_ranks_and_the_coverage(
+        self, narrative_service: NarrativeService
+    ):
+        """
+        The rank is what the badge read; the raw component is what the panel can show as
+        a growth figure; the coverage is what tells a reader how much of the narrative
+        either of them saw. All three have to survive into the row.
+        """
+        inserted = await self._accel(narrative_service, [
+            _accel_row(daily_view_gain=0.0, baseline_views=100.0),
+            _accel_row(daily_view_gain=100.0, baseline_views=100.0, refreshed_videos=2),
+        ])
+        _, _, _, meta = inserted[1]
+        assert meta["views_percentile"] == pytest.approx(1.0)
+        assert meta["engagement_percentile"] == pytest.approx(0.0)
+        assert meta["change_views"] == pytest.approx(1.0)
+        assert meta["coverage"] == pytest.approx(1.0)
+        assert meta["refreshed_videos"] == 2
+        assert meta["panel_baseline_views"] == pytest.approx(100.0)
 
     async def test_the_cohort_is_asked_for_by_date_alone(
         self, narrative_service: NarrativeService
@@ -881,6 +1041,53 @@ class TestGetNarrativeAnalysisIndicators:
         assert response.acceleration_rate.metadata.percentile == pytest.approx(0.91)
         assert response.acceleration_rate.metadata.refreshed_videos == 4
         assert response.acceleration_rate.metadata.mean_gap_days == pytest.approx(1.5)
+
+    async def test_coverage_and_component_ranks_reach_the_consumer(
+        self, narrative_service: NarrativeService
+    ):
+        """
+        The same failure mode as the percentile above: a field the pipeline writes and
+        the model does not declare is silently dropped by pydantic, so the panel cannot
+        show it. `coverage` is the one a reader most needs — it says how much of the
+        narrative the rate actually saw — and the panel cannot render "2 → 3 videos"
+        without the counts either.
+        """
+        rows = self._rows(uuid.uuid4(), with_acceleration=True)
+        rows[-1]["metadata"].update({
+            "views_percentile": 0.88,
+            "engagement_percentile": 0.42,
+            "coverage": 0.0062,
+            "cur_videos": 63.0,
+            "prev_videos": 63.0,
+            "panel_baseline_views": 10_456_777.0,
+            "refreshed_baseline_views": 64_583.0,
+        })
+        response = await self._get(narrative_service, rows)
+
+        metadata = response.acceleration_rate.metadata
+        assert metadata.views_percentile == pytest.approx(0.88)
+        assert metadata.engagement_percentile == pytest.approx(0.42)
+        assert metadata.coverage == pytest.approx(0.0062)
+        assert metadata.cur_videos == pytest.approx(63.0)
+        assert metadata.panel_baseline_views == pytest.approx(10_456_777.0)
+
+    async def test_a_row_from_the_old_three_component_rate_still_parses(
+        self, narrative_service: NarrativeService
+    ):
+        """
+        The endpoint serves the most recent row per type with no recency bound, so rows
+        written before the video-volume term was removed are still returned for a long
+        time. They carry `video_volume_weight`, which the model no longer declares, and
+        they lack everything added since — neither may raise.
+        """
+        response = await self._get(
+            narrative_service, self._rows(uuid.uuid4(), with_acceleration=True)
+        )
+
+        metadata = response.acceleration_rate.metadata
+        assert metadata.change_video_count == pytest.approx(0.5)
+        assert metadata.coverage is None
+        assert metadata.views_percentile is None
 
     async def test_composite_is_returned_when_the_narrative_was_not_visited(
         self, narrative_service: NarrativeService
