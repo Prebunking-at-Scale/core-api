@@ -664,7 +664,9 @@ class NarrativeService:
             await repo.bulk_insert_narrative_analysis_indicators(records, calc_date=calc_date)
 
     @staticmethod
-    def _classify(composite: float, acceleration: float) -> NarrativeSpreadPattern | None:
+    def _classify(
+        composite: float, acceleration: float, views_measured: bool
+    ) -> NarrativeSpreadPattern | None:
         """
         Place a narrative on the percentile plane. Returns None for the no-badge region.
 
@@ -681,8 +683,29 @@ class NarrativeService:
         first. Every boundary compares one axis to a constant on that same axis, never
         to the other axis's percentile, which is what lets the two axes rank over
         different cohorts without needing a shared denominator.
+
+        `views_measured` is NOT a third boundary — it is an evidence precondition on the
+        strongest label, and it leaves the geometry above untouched. It was added when a
+        narrative whose scraper footprint went from 2 linked videos to 3 scored
+        0.35 * 0.5 = 0.175 and ranked in the top 3.5% of the 2026-08-12 cohort with no
+        view measurement behind it at all; the video-volume term that made that possible
+        has since been removed from the rate entirely (config.py).
+
+        The gate outlived that term, because removing it does not make a zero-coverage
+        narrative measurable — it only stops it from ranking high. A narrative with
+        nothing re-fetched now sits at the bottom of the views component along with
+        everything else that did not move, which is a tie between "flat" and "unseen"
+        that the rate cannot break. `viral` is the one label asserting a narrative is
+        spreading *now*, so it is the one that must be paid for with an observation:
+        at least one video re-fetched inside the window, i.e. `refreshed_videos > 0`.
+
+        The other three labels do not need the gate. `consolidated` and `trending` claim
+        no more than the rate can support, and `early_surge` sits under the composite
+        ceiling where the cost of a false positive is small. A blocked `viral` falls
+        through to `trending`, which is the same claim minus the part we could not
+        evidence, rather than to no badge.
         """
-        if composite >= SPREAD_COMPOSITE_HI and acceleration >= SPREAD_ACCEL_HI:
+        if composite >= SPREAD_COMPOSITE_HI and acceleration >= SPREAD_ACCEL_HI and views_measured:
             return NarrativeSpreadPattern.VIRAL
         if composite <= SPREAD_COMPOSITE_LO and acceleration >= SPREAD_ACCEL_MID:
             return NarrativeSpreadPattern.EARLY_SURGE
@@ -698,6 +721,7 @@ class NarrativeService:
         result in the spread_pattern column.
 
             viral         composite >= 0.80  and  acceleration >= 0.80
+                          and at least one video actually re-fetched in the window
             early_surge   composite <= 0.40  and  acceleration >= 0.50
             consolidated  composite >= 0.50  and  acceleration <= 0.40
             trending      composite >= 0.40  and  acceleration >= 0.40
@@ -737,8 +761,14 @@ class NarrativeService:
                 if composite is None or acceleration is None:
                     continue
 
+                # Absent key means a row written before the redesign, which recorded no
+                # coverage at all. Unknown coverage is not evidence of coverage, so it
+                # reads as unmeasured and the row cannot reach `viral` — the same C1
+                # rule the rest of this method follows.
+                refreshed_videos = acceleration_indicator["metadata"].get("refreshed_videos") or 0
+
                 scored.append(narrative_id)
-                pattern = self._classify(composite, acceleration)
+                pattern = self._classify(composite, acceleration, refreshed_videos > 0)
                 if pattern is not None:
                     badged.append((narrative_id, pattern))
 
