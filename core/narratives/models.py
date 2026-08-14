@@ -199,17 +199,19 @@ class AccelerationRateMetadata(BaseModel):
     not measure today is uncomputable rather than zero (D0/D3). The two percentiles are
     therefore never comparable to each other, only each to a constant on its own axis.
 
-    `refreshed_videos`, `coverage` and `mean_gap_days` describe how much of the narrative
-    was actually re-measured, which is what tells a reader how much weight the rate
-    deserves. `coverage` is the share of the narrative's panel views that were re-fetched:
-    the rate is measured over the whole panel with unmeasured videos held flat, so a low
-    coverage means the number is a lower bound rather than a reading.
+    `refreshed_videos`, `new_videos`, `coverage` and `mean_gap_days` describe the evidence
+    behind the rate, which is what tells a reader how much weight it deserves. The rate
+    compares two narrative-level states, so it moves when a video is re-fetched OR when a
+    video is linked to the narrative and arrives with its views; `coverage` is the share
+    of *yesterday's* views that were re-fetched and says nothing about arrivals, so a
+    narrative can be at zero coverage and still have grown.
 
-    `change_video_count` and the raw counts are reported, never ranked — the video-volume
-    term was removed from the rate on 2026-08-13 (see config.py). Every field below that
-    the rate no longer uses is optional, because rows written by earlier versions of the
-    pipeline are still served: the endpoint returns the most recent row per type with no
-    recency bound.
+    The video-volume term left the rate on 2026-08-13 and returned at 0.10 on 2026-08-14,
+    once newly linked videos began contributing their views to `change_views` (see
+    config.py). Rows written in between carry no `video_volume_weight`, which is why it is
+    optional here — as is everything else the rate has gained or lost, since the endpoint
+    returns the most recent row per type with no recency bound and therefore still serves
+    rows from every earlier version of the pipeline.
     """
 
     change_engagement: float
@@ -217,16 +219,21 @@ class AccelerationRateMetadata(BaseModel):
     change_views: float
     engagement_weight: float
     views_weight: float
+    video_volume_weight: float | None = None
     percentile: float | None = None
     views_percentile: float | None = None
+    video_count_percentile: float | None = None
     engagement_percentile: float | None = None
     refreshed_videos: int | None = None
+    new_videos: int | None = None
+    new_video_views: float | None = None
+    refreshed_view_gain: float | None = None
     mean_gap_days: float | None = None
     coverage: float | None = None
-    panel_videos: int | None = None
     cur_videos: float | None = None
     prev_videos: float | None = None
-    panel_baseline_views: float | None = None
+    prev_views_total: float | None = None
+    cur_views_total: float | None = None
     refreshed_baseline_views: float | None = None
 
 

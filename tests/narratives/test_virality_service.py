@@ -98,35 +98,60 @@ def _accel_row(
     cur_comments: float | None = None,
     prev_likes: float = 10.0,
     prev_comments: float = 2.0,
-    panel_prev_views: float | None = None,
-    panel_cur_views: float | None = None,
-    panel_prev_likes: float | None = None,
-    panel_cur_likes: float | None = None,
-    panel_prev_comments: float | None = None,
-    panel_cur_comments: float | None = None,
+    new_videos: int = 0,
+    new_video_views: float = 0.0,
+    prev_views_total: float | None = None,
+    cur_views_total: float | None = None,
+    prev_likes_total: float | None = None,
+    cur_likes_total: float | None = None,
+    prev_comments_total: float | None = None,
+    cur_comments_total: float | None = None,
 ) -> dict:
     """
-    One row of get_acceleration_cohort. The repository has already done the per-day
-    division: `daily_view_gain` is the sum of each video's gain divided by that video's
-    own elapsed gap, and `baseline_views` is the sum of the same videos' baselines.
+    One row of get_acceleration_cohort.
 
-    The current-side totals default to whatever keeps the ENGAGEMENT RATIO unchanged,
-    so a test that means to vary only view growth does not silently also vary
-    engagement. Pass them explicitly to move engagement on purpose.
+    Views growth reaches the service as two ALREADY-PER-DAY halves — `daily_view_gain`,
+    the refreshed videos' gains each divided by that video's own snapshot gap, and
+    `new_video_views`, the views carried in by videos linked since yesterday — over the
+    narrative's whole previous state:
 
-    The `panel_*` totals cover every linked video seen on both days, refreshed or not,
-    and they are what the service divides by. They default to the refreshed totals —
-    i.e. FULL COVERAGE, every video re-fetched — so a test that is not about coverage
-    reads exactly as it did when the two populations were the same one. Pass them to
-    model a narrative whose refreshed videos are a slice of the whole.
+        change_views = (daily_view_gain + new_video_views) / prev_views_total
+
+    `prev_views_total` defaults to `baseline_views`, i.e. a narrative whose whole
+    footprint was re-fetched, which is how these tests were originally written and keeps
+    their arithmetic intact. Pass it to model partial coverage: a narrative where the
+    refreshed videos are a slice of a much larger state.
+
+    The `*_total` fields are the two states the ENGAGEMENT ratio compares, and they may
+    cover different sets of videos. The current-side ones default to whatever keeps that
+    ratio unchanged, so a test that means to vary only view growth does not silently also
+    vary engagement. Pass them explicitly to move engagement on purpose.
     """
     if cur_views is None:
         cur_views = baseline_views + daily_view_gain * mean_gap_days
+    if prev_views_total is None:
+        prev_views_total = baseline_views
+    if cur_views_total is None:
+        cur_views_total = (
+            prev_views_total + daily_view_gain * (mean_gap_days or 1.0) + new_video_views
+        )
+    if prev_likes_total is None:
+        prev_likes_total = prev_likes
+    if prev_comments_total is None:
+        prev_comments_total = prev_comments
+
     ratio = cur_views / baseline_views if baseline_views > 0 else 1.0
     if cur_likes is None:
         cur_likes = prev_likes * ratio
     if cur_comments is None:
         cur_comments = prev_comments * ratio
+
+    total_ratio = cur_views_total / prev_views_total if prev_views_total > 0 else 1.0
+    if cur_likes_total is None:
+        cur_likes_total = prev_likes_total * total_ratio
+    if cur_comments_total is None:
+        cur_comments_total = prev_comments_total * total_ratio
+
     return {
         "narrative_id": narrative_id or uuid.uuid4(),
         "cur_videos": cur_videos,
@@ -140,14 +165,14 @@ def _accel_row(
         "cur_comments": cur_comments,
         "prev_likes": prev_likes,
         "prev_comments": prev_comments,
-        "panel_prev_views": baseline_views if panel_prev_views is None else panel_prev_views,
-        "panel_cur_views": cur_views if panel_cur_views is None else panel_cur_views,
-        "panel_prev_likes": prev_likes if panel_prev_likes is None else panel_prev_likes,
-        "panel_cur_likes": cur_likes if panel_cur_likes is None else panel_cur_likes,
-        "panel_prev_comments": (
-            prev_comments if panel_prev_comments is None else panel_prev_comments
-        ),
-        "panel_cur_comments": cur_comments if panel_cur_comments is None else panel_cur_comments,
+        "new_videos": new_videos,
+        "new_video_views": new_video_views,
+        "prev_views_total": prev_views_total,
+        "cur_views_total": cur_views_total,
+        "prev_likes_total": prev_likes_total,
+        "cur_likes_total": cur_likes_total,
+        "prev_comments_total": prev_comments_total,
+        "cur_comments_total": cur_comments_total,
     }
 
 
@@ -391,7 +416,7 @@ class TestCalculateAccelerationRateForDate:
     ):
         """A rate with no denominator is undefined, not infinite — and not 100%."""
         inserted = await self._accel(narrative_service, [_accel_row(
-            daily_view_gain=500.0, baseline_views=0.0, panel_prev_views=0.0,
+            baseline_views=0.0, prev_views_total=0.0, cur_views_total=500.0,
             refreshed_videos=0, cur_videos=2.0, prev_videos=2.0,
         )])
         _, _, _, meta = inserted[0]
@@ -401,20 +426,21 @@ class TestCalculateAccelerationRateForDate:
         """
         The defect this design exists to fix: a narrative whose views grew while its
         engagement ratio dipped must still register as growing. In rank space the
-        constraint is finally exact — top views and bottom engagement scores 0.85,
-        bottom views and top engagement scores 0.15 — because the weights now describe
-        shares of influence rather than shares of whatever scale the inputs happened to
-        have.
+        constraint is exact — top views and bottom engagement scores 0.75, bottom views
+        and top engagement scores 0.15 — because the weights describe shares of influence
+        rather than shares of whatever scale the inputs happened to have. Neither row
+        gains a video, so the video component ties at the bottom for both and this is a
+        clean comparison of the other two.
         """
         grew_engagement_fell = _accel_row(
             daily_view_gain=100.0, baseline_views=100.0,
-            cur_views=200.0, cur_likes=10.0, cur_comments=2.0,   # engagement halved
-            prev_likes=10.0, prev_comments=2.0,
+            prev_likes_total=10.0, prev_comments_total=2.0,
+            cur_likes_total=10.0, cur_comments_total=2.0,   # engagement ratio halved
         )
         flat_engagement_rose = _accel_row(
             daily_view_gain=0.0, baseline_views=100.0,
-            cur_views=100.0, cur_likes=40.0, cur_comments=8.0,   # engagement quadrupled
-            prev_likes=10.0, prev_comments=2.0,
+            prev_likes_total=10.0, prev_comments_total=2.0,
+            cur_likes_total=40.0, cur_comments_total=8.0,   # engagement quadrupled
         )
         inserted = await self._accel(
             narrative_service, [grew_engagement_fell, flat_engagement_rose]
@@ -422,7 +448,7 @@ class TestCalculateAccelerationRateForDate:
         (_, grower_rate, _, grower_meta), (_, other_rate, _, _) = inserted
         assert grower_meta["change_engagement"] < 0, "engagement ratio fell"
         assert grower_meta["change_views"] == pytest.approx(1.0)
-        assert grower_rate == pytest.approx(0.85)
+        assert grower_rate == pytest.approx(0.75)
         assert other_rate == pytest.approx(0.15)
         assert grower_rate > other_rate, "real view growth must survive an engagement dip"
 
@@ -472,57 +498,82 @@ class TestCalculateAccelerationRateForDate:
         assert meta["change_views"] == pytest.approx(100.0)
         assert inserted[0][1] > inserted[1][1]
 
-    async def test_denominators_are_the_panel_not_the_refreshed_slice(
+    async def test_the_rate_is_the_whole_state_not_the_refreshed_slice(
         self, narrative_service: NarrativeService
     ):
         """
         Narrative 887c8e30 on 2026-08-12: 2 of 63 videos refreshed, those two holding
         64,583 of the narrative's 10,490,748 views and gaining 33,971 in a day. Divided
         by their own baseline that reads +53% and headlines a panel next to a chart that
-        visibly did not move; divided by the panel it reads +0.32%, which is what the
-        chart shows.
+        visibly did not move; divided by the whole previous state it reads +0.32%, which
+        is what the chart shows.
         """
         inserted = await self._accel(narrative_service, [_accel_row(
             refreshed_videos=2, cur_videos=63.0, prev_videos=63.0,
             daily_view_gain=33_971.0, baseline_views=64_583.0,
-            cur_views=98_554.0,
-            panel_prev_views=10_456_777.0, panel_cur_views=10_490_748.0,
+            prev_views_total=10_456_777.0,
         )])
         _, _, _, meta = inserted[0]
         assert meta["change_views"] == pytest.approx(0.00325, abs=1e-5)
         assert meta["coverage"] == pytest.approx(0.00618, abs=1e-5)
 
-    async def test_engagement_uses_the_panel_on_both_sides(
+    async def test_engagement_uses_the_whole_state_on_both_sides(
         self, narrative_service: NarrativeService
     ):
         """
-        The trap that makes a half-done version of this change worse than none: a panel
-        denominator against a refreshed-subset numerator inflates the engagement ratio by
-        1/coverage. At 887c8e30's 0.62% that turns a real +11% into roughly +180, and at
-        a 0.10 weight it would still lead the axis. Both sides must be the panel.
+        The trap that makes a half-done version of this change worse than none: a
+        whole-state denominator against a refreshed-subset numerator inflates the
+        engagement ratio by 1/coverage. At 887c8e30's 0.62% that turns a real +11% into
+        roughly +180, which would lead the axis even at a 0.15 weight. Both sides must
+        be the same state.
         """
         inserted = await self._accel(narrative_service, [_accel_row(
             refreshed_videos=2, cur_videos=63.0, prev_videos=63.0,
-            daily_view_gain=33_971.0, baseline_views=64_583.0,
-            cur_views=98_554.0, cur_likes=9_000.0, cur_comments=200.0,
-            prev_likes=6_000.0, prev_comments=120.0,
-            panel_prev_views=10_456_777.0, panel_cur_views=10_490_748.0,
-            panel_prev_likes=600_000.0, panel_prev_comments=12_000.0,
-            panel_cur_likes=603_000.0, panel_cur_comments=12_080.0,
+            baseline_views=64_583.0,
+            prev_views_total=10_456_777.0, cur_views_total=10_490_748.0,
+            prev_likes_total=600_000.0, prev_comments_total=12_000.0,
+            cur_likes_total=603_000.0, cur_comments_total=12_080.0,
         )])
         _, _, _, meta = inserted[0]
         assert abs(meta["change_engagement"]) < 0.05, (
-            "an engagement change of the order of the panel's own movement, not 1/coverage of it"
+            "an engagement change of the order of the state's own movement, not 1/coverage of it"
         )
 
-    async def test_video_count_is_reported_but_not_scored(
+    async def test_engagement_is_not_divided_by_the_elapsed_gap(
         self, narrative_service: NarrativeService
     ):
         """
-        The video-volume term was removed on 2026-08-13: linking more videos is the
-        scraper's progress, not the narrative's. The ratio survives in the metadata
-        because "2 → 3 videos" is worth showing a reader — with no floor, since nothing
-        ranks on it — but it buys no rank and gets no percentile of its own.
+        Views are divided by elapsed days and engagement is not, because the two are
+        different kinds of quantity. Views accumulate: ten days of observation contains
+        ten days of growth, and without the division the least-scraped narrative ranks
+        highest (D4). An engagement ratio does not accumulate, it drifts — a 10-day drift
+        is not ten times a 1-day drift — so dividing by the gap would shrink a real +30%
+        to +3% for precisely the narratives we measure least often.
+
+        What remains is a variance effect rather than a bias: a longer gap gives the
+        ratio more room to wander in either direction, so stale narratives sit at both
+        ends of this component's rank. Affordable at a 0.15 weight on a ranked component.
+        """
+        inserted = await self._accel(narrative_service, [_accel_row(
+            refreshed_videos=2, mean_gap_days=10.0,
+            daily_view_gain=0.0, baseline_views=1000.0, prev_views_total=1000.0,
+            cur_views_total=1000.0,
+            prev_likes_total=100.0, prev_comments_total=0.0,
+            cur_likes_total=130.0, cur_comments_total=0.0,
+        )])
+        _, _, _, meta = inserted[0]
+        assert meta["change_engagement"] == pytest.approx(0.30), "not 0.03"
+        # Still reported, because it says how far apart the two observations were.
+        assert meta["mean_gap_days"] == pytest.approx(10.0)
+
+    async def test_video_count_is_ranked_never_taken_raw(
+        self, narrative_service: NarrativeService
+    ):
+        """
+        The component is unnormalised — one discovered video is +50% on a 2-video
+        narrative and +0.5% on a 200-video one — so the raw values are 100x apart. Only
+        their ORDER survives into the rate: the smaller footprint takes the top rank and
+        the whole term is worth 0.10, not 100x anything.
         """
         inserted = await self._accel(narrative_service, [
             _accel_row(cur_videos=3.0, prev_videos=2.0),
@@ -531,19 +582,75 @@ class TestCalculateAccelerationRateForDate:
         small, large = (meta for _, _, _, meta in inserted)
         assert small["change_video_count"] == pytest.approx(0.5)
         assert large["change_video_count"] == pytest.approx(0.005)
-        assert "video_count_percentile" not in small
-        assert "video_volume_weight" not in small
-        # Both were flat on views and engagement, so both sit at the bottom together
-        # however many videos either of them gained.
-        assert [rate for _, rate, _, _ in inserted] == pytest.approx([0.0, 0.0])
+        assert small["video_count_percentile"] == pytest.approx(1.0)
+        assert large["video_count_percentile"] == pytest.approx(0.0)
+        # Flat on views and engagement, so the video term is all either of them has.
+        assert [rate for _, rate, _, _ in inserted] == pytest.approx([0.10, 0.0])
 
-    async def test_video_growth_alone_earns_nothing(self, narrative_service: NarrativeService):
+    async def test_a_new_video_is_growth(self, narrative_service: NarrativeService):
         """
-        Narrative 7f0fa45f, the case that started this: 2 linked videos became 3, nothing
-        was re-fetched, and it ranked in the top 3.5% of the cohort. Under a rate built
-        only from what was measured, a narrative that gained videos and no observed views
-        ranks at the bottom — where the evidence puts it — and the badge gate becomes a
-        second line of defence rather than the only one.
+        The signal the axis was blind to. A narrative gains a third video carrying 200
+        views on a 100-view previous state: nothing was re-fetched, so a comparison
+        restricted to videos present on both days sees exactly zero, and with the
+        video-count term gone nothing else would see it either. Compared state against
+        state it is +200%, and it outranks a narrative that did not move.
+
+        `mean_gap_days` is 0 here — no re-fetch means no gap to average — so this also
+        pins the fallback: the window is the one day between prev_date and calc_date,
+        and a zero must not divide the arrival away.
+        """
+        arrival = _accel_row(
+            refreshed_videos=0, mean_gap_days=0.0, baseline_views=0.0,
+            cur_videos=3.0, prev_videos=2.0,
+            new_videos=1, new_video_views=200.0,
+            prev_views_total=100.0,
+        )
+        flat = _accel_row(daily_view_gain=0.0, baseline_views=100.0)
+        inserted = await self._accel(narrative_service, [arrival, flat])
+        _, arrival_rate, _, meta = inserted[0]
+
+        assert meta["change_views"] == pytest.approx(2.0)
+        assert meta["new_videos"] == 1
+        assert meta["refreshed_videos"] == 0
+        # Coverage speaks only for yesterday's footprint, which nobody re-measured. A
+        # narrative can be at zero coverage and still have grown, and this is that case.
+        assert meta["coverage"] == pytest.approx(0.0)
+        assert arrival_rate > inserted[1][1]
+
+    async def test_an_arrival_is_not_divided_by_the_refreshed_videos_gap(
+        self, narrative_service: NarrativeService
+    ):
+        """
+        The two halves of the numerator are normalised differently on purpose. A
+        refreshed video's gain is divided by its own snapshot gap, because that is how
+        long the gain took. An arrival has no earlier snapshot to date it from, and the
+        only window it can have arrived in is the single day between prev_date and
+        calc_date — so it is already a per-day quantity and nothing divides it.
+
+        Here the refreshed videos average a ten-day gap. Applying that gap to the arrival
+        as well would report 0.06 instead of 0.51, understating a narrative purely
+        because its *other* videos are scraped infrequently.
+        """
+        inserted = await self._accel(narrative_service, [_accel_row(
+            refreshed_videos=3, mean_gap_days=10.0,
+            daily_view_gain=10.0, prev_views_total=1000.0, baseline_views=1000.0,
+            cur_videos=4.0, prev_videos=3.0,
+            new_videos=1, new_video_views=500.0,
+        )])
+        _, _, _, meta = inserted[0]
+        assert meta["change_views"] == pytest.approx(0.51)
+        assert meta["new_video_views"] == pytest.approx(500.0)
+        assert meta["refreshed_view_gain"] == pytest.approx(10.0)
+
+    async def test_videos_that_bring_no_views_cannot_outrank_views(
+        self, narrative_service: NarrativeService
+    ):
+        """
+        Narrative 7f0fa45f's case: 2 linked videos became 3 and it ranked in the top 3.5%
+        of the cohort on the count alone. The component is back at 0.10, so gaining videos
+        is worth a nudge — but an unbeatable lead on it (998 videos gained, carrying no
+        views between them) must still lose to modest, real view growth. That ordering is
+        what the weights exist to guarantee, and it is why 0.10 is a ceiling.
         """
         enormous_video_growth = _accel_row(
             daily_view_gain=0.0, baseline_views=100.0,
@@ -557,10 +664,10 @@ class TestCalculateAccelerationRateForDate:
             narrative_service, [enormous_video_growth, modest_view_growth]
         )
         video_led, views_led = (rate for _, rate, _, _ in inserted)
-        # Engagement is a rounding artefact of the fixture's derived totals here, so it
-        # is left free: whichever row takes it, 0.15 alone still loses to 0.85.
-        assert video_led <= 0.15
-        assert views_led >= 0.85
+        # Engagement is a rounding artefact of the fixture's derived totals here, so it is
+        # left free: whichever row takes it, 0.10 + 0.15 still loses to 0.75.
+        assert video_led <= 0.10 + 0.15
+        assert views_led >= 0.75
         assert views_led > video_led
 
     async def test_the_metadata_carries_the_ranks_and_the_coverage(
@@ -581,7 +688,8 @@ class TestCalculateAccelerationRateForDate:
         assert meta["change_views"] == pytest.approx(1.0)
         assert meta["coverage"] == pytest.approx(1.0)
         assert meta["refreshed_videos"] == 2
-        assert meta["panel_baseline_views"] == pytest.approx(100.0)
+        assert meta["new_videos"] == 0
+        assert meta["prev_views_total"] == pytest.approx(100.0)
 
     async def test_the_cohort_is_asked_for_by_date_alone(
         self, narrative_service: NarrativeService
@@ -1124,7 +1232,7 @@ class TestGetNarrativeAnalysisIndicators:
             "coverage": 0.0062,
             "cur_videos": 63.0,
             "prev_videos": 63.0,
-            "panel_baseline_views": 10_456_777.0,
+            "prev_views_total": 10_456_777.0,
             "refreshed_baseline_views": 64_583.0,
         })
         response = await self._get(narrative_service, rows)
@@ -1134,7 +1242,7 @@ class TestGetNarrativeAnalysisIndicators:
         assert metadata.engagement_percentile == pytest.approx(0.42)
         assert metadata.coverage == pytest.approx(0.0062)
         assert metadata.cur_videos == pytest.approx(63.0)
-        assert metadata.panel_baseline_views == pytest.approx(10_456_777.0)
+        assert metadata.prev_views_total == pytest.approx(10_456_777.0)
 
     async def test_a_row_from_the_old_three_component_rate_still_parses(
         self, narrative_service: NarrativeService

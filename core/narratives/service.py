@@ -6,6 +6,7 @@ from uuid import UUID
 
 from core.config import (
     ACCELERATION_ENGAGEMENT_WEIGHT,
+    ACCELERATION_VIDEO_VOLUME_WEIGHT,
     ACCELERATION_VIEWS_WEIGHT,
     SPREAD_ACCEL_HI,
     SPREAD_ACCEL_LO,
@@ -561,46 +562,71 @@ class NarrativeService:
             stats_rows = await repo.get_acceleration_cohort(calc_date)
             components: list[dict[str, Any]] = []
             for row in stats_rows:
-                mean_gap = row["mean_gap_days"]
+                # The narrative's whole previous state — every linked video we had seen,
+                # not the slice that moved. Dividing by the slice is what let 2 videos of
+                # 63, holding 0.62% of a narrative's views, report +53% for the narrative.
+                prev_views = row["prev_views_total"]
+                cur_views = row["cur_views_total"]
 
-                # Denominators are the BALANCED PANEL — every linked video seen on both
-                # days — while the numerator is the movement of the refreshed ones. The
-                # result is the narrative's own daily growth with unmeasured videos held
-                # flat, which is a lower bound rather than a sample extrapolated to the
-                # whole. See get_acceleration_cohort for the measurement that forced it.
-                panel_prev_views = row["panel_prev_views"]
-                panel_cur_views = row["panel_cur_views"]
+                # Growth per day, from two sources that are each ALREADY per-day:
+                #
+                #   refreshed videos  the repository divided every video's gain by that
+                #                     video's own snapshot gap, so a video last fetched
+                #                     ten days ago contributes a tenth of its gain (D4).
+                #   arrivals          a video linked since yesterday brings its whole view
+                #                     count, and one day is the entire window it could
+                #                     have arrived in — nothing to divide.
+                #
+                # Arrivals are the only evidence a narrative spreading by spawning videos
+                # ever produces: they are absent from the previous day by definition, so
+                # any comparison restricted to videos present on both days scores it zero.
                 change_views = (
-                    row["daily_view_gain"] / panel_prev_views if panel_prev_views > 0 else 0.0
+                    (row["daily_view_gain"] + row["new_video_views"]) / prev_views
+                    if prev_views > 0 else 0.0
                 )
 
-                # Engagement: a quality modifier, not a growth term. Measured over the
-                # same panel as views, on both sides. Mixing the two populations here is
-                # the trap this rewrite exists to avoid — a panel denominator against a
-                # refreshed-subset numerator inflates the ratio by 1/coverage, which for
-                # a narrative covered at 0.62% turns a +11% engagement change into +180.
+                # Engagement: a quality modifier, not a growth term. Yesterday's ratio
+                # against today's, each over its own whole state. What must never happen
+                # is one side over the whole state and the other over the refreshed
+                # slice: that inflates the ratio by 1/coverage, and for a narrative
+                # covered at 0.62% it turns a real +11% into roughly +180.
+                #
+                # NOT divided by elapsed days, unlike views. Views accumulate — a stock,
+                # where ten days of observation contains ten days of growth, so a gap
+                # division is what stops the least-scraped narrative ranking highest. An
+                # engagement ratio does not accumulate; it drifts, and a 10-day drift is
+                # not ten times a 1-day drift (nearer √10 under a random walk, and not a
+                # function of time at all if it is stationary). Dividing by the gap
+                # shrinks a real signal by an order of magnitude for exactly the
+                # narratives we measure least often, which is a bigger error than the one
+                # it prevents. What is left is a variance effect rather than a bias: a
+                # long gap gives the ratio more room to wander, so stale narratives are
+                # over-represented at BOTH ends of this component's rank. At a 0.15
+                # weight on a ranked component that is affordable, and `coverage` tells a
+                # reader when it applies.
                 prev_engagement = (
-                    (row["panel_prev_likes"] * VIRALITY_SCORE_LIKES_WEIGHT
-                     + row["panel_prev_comments"] * VIRALITY_SCORE_COMMENTS_WEIGHT) / panel_prev_views
-                    if panel_prev_views > 0 else 0.0
+                    (row["prev_likes_total"] * VIRALITY_SCORE_LIKES_WEIGHT
+                     + row["prev_comments_total"] * VIRALITY_SCORE_COMMENTS_WEIGHT) / prev_views
+                    if prev_views > 0 else 0.0
                 )
                 cur_engagement = (
-                    (row["panel_cur_likes"] * VIRALITY_SCORE_LIKES_WEIGHT
-                     + row["panel_cur_comments"] * VIRALITY_SCORE_COMMENTS_WEIGHT) / panel_cur_views
-                    if panel_cur_views > 0 else 0.0
+                    (row["cur_likes_total"] * VIRALITY_SCORE_LIKES_WEIGHT
+                     + row["cur_comments_total"] * VIRALITY_SCORE_COMMENTS_WEIGHT) / cur_views
+                    if cur_views > 0 else 0.0
                 )
                 change_engagement = (
-                    ((cur_engagement - prev_engagement) / prev_engagement) / mean_gap
-                    if prev_engagement > 0 and mean_gap > 0 else 0.0
+                    (cur_engagement - prev_engagement) / prev_engagement
+                    if prev_engagement > 0 else 0.0
                 )
 
-                # Video count is DESCRIPTIVE ONLY — it is not a component of the rate.
-                # It measures how many videos we have linked to the narrative today
-                # against yesterday, which is the scraper's progress rather than the
-                # narrative's, and as a scored term it was the single largest source of
-                # wrong `viral` badges (see config.py for the measurements that retired
-                # it). It stays in the metadata because "2 → 3 videos" is a fact worth
-                # showing a reader beside the rate; it is simply not ranked on.
+                # Video count: the narrative's footprint in our corpus, today against
+                # yesterday. It is the weakest of the three and deliberately the lightest
+                # — unnormalised, so its size tracks how small a footprint is rather than
+                # how far a narrative spread, and zero for two thirds of the cohort, so
+                # any gain at all clears that tie block. It sits at 0.10 because the views
+                # it brought are already counted properly by `change_views`; this term
+                # only says the footprint grew, which is worth a nudge and not a verdict.
+                # See config.py for the measurements behind that ceiling.
                 prev_videos = row["prev_videos"]
                 change_video_count = (
                     (row["cur_videos"] - prev_videos) / prev_videos if prev_videos > 0 else 0.0
@@ -613,17 +639,29 @@ class NarrativeService:
                     "change_video_count": change_video_count,
                     "change_views": change_views,
                     "refreshed_videos": row["refreshed_videos"],
-                    "mean_gap_days": mean_gap,
-                    "panel_videos": prev_videos,
+                    # Videos linked since yesterday, and the views they brought with
+                    # them. Together with refreshed_videos this is the narrative's whole
+                    # evidence base for the day: either some video was re-fetched or some
+                    # video arrived, and if neither happened the two states are identical
+                    # and every component is exactly zero.
+                    "new_videos": row["new_videos"],
+                    "new_video_views": row["new_video_views"],
+                    "refreshed_view_gain": row["daily_view_gain"],
+                    # Descriptive only — nothing divides by it any more. It still says how
+                    # far apart the two observations behind the refreshed half of the
+                    # numerator were, which is worth reporting beside the coverage.
+                    "mean_gap_days": row["mean_gap_days"],
                     "cur_videos": row["cur_videos"],
                     "prev_videos": prev_videos,
-                    "panel_baseline_views": panel_prev_views,
+                    "prev_views_total": prev_views,
+                    "cur_views_total": cur_views,
                     "refreshed_baseline_views": refreshed_baseline,
-                    # How much of the narrative the day's number actually saw. The one
-                    # figure a reader needs to weigh everything above, and the one the
-                    # old formula spent without ever reporting.
+                    # How much of yesterday's footprint the day's number actually
+                    # re-measured. It does not account for arrivals, which have no
+                    # previous state to cover — a narrative can be at zero coverage and
+                    # still have moved, if what moved it was a new video.
                     "coverage": (
-                        refreshed_baseline / panel_prev_views if panel_prev_views > 0 else 0.0
+                        refreshed_baseline / prev_views if prev_views > 0 else 0.0
                     ),
                 })
 
@@ -632,15 +670,17 @@ class NarrativeService:
             # shape _attach_percentiles uses for the blended rate below.
             ranks = {
                 key: self._percent_ranks([component[key] for component in components])
-                for key in ("change_views", "change_engagement")
+                for key in ("change_views", "change_video_count", "change_engagement")
             }
 
             records: list[tuple[UUID, float, NarrativeAnalysisIndicatorType, dict[str, Any] | None]] = []
             for index, component in enumerate(components):
                 views_rank = ranks["change_views"][index]
+                video_count_rank = ranks["change_video_count"][index]
                 engagement_rank = ranks["change_engagement"][index]
                 acceleration_rate = (
                     engagement_rank * ACCELERATION_ENGAGEMENT_WEIGHT
+                    + video_count_rank * ACCELERATION_VIDEO_VOLUME_WEIGHT
                     + views_rank * ACCELERATION_VIEWS_WEIGHT
                 )
                 narrative_id = component.pop("narrative_id")
@@ -651,12 +691,13 @@ class NarrativeService:
                     {
                         **component,
                         # The raw components stay in the metadata beside their ranks: the
-                        # rank is what the badge read, the raw value is what the panel
-                        # can show a reader as a growth figure. change_video_count has a
-                        # raw value and no rank, because it is reported and not scored.
+                        # rank is what the badge read, the raw value is what the panel can
+                        # show a reader as a growth figure.
                         "views_percentile": views_rank,
+                        "video_count_percentile": video_count_rank,
                         "engagement_percentile": engagement_rank,
                         "engagement_weight": ACCELERATION_ENGAGEMENT_WEIGHT,
+                        "video_volume_weight": ACCELERATION_VIDEO_VOLUME_WEIGHT,
                         "views_weight": ACCELERATION_VIEWS_WEIGHT,
                     },
                 ))
@@ -721,7 +762,6 @@ class NarrativeService:
         result in the spread_pattern column.
 
             viral         composite >= 0.80  and  acceleration >= 0.80
-                          and at least one video actually re-fetched in the window
             early_surge   composite <= 0.40  and  acceleration >= 0.50
             consolidated  composite >= 0.50  and  acceleration <= 0.40
             trending      composite >= 0.40  and  acceleration >= 0.40
