@@ -705,9 +705,7 @@ class NarrativeService:
             await repo.bulk_insert_narrative_analysis_indicators(records, calc_date=calc_date)
 
     @staticmethod
-    def _classify(
-        composite: float, acceleration: float, views_measured: bool
-    ) -> NarrativeSpreadPattern | None:
+    def _classify(composite: float, acceleration: float) -> NarrativeSpreadPattern | None:
         """
         Place a narrative on the percentile plane. Returns None for the no-badge region.
 
@@ -725,28 +723,24 @@ class NarrativeService:
         to the other axis's percentile, which is what lets the two axes rank over
         different cohorts without needing a shared denominator.
 
-        `views_measured` is NOT a third boundary — it is an evidence precondition on the
-        strongest label, and it leaves the geometry above untouched. It was added when a
-        narrative whose scraper footprint went from 2 linked videos to 3 scored
-        0.35 * 0.5 = 0.175 and ranked in the top 3.5% of the 2026-08-12 cohort with no
-        view measurement behind it at all; the video-volume term that made that possible
-        has since been removed from the rate entirely (config.py).
+        `viral` briefly carried an evidence precondition as well — at least one video
+        re-fetched or newly linked — added on 2026-08-13 when the video-volume term could
+        carry a rank on its own and a narrative whose footprint went from 2 videos to 3
+        reached the top 3.5% of the cohort with no view measurement behind it. It was
+        removed on 2026-08-14 because the arithmetic had made it unreachable: newly linked
+        videos now contribute their views to `change_views`, and the video term fell to
+        0.10, so a narrative with nothing observed scores exactly zero on all three
+        components. Measured over the 2026-08-13 production cohort, all 8 such narratives
+        rank at 0.005 against a viral floor of 0.80. Do not reintroduce it without first
+        checking that number: a guard that cannot fire teaches the next reader that
+        something protects them here, and nothing does.
 
-        The gate outlived that term, because removing it does not make a zero-coverage
-        narrative measurable — it only stops it from ranking high. A narrative with
-        nothing re-fetched now sits at the bottom of the views component along with
-        everything else that did not move, which is a tie between "flat" and "unseen"
-        that the rate cannot break. `viral` is the one label asserting a narrative is
-        spreading *now*, so it is the one that must be paid for with an observation:
-        at least one video re-fetched inside the window, i.e. `refreshed_videos > 0`.
-
-        The other three labels do not need the gate. `consolidated` and `trending` claim
-        no more than the rate can support, and `early_surge` sits under the composite
-        ceiling where the cost of a false positive is small. A blocked `viral` falls
-        through to `trending`, which is the same claim minus the part we could not
-        evidence, rather than to no badge.
+        What that measurement does NOT settle is `consolidated`, which those narratives
+        can still reach on composite alone — "large and no longer growing" asserted about
+        something nobody looked at. The fix for that is to keep unobserved narratives out
+        of the cohort entirely, not to gate a label.
         """
-        if composite >= SPREAD_COMPOSITE_HI and acceleration >= SPREAD_ACCEL_HI and views_measured:
+        if composite >= SPREAD_COMPOSITE_HI and acceleration >= SPREAD_ACCEL_HI:
             return NarrativeSpreadPattern.VIRAL
         if composite <= SPREAD_COMPOSITE_LO and acceleration >= SPREAD_ACCEL_MID:
             return NarrativeSpreadPattern.EARLY_SURGE
@@ -801,14 +795,8 @@ class NarrativeService:
                 if composite is None or acceleration is None:
                     continue
 
-                # Absent key means a row written before the redesign, which recorded no
-                # coverage at all. Unknown coverage is not evidence of coverage, so it
-                # reads as unmeasured and the row cannot reach `viral` — the same C1
-                # rule the rest of this method follows.
-                refreshed_videos = acceleration_indicator["metadata"].get("refreshed_videos") or 0
-
                 scored.append(narrative_id)
-                pattern = self._classify(composite, acceleration, refreshed_videos > 0)
+                pattern = self._classify(composite, acceleration)
                 if pattern is not None:
                     badged.append((narrative_id, pattern))
 

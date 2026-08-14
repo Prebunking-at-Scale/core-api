@@ -718,36 +718,20 @@ class TestUpdateNarrativeSpreadPatterns:
     """
     The four labels are RECTANGLES on the percentile plane, not quadrants:
 
-        viral         composite >= 0.80  and  accel >= 0.80  and  views measured
+        viral         composite >= 0.80  and  accel >= 0.80
         early_surge   composite <= 0.40  and  accel >= 0.50
         consolidated  composite >= 0.50  and  accel <= 0.40
         trending      composite >= 0.40  and  accel >= 0.40
         (no badge)    everything else — small AND flat
-
-    `viral` carries one extra precondition that is not a boundary: at least one video
-    re-fetched inside the window. Without it the acceleration rank can come entirely
-    from the video-count term, and the label would be asserting spread we never observed.
     """
 
     @staticmethod
-    def _indicators(
-        composite: float | None,
-        acceleration: float | None,
-        refreshed_videos: int | None = 4,
-    ) -> dict:
-        """
-        Coverage defaults to measured, so every geometry test below reads as the pure
-        percentile-plane assertion it was written as. Pass 0 for a narrative whose views
-        went unmeasured, or None for a pre-redesign row that recorded no coverage key.
-        """
+    def _indicators(composite: float | None, acceleration: float | None) -> dict:
         values: dict = {}
         if composite is not None:
             values["composite_virality"] = {"value": 0.5, "metadata": {"percentile": composite}}
         if acceleration is not None:
-            metadata: dict = {"percentile": acceleration}
-            if refreshed_videos is not None:
-                metadata["refreshed_videos"] = refreshed_videos
-            values["acceleration_rate"] = {"value": 0.42, "metadata": metadata}
+            values["acceleration_rate"] = {"value": 0.42, "metadata": {"percentile": acceleration}}
         return values
 
     async def _run(self, narrative_service, indicators: dict):
@@ -761,10 +745,10 @@ class TestUpdateNarrativeSpreadPatterns:
             return [], count, mock_repo
         return mock_repo.bulk_update_narrative_spread_patterns.call_args[0][0], count, mock_repo
 
-    async def _pattern(self, narrative_service, composite, acceleration, refreshed_videos=4):
+    async def _pattern(self, narrative_service, composite, acceleration):
         nid = uuid.uuid4()
         records, _, _ = await self._run(
-            narrative_service, {nid: self._indicators(composite, acceleration, refreshed_videos)}
+            narrative_service, {nid: self._indicators(composite, acceleration)}
         )
         return records[0][1] if records else None
 
@@ -837,63 +821,15 @@ class TestUpdateNarrativeSpreadPatterns:
                 f"composite={composite} accel={acceleration}"
             )
 
-    async def test_viral_requires_a_measured_view_pair(self, narrative_service: NarrativeService):
-        """
-        The case this gate exists for: narrative 7f0fa45f on 2026-08-12 went from 2
-        linked videos to 3, scored 0.35 * 0.5 = 0.175 with change_views exactly 0 and
-        refreshed_videos 0, and that ranked in the top 3.5% of the day's cohort. Top of
-        both axes, and not one observation of a view behind it.
-        """
-        assert await self._pattern(narrative_service, 0.95, 0.95, refreshed_videos=0) == (
-            NarrativeSpreadPattern.TRENDING
-        )
-
-    async def test_a_measured_pair_still_reaches_viral(self, narrative_service: NarrativeService):
-        """The gate must be a floor on evidence, not an inversion of the region."""
-        assert await self._pattern(narrative_service, 0.95, 0.95, refreshed_videos=1) == (
-            NarrativeSpreadPattern.VIRAL
-        )
-
-    async def test_a_row_without_coverage_metadata_is_not_viral(
-        self, narrative_service: NarrativeService
-    ):
-        """
-        Pre-redesign rows carry no `refreshed_videos` key at all. Unknown coverage is not
-        evidence of coverage — absence of data must not be a signal (C1).
-        """
-        assert await self._pattern(narrative_service, 0.95, 0.95, refreshed_videos=None) == (
-            NarrativeSpreadPattern.TRENDING
-        )
-
-    async def test_the_gate_touches_no_other_label(self, narrative_service: NarrativeService):
-        """
-        `consolidated` and `trending` survive on footprint growth alone, and `early_surge`
-        is exactly the label for a small narrative gaining videos. Only `viral` asserts
-        that a narrative is spreading right now, so only `viral` has to pay for it.
-        """
-        unmeasured = {"refreshed_videos": 0}
-        for composite, acceleration, expected in [
-            (0.20, 0.90, NarrativeSpreadPattern.EARLY_SURGE),
-            (0.85, 0.05, NarrativeSpreadPattern.CONSOLIDATED),
-            (0.60, 0.60, NarrativeSpreadPattern.TRENDING),
-            (0.20, 0.20, None),
-        ]:
-            assert await self._pattern(narrative_service, composite, acceleration, 0) == expected, (
-                f"composite={composite} accel={acceleration} {unmeasured}"
-            )
-
     async def test_classifier_never_emits_a_retired_label(
         self, narrative_service: NarrativeService
     ):
         """`alert` and `watch` survive in the enum for consumers, not for the pipeline."""
         retired = {NarrativeSpreadPattern.ALERT, NarrativeSpreadPattern.WATCH, NarrativeSpreadPattern.NONE}
-        for measured in (True, False):
-            for i in range(0, 101, 5):
-                for j in range(0, 101, 5):
-                    pattern = narrative_service._classify(i / 100, j / 100, measured)
-                    assert pattern not in retired, (
-                        f"composite={i / 100} accel={j / 100} measured={measured} -> {pattern}"
-                    )
+        for i in range(0, 101, 5):
+            for j in range(0, 101, 5):
+                pattern = narrative_service._classify(i / 100, j / 100)
+                assert pattern not in retired, f"composite={i / 100} accel={j / 100} -> {pattern}"
 
     async def test_every_boundary_is_axis_aligned(self, narrative_service: NarrativeService):
         """
@@ -901,16 +837,13 @@ class TestUpdateNarrativeSpreadPatterns:
         rank over different cohorts without a shared denominator. Holding one axis
         fixed and sweeping the other must therefore produce contiguous runs of labels.
         """
-        for measured in (True, False):
-            for fixed in (0.0, 0.25, 0.5, 0.75, 1.0):
-                seen: list = []
-                for i in range(101):
-                    pattern = narrative_service._classify(fixed, i / 100, measured)
-                    if not seen or seen[-1] != pattern:
-                        seen.append(pattern)
-                assert len(seen) == len(set(seen)), (
-                    f"composite={fixed} measured={measured} revisits a label: {seen}"
-                )
+        for fixed in (0.0, 0.25, 0.5, 0.75, 1.0):
+            seen: list = []
+            for i in range(101):
+                pattern = narrative_service._classify(fixed, i / 100)
+                if not seen or seen[-1] != pattern:
+                    seen.append(pattern)
+            assert len(seen) == len(set(seen)), f"composite={fixed} revisits a label: {seen}"
 
     async def test_missing_composite_is_not_classified(self, narrative_service: NarrativeService):
         """Absence of data must not be a signal (C1)."""
