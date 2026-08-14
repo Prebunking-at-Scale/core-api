@@ -1195,6 +1195,38 @@ class TestGetNarrativeAnalysisIndicators:
         assert metadata.coverage is None
         assert metadata.views_percentile is None
 
+    async def test_an_acceleration_older_than_the_composite_is_not_served(
+        self, narrative_service: NarrativeService
+    ):
+        """
+        The response carries ONE date, taken from the composite row, so an acceleration
+        scored weeks ago would be served under today's and read as today's answer. The
+        endpoint returns the most recent row per type with no recency bound, and composite
+        is scored for every narrative while acceleration covers only the ~11% visited that
+        day — so the stale case is the common one: 21,502 of 24,086 narratives sat outside
+        the 2026-08-13 cohort, and every one of them ever scored had an old rate to serve.
+
+        Dropping it returns the same None as a narrative that was never scored, which the
+        client already reads as "not re-measured on this date".
+        """
+        rows = self._rows(uuid.uuid4(), with_acceleration=True)
+        rows[-1]["calculated_at"] = rows[0]["calculated_at"] - timedelta(days=12)
+        response = await self._get(narrative_service, rows)
+
+        assert response is not None
+        assert response.composite_virality is not None
+        assert response.acceleration_rate is None
+
+    async def test_an_acceleration_from_the_same_run_is_served(
+        self, narrative_service: NarrativeService
+    ):
+        """The bound must drop stale rows, not every row — same day is not stale."""
+        rows = self._rows(uuid.uuid4(), with_acceleration=True)
+        response = await self._get(narrative_service, rows)
+
+        assert response.acceleration_rate is not None
+        assert response.acceleration_rate.indicator_value == pytest.approx(0.41)
+
     async def test_composite_is_returned_when_the_narrative_was_not_visited(
         self, narrative_service: NarrativeService
     ):

@@ -2137,6 +2137,19 @@ class NarrativeRepository:
             LEFT JOIN prev_totals pt ON pt.narrative_id = co.narrative_id
             LEFT JOIN arrivals a     ON a.narrative_id = co.narrative_id
             WHERE co.prev_videos > 0
+              -- AND SOMETHING WAS OBSERVED. `visited` is satisfied by a video row being
+              -- touched, which is not the same as a video moving: a narrative can enter
+              -- the cohort with every snapshot unchanged and nothing newly linked, in
+              -- which case `cur` and `prev` are the same state and every component is
+              -- exactly zero. Ranked, that zero lands at the bottom of the axis and the
+              -- narrative collects `consolidated` — "large, and no longer growing" —
+              -- asserted about a narrative nobody looked at. Measured on the 2026-08-13
+              -- production cohort that was 8 narratives, 4 of them badged.
+              --
+              -- We only rank what we measured (C1), so they leave the cohort rather than
+              -- being ranked at an honest-looking zero. Downstream they have no
+              -- acceleration row, are unclassifiable, and lose the badge they held.
+              AND (COALESCE(g.refreshed_videos, 0) > 0 OR COALESCE(a.new_videos, 0) > 0)
             """,
             {"calc_date": calc_date, "prev_date": prev_date},
         )

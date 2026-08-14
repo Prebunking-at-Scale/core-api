@@ -268,6 +268,57 @@ async def test_acceleration_excludes_narratives_born_on_calc_date(conn_factory):
     assert newborn not in ids
 
 
+async def test_acceleration_excludes_the_visited_but_unobserved(conn_factory):
+    """Being visited is not the same as having moved.
+
+    `visited` is satisfied by a video row being touched — videos.updated_at stamped with
+    calc_date — which happens without any snapshot advancing. Then `cur` and `prev` are
+    the same state, every component is exactly zero, and ranked that zero sits at the
+    bottom of the axis, where a large narrative collects `consolidated`: "large, and no
+    longer growing", asserted about a narrative nobody actually observed. On the
+    2026-08-13 production cohort that was 8 narratives, 4 of them badged.
+
+    A narrative whose only evidence is an ARRIVAL stays in — the new video brings its
+    views, which is a real observation — so the predicate is refreshed OR new, never
+    refreshed alone.
+    """
+    calc_date = date(2025, 1, 5)
+    async with conn_factory() as conn:
+        cur = conn.cursor()
+        unobserved = await _make_narrative(cur)
+        arrival_only = await _make_narrative(cur)
+        refreshed = await _make_narrative(cur)
+
+        # Touched today, but its snapshot is yesterday's on both sides of the window.
+        a = await _insert_video(cur, views_by_date={"2025-01-04": 100})
+        # Nothing re-fetched, but a video was linked that we had never seen before.
+        b = await _insert_video(cur, views_by_date={"2025-01-04": 100})
+        c = await _insert_video(cur, views_by_date={"2025-01-05": 900})
+        # The ordinary case: a video actually re-measured inside the window.
+        d = await _insert_video(cur, views_by_date={"2025-01-04": 100, "2025-01-05": 150})
+
+        await _link_videos_to_narrative(cur, unobserved, [a])
+        await _link_videos_to_narrative(cur, arrival_only, [b, c])
+        await _link_videos_to_narrative(cur, refreshed, [d])
+        await cur.execute(
+            "UPDATE videos SET updated_at = %(d)s WHERE id = ANY(%(ids)s)",
+            {"d": calc_date, "ids": [a, b, c, d]},
+        )
+
+        repo = NarrativeRepository(conn.cursor())
+        rows = await repo.get_acceleration_cohort(calc_date)
+
+    ids = {r["narrative_id"] for r in rows}
+    assert unobserved not in ids
+    assert arrival_only in ids
+    assert refreshed in ids
+
+    arrival_row = next(r for r in rows if r["narrative_id"] == arrival_only)
+    assert arrival_row["refreshed_videos"] == 0
+    assert arrival_row["new_videos"] == 1
+    assert arrival_row["new_video_views"] == 900.0
+
+
 async def test_acceleration_excludes_the_unvisited(conn_factory):
     """A narrative nobody looked at on calc_date cannot have a rate computed.
 

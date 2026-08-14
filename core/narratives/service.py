@@ -911,6 +911,20 @@ class NarrativeService:
         cv = by_type[NarrativeAnalysisIndicatorType.COMPOSITE_VIRALITY]
         ar = by_type.get(NarrativeAnalysisIndicatorType.ACCELERATION_RATE)
 
+        # A rate older than the level beside it is not this narrative's rate today, and
+        # the response has no way to say so: `date` below comes from the composite row,
+        # so an acceleration scored in July would be served under today's date and read
+        # as today's answer. Composite is scored for every narrative with any stats ever
+        # and acceleration only for the ~11% visited that day, so this is the common
+        # case, not an edge: 21,502 of 24,086 narratives were outside the 2026-08-13
+        # cohort, and every one of them that was ever scored had an old rate to serve.
+        #
+        # Dropping it returns the same None a narrative that has never been scored gets,
+        # which callers already read as "not re-measured on this date" — unknown rather
+        # than zero, which is the whole of D0.
+        if ar is not None and ar["calculated_at"].date() < cv["calculated_at"].date():
+            ar = None
+
         return NarrativeAnalysisIndicatorsResponse(
             narrative_id=narrative_id,
             composite_virality=AnalysisIndicator(
