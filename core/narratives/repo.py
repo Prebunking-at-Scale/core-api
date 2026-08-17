@@ -1909,14 +1909,31 @@ class NarrativeRepository:
         having gone unmeasured. Videos are aggregated the way that avoids averaging
         ratios:
 
-            change_views = SUM(per-video daily view gain) / SUM(baseline views)
+            change_views = [ SUM(refreshed video's gain / that video's own gap)
+                             + SUM(views of videos that arrived) ]
+                           / TOTAL views yesterday
 
-        Numerator and denominator cover the same videos — the ones actually refreshed on
-        calc_date. That is deliberate but *not* free: it is unbiased if refreshed videos
-        are representative and biased upward if the scraper prioritises active ones,
-        which is the open question about revisit strategy (O5.3/O5.6, gated on O6). If
-        that turns out to prioritise active videos, the fix is to divide by every
-        video's baseline rather than only the refreshed ones — this CTE, not a rewrite.
+        The numerator is already per-day on both halves: a refreshed video's gain is
+        divided by its own snapshot gap (D4), and an arrival's views accrued inside the
+        single day between prev_date and calc_date, which is the whole window. The
+        denominator is the narrative's entire previous state, not the slice that moved.
+        The service does the division; this query supplies both halves, the previous
+        state, and the mean gap that the engagement ratio needs.
+
+        Two earlier designs are buried in that one line. It used to divide the refreshed
+        videos' gain by the refreshed videos' own baseline, which is unbiased only if
+        they are representative, and measured on 2026-08-12 they are not: median
+        coverage is 5% of a narrative's views, while the median narrative *badged viral*
+        sat at 0.74%, because a thin sample produces a large ratio and the ratio earns
+        the badge. One narrative reported +53% daily growth from 2 videos of 63 covering
+        0.62% of its views, against actual movement of +0.32%. Dividing by the whole
+        previous state fixed that (O5.3/O5.6).
+
+        It then held the video set FIXED across the two days, which zeroed every
+        narrative whose only growth was a new video — and since the video-count term was
+        removed at the same time, nothing was left to see it at all. Letting the current
+        state include arrivals restores that signal in views rather than in video counts,
+        which is the unit the axis is denominated in.
 
         A baseline's AGE does not disqualify it. Growth per day is the whole point of
         the per-day division: a video last seen twenty days ago contributes its twenty
@@ -1979,13 +1996,16 @@ class NarrativeRepository:
                 WHERE vs.recorded_at::date <= %(prev_date)s
                 ORDER BY l.narrative_id, l.video_id, vs.recorded_at DESC
             ),
-            -- Videos actually re-fetched in the window: their latest snapshot as of
-            -- calc_date is newer than their latest as of prev_date. Everything else
-            -- carried forward unchanged and contributes no growth.
-            refreshed AS (
+            -- The BALANCED PANEL: every linked video observed on both days. Videos that
+            -- were not re-fetched carry forward, so they sit on both sides identically
+            -- and move no ratio — they only enlarge the denominator, which is the point.
+            -- Videos with no prev-side observation at all are excluded: they are brand
+            -- new, and a growing footprint is what the video-count term measures.
+            panel AS (
                 SELECT
                     c.narrative_id,
                     c.video_id,
+                    (c.recorded_on > p.recorded_on)        AS was_refreshed,
                     (c.recorded_on - p.recorded_on)::float AS gap_days,
                     c.views    AS cur_views,
                     p.views    AS prev_views,
@@ -1995,7 +2015,62 @@ class NarrativeRepository:
                     p.comments AS prev_comments
                 FROM cur c
                 JOIN prev p ON p.narrative_id = c.narrative_id AND p.video_id = c.video_id
-                WHERE c.recorded_on > p.recorded_on
+            ),
+            -- Videos actually re-fetched in the window: their latest snapshot as of
+            -- calc_date is newer than their latest as of prev_date. They supply the
+            -- NUMERATOR — all observed movement comes from them — while the panel above
+            -- supplies the denominator.
+            refreshed AS (
+                SELECT * FROM panel WHERE was_refreshed
+            ),
+            -- Narrative-level state on each day, over EVERY linked video and not only
+            -- the ones seen on both. `prev` is a subset of `cur` by construction — a
+            -- video with a snapshot on or before prev_date has one on or before
+            -- calc_date — so the difference between these two aggregates is exactly the
+            -- movement of the refreshed videos PLUS the arrival of videos that were not
+            -- linked to the narrative yesterday.
+            --
+            -- Counting arrivals as growth is deliberate. A narrative that spreads by
+            -- spawning new videos has no other evidence of it: those videos are absent
+            -- from the previous day by definition, so any comparison restricted to
+            -- videos present on both days scores it at exactly zero. The cost is that a
+            -- video newly *discovered* is indistinguishable from a video newly
+            -- *uploaded* — an old video with a large lifetime view count arrives as one
+            -- window's growth. That is an accepted trade rather than an oversight
+            -- (2026-08-14): new to us is treated as new to the world.
+            cur_totals AS (
+                SELECT
+                    narrative_id,
+                    SUM(views)::float    AS cur_views_total,
+                    SUM(likes)::float    AS cur_likes_total,
+                    SUM(comments)::float AS cur_comments_total
+                FROM cur
+                GROUP BY narrative_id
+            ),
+            -- Videos linked to the narrative since prev_date: present in `cur`, absent
+            -- from `prev`. Their views are growth, and they accrued inside the one-day
+            -- window — there is no earlier observation to date them from, and the window
+            -- between prev_date and calc_date is exactly one day. So unlike a refreshed
+            -- video, whose gain is divided by its own snapshot gap, an arrival's views
+            -- are already a per-day quantity.
+            arrivals AS (
+                SELECT
+                    c.narrative_id,
+                    COUNT(*)::int      AS new_videos,
+                    SUM(c.views)::float AS new_video_views
+                FROM cur c
+                LEFT JOIN prev p ON p.narrative_id = c.narrative_id AND p.video_id = c.video_id
+                WHERE p.video_id IS NULL
+                GROUP BY c.narrative_id
+            ),
+            prev_totals AS (
+                SELECT
+                    narrative_id,
+                    SUM(views)::float    AS prev_views_total,
+                    SUM(likes)::float    AS prev_likes_total,
+                    SUM(comments)::float AS prev_comments_total
+                FROM prev
+                GROUP BY narrative_id
             ),
             -- The clean aggregation: sum the per-day gains, sum the baselines they came
             -- from, divide once. Averaging per-video ratios would let a video with a
@@ -2047,10 +2122,34 @@ class NarrativeRepository:
                 COALESCE(g.cur_likes, 0.0)       AS cur_likes,
                 COALESCE(g.cur_comments, 0.0)    AS cur_comments,
                 COALESCE(g.prev_likes, 0.0)      AS prev_likes,
-                COALESCE(g.prev_comments, 0.0)   AS prev_comments
+                COALESCE(g.prev_comments, 0.0)   AS prev_comments,
+                COALESCE(ct.cur_views_total, 0.0)     AS cur_views_total,
+                COALESCE(ct.cur_likes_total, 0.0)     AS cur_likes_total,
+                COALESCE(ct.cur_comments_total, 0.0)  AS cur_comments_total,
+                COALESCE(pt.prev_views_total, 0.0)    AS prev_views_total,
+                COALESCE(pt.prev_likes_total, 0.0)    AS prev_likes_total,
+                COALESCE(pt.prev_comments_total, 0.0) AS prev_comments_total,
+                COALESCE(a.new_videos, 0)             AS new_videos,
+                COALESCE(a.new_video_views, 0.0)      AS new_video_views
             FROM counts co
-            LEFT JOIN growth g ON g.narrative_id = co.narrative_id
+            LEFT JOIN growth g       ON g.narrative_id = co.narrative_id
+            LEFT JOIN cur_totals ct  ON ct.narrative_id = co.narrative_id
+            LEFT JOIN prev_totals pt ON pt.narrative_id = co.narrative_id
+            LEFT JOIN arrivals a     ON a.narrative_id = co.narrative_id
             WHERE co.prev_videos > 0
+              -- AND SOMETHING WAS OBSERVED. `visited` is satisfied by a video row being
+              -- touched, which is not the same as a video moving: a narrative can enter
+              -- the cohort with every snapshot unchanged and nothing newly linked, in
+              -- which case `cur` and `prev` are the same state and every component is
+              -- exactly zero. Ranked, that zero lands at the bottom of the axis and the
+              -- narrative collects `consolidated` — "large, and no longer growing" —
+              -- asserted about a narrative nobody looked at. Measured on the 2026-08-13
+              -- production cohort that was 8 narratives, 4 of them badged.
+              --
+              -- We only rank what we measured (C1), so they leave the cohort rather than
+              -- being ranked at an honest-looking zero. Downstream they have no
+              -- acceleration row, are unclassifiable, and lose the badge they held.
+              AND (COALESCE(g.refreshed_videos, 0) > 0 OR COALESCE(a.new_videos, 0) > 0)
             """,
             {"calc_date": calc_date, "prev_date": prev_date},
         )

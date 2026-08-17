@@ -103,9 +103,44 @@ COMPOSITE_REACH_WEIGHT = float(os.environ.get("COMPOSITE_REACH_WEIGHT", "0.625")
 # old 0.40/0.35/0.25 broke it, so a narrative whose views grew while its engagement
 # ratio dipped scored a *negative* rate and was floored to zero. Measured against
 # 2026-07-16 (n=2237), the old weights erased 679 genuine growers; these erase 43.
-ACCELERATION_ENGAGEMENT_WEIGHT = float(os.environ.get("ACCELERATION_ENGAGEMENT_WEIGHT", "0.10"))
-ACCELERATION_VIDEO_VOLUME_WEIGHT = float(os.environ.get("ACCELERATION_VIDEO_VOLUME_WEIGHT", "0.35"))
-ACCELERATION_VIEWS_WEIGHT = float(os.environ.get("ACCELERATION_VIEWS_WEIGHT", "0.55"))
+#
+# These weight the PERCENT_RANK of each component, not the raw component. A weighted sum
+# of raw components gives influence in proportion to a component's SCALE rather than its
+# weight, and the components do not share a scale. Ranking first puts each on [0, 1] by
+# construction, which is the same reason composite blends ranks and not scores (D2), and
+# it is what makes these numbers mean the share of influence they claim.
+#
+# THE VIDEO-VOLUME TERM WAS REMOVED AND THEN REINSTATED SMALL. It carried 0.35 until
+# 2026-08-13, when it was measured to be the single largest source of wrong `viral`
+# badges: a narrative going from 2 linked videos to 3 scored 0.175 and ranked in the top
+# 3.5% of that day's cohort with no view measurement behind it at all, and narratives
+# whose only non-zero component was video count were 2.7x likelier to be badged viral
+# than narratives with real view growth (45.0% of 685 against 16.4% of 1709), making up
+# 44% of the band. It was dropped to zero the same day.
+#
+# What changed on 2026-08-14 is the views component, not this one: a video newly linked
+# to a narrative now brings its views into `change_views`, so the two signals move
+# together instead of one substituting for the other. Re-simulated over the 2026-08-13
+# production cohort (n=2584) at this weight, no viral badge is video-led — against 70% of
+# the band before — and 150 of 2584 labels move.
+#
+# 0.10 is a ceiling as much as a weight. Two properties of this component make a larger
+# one unsafe, and neither has gone away:
+#
+#   - It is unnormalised. The same single discovered video is +50% on a 2-video narrative
+#     and +0.5% on a 200-video one, so its magnitude tracks how small a footprint is
+#     rather than how far a narrative spread.
+#   - It is near-binary. It is exactly zero for 68% of the cohort, so any gain at all
+#     clears that tie block and lands near rank 0.68 — measured on the same cohort, the
+#     92 narratives that gained one video carrying essentially no views rank at a median
+#     0.76 here against 0.21 on views. The term promotes non-growth by construction; the
+#     weight is what keeps that promotion small enough not to decide a badge.
+#
+# So the ordering is load-bearing, and the constraint now has two sides:
+# ACCELERATION_VIDEO_VOLUME_WEIGHT < ACCELERATION_ENGAGEMENT_WEIGHT < ACCELERATION_VIEWS_WEIGHT.
+ACCELERATION_ENGAGEMENT_WEIGHT = float(os.environ.get("ACCELERATION_ENGAGEMENT_WEIGHT", "0.15"))
+ACCELERATION_VIDEO_VOLUME_WEIGHT = float(os.environ.get("ACCELERATION_VIDEO_VOLUME_WEIGHT", "0.10"))
+ACCELERATION_VIEWS_WEIGHT = float(os.environ.get("ACCELERATION_VIEWS_WEIGHT", "0.75"))
 
 # Spread-pattern percentile thresholds. Both axes are classified by their PERCENT_RANK
 # within their own cohort, never by raw values, so each threshold means a knowable
