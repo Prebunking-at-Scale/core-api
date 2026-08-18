@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any, AsyncContextManager
 from uuid import UUID
 
@@ -107,17 +108,21 @@ class ClaimsService:
         text: str | None = None,
         language: str | None = None,
         min_score: float | None = None,
-        max_score: float | None = None
+        max_score: float | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> tuple[list[EnrichedClaim], int]:
         async with self.repo() as repo:
             return await repo.get_all_claims(
-                limit=limit, 
-                offset=offset, 
-                topic_id=topic_id, 
+                limit=limit,
+                offset=offset,
+                topic_id=topic_id,
                 text=text,
                 language=language,
                 min_score=min_score,
-                max_score=max_score
+                max_score=max_score,
+                start_date=start_date,
+                end_date=end_date,
             )
 
     async def associate_topics_with_claim(
