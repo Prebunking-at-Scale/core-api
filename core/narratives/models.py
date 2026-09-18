@@ -124,6 +124,23 @@ class NarrativeStatsDataPoint(BaseModel):
     video_count: int = 0
     cumulative_video_count: int = 0
 
+    # `views` split by where it came from, because the two are different kinds of
+    # fact and a chart should not draw them the same way.
+    #
+    #   views_from_new_videos  a video appeared this day and brought its views with
+    #                          it. A discontinuity on a date we know exactly: draw a
+    #                          step. Spreading it across the preceding gap asserts
+    #                          growth on days the narrative did not hold the video.
+    #   views_from_existing    videos already in the narrative were re-measured and
+    #                          had gained views since we last looked. That growth is
+    #                          real but undated — it happened somewhere inside the
+    #                          gap — so a straight ramp is the neutral estimate.
+    #
+    # They always sum to `views`. On the first point of a series everything is an
+    # arrival, which is correct: the narrative had nothing before it.
+    views_from_new_videos: int = 0
+    views_from_existing: int = 0
+
 
 class NarrativeStatsTotals(BaseModel):
     """Total stats for a narrative."""
