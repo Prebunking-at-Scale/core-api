@@ -1165,6 +1165,30 @@ class NarrativeRepository:
         video and sum across the narrative — that's the cumulative engagement
         state at end of day. Per-day deltas are derived by LAG so the original
         response shape (cumulative_* + per-day delta fields) is preserved.
+
+        Each day's `views` is also split into `views_from_new_videos` and
+        `views_from_existing`, because the two are different kinds of fact and a
+        chart that draws them identically misleads. video_stats is scraped sparsely,
+        so consecutive points can be months apart, and whatever the renderer draws
+        between them is an assertion the data never made:
+
+            existing videos, re-measured   they gained views somewhere inside the
+                                           gap and nothing dates it more precisely.
+                                           A ramp spreads them evenly, which claims
+                                           no particular shape — the neutral guess.
+            a video appearing               it brought its whole view count on a day
+                                           we know exactly. That is a step. Drawn as
+                                           a ramp it becomes months of growth the
+                                           narrative did not have, and a one-day
+                                           event reads as a sustained trend.
+
+        Observed on a narrative created 2026-09-16 from a claim first seen in May:
+        the chart showed a four-month climb, while the acceleration axis reported the
+        arrival as a single day's +18%. Both were right about their own endpoints;
+        only the line between them was invented.
+
+        The split is exact — the two always sum to `views` — so callers that ignore
+        it keep the series they had.
         """
         if not await self.narrative_exists(narrative_id):
             return None
@@ -1209,28 +1233,56 @@ class NarrativeRepository:
                     ORDER BY dl.video_id, dl.day DESC
                 ) latest ON TRUE
             ),
+            first_seen AS (
+                -- The day each video enters the narrative's series: the first day we
+                -- have any measurement of it. Everything it had accumulated before we
+                -- saw it arrives with it on that day, as a step.
+                SELECT video_id, MIN(day) AS first_day
+                FROM daily_latest
+                GROUP BY video_id
+            ),
             per_day AS (
-                -- End-of-day cumulative state across all videos in the narrative.
+                -- End-of-day cumulative state across all videos in the narrative,
+                -- plus how much of that day's state is videos appearing for the
+                -- first time. FILTER isolates the arrivals without a second pass.
+                SELECT
+                    c.day,
+                    COUNT(DISTINCT c.video_id) AS videos_with_stats,
+                    COALESCE(SUM(c.views), 0)    AS cum_views,
+                    COALESCE(SUM(c.likes), 0)    AS cum_likes,
+                    COALESCE(SUM(c.comments), 0) AS cum_comments,
+                    COALESCE(SUM(c.views) FILTER (WHERE fs.first_day = c.day), 0)
+                        AS arrival_views
+                FROM carried c
+                JOIN first_seen fs ON fs.video_id = c.video_id
+                GROUP BY c.day
+            ),
+            deltas AS (
                 SELECT
                     day,
-                    COUNT(DISTINCT video_id) AS videos_with_stats,
-                    COALESCE(SUM(views), 0)    AS cum_views,
-                    COALESCE(SUM(likes), 0)    AS cum_likes,
-                    COALESCE(SUM(comments), 0) AS cum_comments
-                FROM carried
-                GROUP BY day
+                    videos_with_stats,
+                    cum_views, cum_likes, cum_comments,
+                    arrival_views,
+                    GREATEST(cum_views    - LAG(cum_views,    1, 0::bigint) OVER (ORDER BY day), 0) AS views,
+                    GREATEST(cum_likes    - LAG(cum_likes,    1, 0::bigint) OVER (ORDER BY day), 0) AS likes,
+                    GREATEST(cum_comments - LAG(cum_comments, 1, 0::bigint) OVER (ORDER BY day), 0) AS comments
+                FROM per_day
             )
             SELECT
                 day AS date,
                 videos_with_stats AS video_count,
-                GREATEST(cum_views    - LAG(cum_views,    1, 0::bigint) OVER (ORDER BY day), 0) AS views,
-                GREATEST(cum_likes    - LAG(cum_likes,    1, 0::bigint) OVER (ORDER BY day), 0) AS likes,
-                GREATEST(cum_comments - LAG(cum_comments, 1, 0::bigint) OVER (ORDER BY day), 0) AS comments,
+                views, likes, comments,
                 videos_with_stats AS cumulative_video_count,
                 cum_views    AS cumulative_views,
                 cum_likes    AS cumulative_likes,
-                cum_comments AS cumulative_comments
-            FROM per_day
+                cum_comments AS cumulative_comments,
+                -- LEAST guards the one case where the two disagree: if a video's
+                -- reported views fall, the day's delta can be smaller than what the
+                -- arrivals brought. The split then reports what the day actually
+                -- moved, and the pair still sums to `views` rather than exceeding it.
+                LEAST(arrival_views, views)        AS views_from_new_videos,
+                views - LEAST(arrival_views, views) AS views_from_existing
+            FROM deltas
             ORDER BY day
         """
 
@@ -1250,6 +1302,8 @@ class NarrativeRepository:
                     cumulative_comments=row["cumulative_comments"],
                     video_count=row["video_count"],
                     cumulative_video_count=row["cumulative_video_count"],
+                    views_from_new_videos=row["views_from_new_videos"],
+                    views_from_existing=row["views_from_existing"],
                 )
             )
 
