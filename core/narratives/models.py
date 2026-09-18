@@ -105,6 +105,7 @@ class NarrativeDetail(BaseModel):
     total_comments: int = 0
     platforms: list[str] = []
     language_count: int = 0
+    languages: list[str] = []  # Distinct raw language codes across all claims
     metadata: dict[str, Any] = {}
     created_at: datetime | None = None
     updated_at: datetime | None = None

@@ -982,10 +982,15 @@ class NarrativeRepository:
                 ) distinct_videos
             ),
             language_stats AS (
-                SELECT COUNT(DISTINCT vc.metadata->>'language') FILTER (
-                    WHERE vc.metadata->>'language' IS NOT NULL
-                    AND vc.metadata->>'language' != ''
-                ) as language_count
+                SELECT
+                    COUNT(DISTINCT vc.metadata->>'language') FILTER (
+                        WHERE vc.metadata->>'language' IS NOT NULL
+                        AND vc.metadata->>'language' != ''
+                    ) as language_count,
+                    ARRAY_AGG(DISTINCT vc.metadata->>'language') FILTER (
+                        WHERE vc.metadata->>'language' IS NOT NULL
+                        AND vc.metadata->>'language' != ''
+                    ) as languages
                 FROM video_claims vc
                 JOIN claim_narratives cn ON vc.id = cn.claim_id
                 WHERE cn.narrative_id = %(narrative_id)s
@@ -1005,6 +1010,7 @@ class NarrativeRepository:
                 COALESCE(vs.total_comments, 0) as total_comments,
                 COALESCE(vs.platforms, ARRAY[]::text[]) as platforms,
                 COALESCE(ls.language_count, 0) as language_count,
+                COALESCE(ls.languages, ARRAY[]::text[]) as languages,
                 nb.spread_pattern
             FROM narrative_base nb
             CROSS JOIN claim_stats cs
@@ -1047,6 +1053,7 @@ class NarrativeRepository:
             total_comments=row["total_comments"],
             platforms=row["platforms"] or [],
             language_count=row["language_count"],
+            languages=row["languages"] or [],
             metadata=row["metadata"] or {},
             created_at=row["created_at"],
             updated_at=row["updated_at"],
