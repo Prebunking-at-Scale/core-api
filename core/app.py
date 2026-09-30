@@ -24,6 +24,7 @@ from core.languages.controller import LanguageController
 from core.media_feeds.controller import MediaFeedController
 from core.migrate import migrate
 from core.narratives.controller import NarrativeController
+from core.search.controller import SearchController
 from core.topics.controller import TopicController
 from core.videos.claims.controller import ClaimController, RootClaimController
 from core.videos.controller import VideoController
@@ -107,6 +108,7 @@ api_router = Router(
         NarrativeFeedbackController,
         ClaimNarrativeFeedbackController,
         LanguageController,
+        SearchController,
     ],
 )
 
