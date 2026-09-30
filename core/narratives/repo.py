@@ -298,12 +298,26 @@ class NarrativeRepository:
             )
             params["text"] = f"%{text}%"
 
-        if start_date:
-            where_conditions.append("n.created_at >= %(start_date)s")
-            params["start_date"] = start_date
-        if end_date:
-            where_conditions.append("n.created_at <= %(end_date)s")
-            params["end_date"] = end_date
+        # Match on the videos behind a narrative's claims, not n.created_at
+        # (when the pipeline recorded it). A narrative is in range if any one of
+        # its claims was posted in the window; every claim counts, unlike
+        # first_content_* below, which only weighs the oldest.
+        if start_date or end_date:
+            date_conditions = []
+            if start_date:
+                date_conditions.append("dv.uploaded_at >= %(start_date)s")
+                params["start_date"] = start_date
+            if end_date:
+                date_conditions.append("dv.uploaded_at <= %(end_date)s")
+                params["end_date"] = end_date
+            where_conditions.append(
+                "n.id IN ("
+                "SELECT dcn.narrative_id "
+                "FROM claim_narratives dcn "
+                "JOIN video_claims dvc ON dcn.claim_id = dvc.id "
+                "JOIN videos dv ON dvc.video_id = dv.id "
+                "WHERE " + " AND ".join(date_conditions) + ")"
+            )
 
         if spread_patterns:
             where_conditions.append("n.spread_pattern = ANY(%(spread_patterns)s)")
@@ -399,13 +413,24 @@ class NarrativeRepository:
             )
             params["text"] = f"%{text}%"
 
-        if start_date:
-            filter_conditions.append("n.created_at >= %(start_date)s")
-            params["start_date"] = start_date
-
-        if end_date:
-            filter_conditions.append("n.created_at <= %(end_date)s")
-            params["end_date"] = end_date
+        # Same rule as _build_get_all_narratives_where_statement: any claim
+        # posted in the window by its video's uploaded_at, not n.created_at.
+        if start_date or end_date:
+            date_conditions = []
+            if start_date:
+                date_conditions.append("dv.uploaded_at >= %(start_date)s")
+                params["start_date"] = start_date
+            if end_date:
+                date_conditions.append("dv.uploaded_at <= %(end_date)s")
+                params["end_date"] = end_date
+            filter_conditions.append(
+                "n.id IN ("
+                "SELECT dcn.narrative_id "
+                "FROM claim_narratives dcn "
+                "JOIN video_claims dvc ON dcn.claim_id = dvc.id "
+                "JOIN videos dv ON dvc.video_id = dv.id "
+                "WHERE " + " AND ".join(date_conditions) + ")"
+            )
 
         if spread_patterns:
             filter_conditions.append("n.spread_pattern = ANY(%(spread_patterns)s)")

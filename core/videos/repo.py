@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -229,6 +230,8 @@ class VideoRepository:
         channel: str | None = None,
         text: str | None = None,
         language: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> tuple[list[Video], int]:
         wheres = [sql.SQL("1=1")]
         params: dict[str, Any] = {"limit": limit, "offset": offset}
@@ -252,6 +255,16 @@ class VideoRepository:
         if language:
             wheres.append(sql.SQL("metadata->>'language' = %(language)s"))
             params["language"] = language
+
+        # uploaded_at is when the video was posted on the platform, not when we
+        # ingested it; ingestion says nothing about when the content circulated.
+        if start_date:
+            wheres.append(sql.SQL("uploaded_at >= %(start_date)s"))
+            params["start_date"] = start_date
+
+        if end_date:
+            wheres.append(sql.SQL("uploaded_at <= %(end_date)s"))
+            params["end_date"] = end_date
 
         where_clause = sql.Composed(wheres).join(" AND ")
 
