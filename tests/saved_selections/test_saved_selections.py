@@ -74,7 +74,7 @@ async def test_defaults_come_from_the_organisations_feeds(
         {
             "id": "default-channels",
             "kind": "channel",
-            "name": f"{organisation.short_name}-channels",
+            "name": "Channels",
             "values": ["@datos_ocultos", "Le Réveil"],
             "is_default": True,
             "created_at": None,
@@ -82,8 +82,8 @@ async def test_defaults_come_from_the_organisations_feeds(
     ]
     keywords = await listed(auth_client, token, "keyword")
     assert [(k["name"], k["values"], k["is_default"]) for k in keywords] == [
-        (f"{organisation.short_name}-Climate", ["sequía", "HAARP"], True),
-        (f"{organisation.short_name}-Health", ["vacuna", "OMS"], True),
+        ("Climate", ["sequía", "HAARP"], True),
+        ("Health", ["vacuna", "OMS"], True),
     ]
     assert keywords[0]["id"] == f"default-topic-{CLIMATE}"
     assert await listed(auth_client, token, "entity_id") == []
@@ -145,7 +145,7 @@ async def test_what_a_selection_needs(
         assert (response.status_code, response.json()["detail"]) == (422, code), code
 
     # A default's name is taken as well
-    response = await save(auth_client, token, kind="keyword", name=f"{organisation.short_name.upper()}-climate", values=["b"])
+    response = await save(auth_client, token, kind="keyword", name="CLIMATE", values=["b"])
     assert (response.status_code, response.json()["detail"]) == (422, "name_taken")
 
     # Values are trimmed and deduplicated

@@ -33,9 +33,9 @@ class SavedSelectionService:
         self, organisation: Organisation, kind: SavedSelectionKind
     ) -> list[SavedSelection]:
         """The organisation's defaults, read live from its feeds so they always match
-        what it collects: "<short_name>-channels" and one "<short_name>-<Topic>" per
-        keyword feed. There are no default entity selections."""
-        prefix = organisation.short_name
+        what it collects: "Channels" and one per keyword feed, named after its topic.
+        Each organisation only sees its own, so the names don't carry it. There are no
+        default entity selections."""
         if kind == "channel":
             channel_feeds = await self._feeds.get_channel_feeds(organisation.id)
             channels = sorted({feed.channel for feed in channel_feeds}, key=str.lower)
@@ -45,7 +45,7 @@ class SavedSelectionService:
                 SavedSelection(
                     id=f"{DEFAULT_ID_PREFIX}channels",
                     kind="channel",
-                    name=f"{prefix}-channels",
+                    name="Channels",
                     values=channels,
                     is_default=True,
                 )
@@ -57,7 +57,7 @@ class SavedSelectionService:
                     SavedSelection(
                         id=f"{DEFAULT_ID_PREFIX}topic-{feed.topic_id}",
                         kind="keyword",
-                        name=f"{prefix}-{feed.topic_name}",
+                        name=feed.topic_name,
                         values=feed.keywords,
                         is_default=True,
                     )

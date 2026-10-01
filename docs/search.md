@@ -77,8 +77,9 @@ Exact up to 10,000 (`COUNT_CAP`); above that, `total` is 10,000 with `capped: tr
 
 - A person's selections are visible to that person only, within their organisation.
 - The organisation's defaults are built from its non-archived feeds on each request:
-  `<short_name>-channels` (`id: "default-channels"`) and one `<short_name>-<Topic>` per
-  keyword feed (`id: "default-topic-<topic_id>"`). Deleting one gives 403; they change
+  `Channels` (`id: "default-channels"`; the frontend shows its own translated name) and
+  one per keyword feed named after its topic (`id: "default-topic-<topic_id>"`). Each
+  organisation only sees its own, so the names don't include it. Deleting one gives 403; they change
   with the feeds.
 - `POST` errors are 422 with `detail` `invalid_kind`, `name_required`, `name_too_long`
   (over 60), `values_required` or `name_taken` (per person and kind, ignoring case,
