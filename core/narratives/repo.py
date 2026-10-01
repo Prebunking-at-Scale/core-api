@@ -233,6 +233,8 @@ class NarrativeRepository:
         end_date: datetime | None = None,
         first_content_start: datetime | None = None,
         first_content_end: datetime | None = None,
+        created_start: datetime | None = None,
+        created_end: datetime | None = None,
         spread_patterns: list[str] | None = None,
     ) -> int:
         query = """
@@ -247,6 +249,8 @@ class NarrativeRepository:
             end_date=end_date,
             first_content_start=first_content_start,
             first_content_end=first_content_end,
+            created_start=created_start,
+            created_end=created_end,
             spread_patterns=spread_patterns,
         )
         query += where_statement
@@ -265,6 +269,8 @@ class NarrativeRepository:
         end_date: datetime | None = None,
         first_content_start: datetime | None = None,
         first_content_end: datetime | None = None,
+        created_start: datetime | None = None,
+        created_end: datetime | None = None,
         spread_patterns: list[str] | None = None,
     ) -> tuple[str, dict[str, Any]]:
         query = ""
@@ -319,6 +325,15 @@ class NarrativeRepository:
                 "WHERE " + " AND ".join(date_conditions) + ")"
             )
 
+        # When the narrative was created (recorded by the pipeline), as opposed to
+        # start_date/end_date above, which are about when its videos were posted.
+        if created_start:
+            where_conditions.append("n.created_at >= %(created_start)s")
+            params["created_start"] = created_start
+        if created_end:
+            where_conditions.append("n.created_at <= %(created_end)s")
+            params["created_end"] = created_end
+
         if spread_patterns:
             where_conditions.append("n.spread_pattern = ANY(%(spread_patterns)s)")
             params["spread_patterns"] = spread_patterns
@@ -369,6 +384,8 @@ class NarrativeRepository:
         end_date: datetime | None = None,
         first_content_start: datetime | None = None,
         first_content_end: datetime | None = None,
+        created_start: datetime | None = None,
+        created_end: datetime | None = None,
         language: str | None = None,
         spread_patterns: list[str] | None = None,
         sort: str | None = None,
@@ -431,6 +448,15 @@ class NarrativeRepository:
                 "JOIN videos dv ON dvc.video_id = dv.id "
                 "WHERE " + " AND ".join(date_conditions) + ")"
             )
+
+        # When the narrative was created (recorded by the pipeline), as opposed to
+        # start_date/end_date above, which are about when its videos were posted.
+        if created_start:
+            filter_conditions.append("n.created_at >= %(created_start)s")
+            params["created_start"] = created_start
+        if created_end:
+            filter_conditions.append("n.created_at <= %(created_end)s")
+            params["created_end"] = created_end
 
         if spread_patterns:
             filter_conditions.append("n.spread_pattern = ANY(%(spread_patterns)s)")

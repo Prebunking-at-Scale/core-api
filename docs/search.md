@@ -82,6 +82,14 @@ Exact up to 10,000 (`COUNT_CAP`); above that, `total` is 10,000 with `capped: tr
   (over 60), `values_required` or `name_taken` (per person and kind, ignoring case,
   defaults included). Values are trimmed and deduplicated.
 
+## Narrative list dates
+
+`GET /api/narratives` has two date filters. `start_date`/`end_date` (from the date-filter
+branch) are about when the narrative's videos were posted: a narrative is in range if
+any of them was. `created_start`/`created_end` are about when the narrative was created
+(`n.created_at`), which is what `start_date`/`end_date` meant before. The frontend's
+dashboard and its "Created" timeframe on the Narratives list use the latter.
+
 ## Deploying
 
 The indexes of migrations 23 and 25 are large in production (4M claims, 1.1M videos
