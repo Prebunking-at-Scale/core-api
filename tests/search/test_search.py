@@ -90,6 +90,20 @@ async def test_keyword_matches_a_narrative_title_directly_and_claim_text_through
     assert (await matched(api_key_client, data, "narratives", keyword="vacuna")) == {"n_vax": "claims"}
 
 
+async def test_with_a_claim_filter_a_narratives_keywords_must_be_in_that_claim(
+    api_key_client: Client, data: SearchData
+) -> None:
+    # n_vax's title says "Vaccines"; its English TikTok claim (c6) doesn't
+    assert await matched(api_key_client, data, "narratives", keyword="vaccines") == {"n_vax": "direct"}
+    assert await matched(api_key_client, data, "narratives", keyword="vaccines", platform="tiktok", language="en") == {}
+    # A claim that has both: c5, a TikTok claim about the microchip
+    assert await matched(api_key_client, data, "narratives", keyword="microchip", platform="tiktok") == {
+        "n_vax": "claims"
+    }
+    # The other tabs agree
+    assert await matched(api_key_client, data, "claims", keyword="vaccines", platform="tiktok", language="en") == {}
+
+
 async def test_keyword_matches_a_video_title_directly_and_its_claims_with_the_label(
     api_key_client: Client, data: SearchData
 ) -> None:
@@ -162,9 +176,14 @@ async def test_claim_level_filters_must_hold_on_the_same_claim(api_key_client: C
     assert (await matched(api_key_client, data, "narratives", language="fr", channel="Le Réveil")) == {"n_chem": "direct"}
 
 
-async def test_a_direct_match_combines_with_a_claim_match(api_key_client: Client, data: SearchData) -> None:
-    # The title says "Planes"; the French claim c3 doesn't, but it gives the language
-    assert (await matched(api_key_client, data, "narratives", keyword="planes", language="fr")) == {"n_chem": "direct"}
+async def test_a_direct_topic_match_combines_with_a_claim_match(api_key_client: Client, data: SearchData) -> None:
+    # n_climate is about Climate itself, and its claim c1 is in English
+    assert await matched(api_key_client, data, "narratives", topic_id=str(CLIMATE), language="en") == {
+        "n_climate": "direct",
+        "n_chem": "claims",
+    }
+    # Keywords don't: n_chem's title says "Planes", its French claim c3 doesn't
+    assert await matched(api_key_client, data, "narratives", keyword="planes", language="fr") == {}
 
 
 async def test_claim_only_filters_never_add_the_label(api_key_client: Client, data: SearchData) -> None:

@@ -213,18 +213,22 @@ def videos_query(filters: SearchFilters) -> TabQuery:
 
 def narratives_query(filters: SearchFilters) -> TabQuery:
     """A narrative matches when it has one claim such that every filter holds on the
-    narrative or on that claim: topic and keywords on either, entities and spread
-    pattern on the narrative, language, platform, channel and dates on the claim (and
-    its video). Newest first."""
+    narrative or on that claim: topic on either, entities and spread pattern on the
+    narrative, language, platform, channel and dates on the claim (and its video).
+    Keywords are on either too, but only while none of those claim filters is set:
+    with one, the keywords must be in that same claim's text, so a narrative about the
+    keyword isn't listed for content that doesn't mention it. Newest first."""
     q = Query(filters)
     own_topic = q.narrative_topic("n")
-    own_title = q.keywords_in("n.title")
+    content = [q.claim_language("c"), *q.video_conditions("v")]
+    has_content_filter = any(content)
+    own_title = None if has_content_filter else q.keywords_in("n.title")
+    claim_text = q.keywords_in("c.claim")
 
     per_claim: list[str | None] = [
         f"({own_topic} OR {q.claim_topic('c')})" if own_topic else None,
-        f"({own_title} OR {q.keywords_in('c.claim')})" if own_title else None,
-        q.claim_language("c"),
-        *q.video_conditions("v"),
+        f"({own_title} OR {claim_text})" if own_title else claim_text,
+        *content,
     ]
     a_claim = None
     if any(per_claim):
@@ -239,14 +243,16 @@ def narratives_query(filters: SearchFilters) -> TabQuery:
     if filters.spread_patterns:
         spread = f"n.spread_pattern = ANY({q.param([s.value for s in filters.spread_patterns])})"
 
-    # "claims" when the topic or the keywords needed a claim; entities are always the
-    # narrative's own, and the claim-only filters don't count (docs/search.md).
+    # "claims" when the topic or the keywords needed a claim (always, for keywords,
+    # while a claim filter is set); entities are always the narrative's own, and the
+    # claim-only filters don't count (docs/search.md).
     needed_claim = [f"NOT {x}" for x in (own_topic, own_title) if x]
-    match_source = (
-        f"CASE WHEN {' OR '.join(needed_claim)} THEN 'claims' ELSE 'direct' END"
-        if needed_claim
-        else "'direct'"
-    )
+    if claim_text and not own_title:
+        match_source = "'claims'"
+    elif needed_claim:
+        match_source = f"CASE WHEN {' OR '.join(needed_claim)} THEN 'claims' ELSE 'direct' END"
+    else:
+        match_source = "'direct'"
 
     return TabQuery(
         from_sql="narratives n",

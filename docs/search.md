@@ -55,8 +55,10 @@ claim**.
   matched a claim.
 - **Narratives:** one claim such that every filter holds on the narrative or on that
   claim: topic and keywords on either, entities and spread pattern on the narrative,
-  the rest on the claim. `match_source: "claims"` when the topic or keywords needed the
-  claim.
+  the rest on the claim. With a language, platform, channel or date filter, keywords
+  must be in that same claim's text, not the title: a narrative about the keyword isn't
+  listed for content that doesn't mention it. `match_source: "claims"` when the topic
+  or keywords needed the claim.
 
 ### Counts
 
