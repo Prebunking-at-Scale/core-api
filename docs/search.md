@@ -88,7 +88,8 @@ Exact up to 10,000 (`COUNT_CAP`); above that, `total` is 10,000 with `capped: tr
 branch) are about when the narrative's videos were posted: a narrative is in range if
 any of them was. `created_start`/`created_end` are about when the narrative was created
 (`n.created_at`), which is what `start_date`/`end_date` meant before. The frontend's
-dashboard and its "Created" timeframe on the Narratives list use the latter.
+Narratives list uses the former (its Date Range); the dashboard's timeframe uses the
+latter.
 
 ## Deploying
 
