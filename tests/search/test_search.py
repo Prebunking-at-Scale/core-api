@@ -70,10 +70,14 @@ async def test_topics_are_ored(api_key_client: Client, data: SearchData) -> None
     assert set(claims) == {"c1", "c9", "c7"}
 
 
-async def test_claim_topics_leave_out_values_that_are_not_topics(api_key_client: Client, data: SearchData) -> None:
+async def test_claim_topics_come_from_the_classifier_not_the_claim_finder(
+    api_key_client: Client, data: SearchData
+) -> None:
+    # c9's metadata.topics says Health; claim_topics says Climate
     body = await search(api_key_client, "claims", keyword="carbon taxes")
     [claim] = body["data"]
     assert [t["topic"] for t in claim["topics"]] == ["Climate"]
+    assert "c9" not in await matched(api_key_client, data, "claims", topic_id=str(HEALTH))
 
 
 # Keywords --------------------------------------------------------------------

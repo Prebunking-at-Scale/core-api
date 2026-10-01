@@ -30,7 +30,7 @@ are ORed; filters are ANDed.
 
 | Param | |
 |---|---|
-| `topic_id` (repeated) | a claim's own topics (`video_claims.metadata.topics`), or a narrative's (`narrative_topics`) |
+| `topic_id` (repeated) | a claim's own topics (`claim_topics`, from the narratives service's classifier), or a narrative's (`narrative_topics`) |
 | `entity_id` (repeated) | a narrative's entities; claims and videos through their narratives |
 | `keyword` (repeated), `keyword_mode=any\|all` | each keyword a phrase, anywhere in claim text, video titles or narrative titles, ignoring case, accents and hyphens; `all`: every keyword in the same text |
 | `language` (repeated) | the claim's language |
@@ -103,5 +103,7 @@ failed build (it should return nothing).
   entity filters on claims and videos go through narratives, which hold 2–9% of claims.
 - A video collected for several organisations gives one claim per organisation.
 - Keywords under three characters can't use the trigram index and read every row.
-- `/api/topics/stats` and `GET /api/claims?topic_id=` still count `claim_topics`, the
-  narratives service's topics, so their numbers differ from the search's.
+- Claim topics come from `claim_topics`, which the narratives service writes only for
+  the claims it keeps (score of about 2.5 or more): roughly 4–9% of claims in September
+  2026. A topic filter on claims finds those; `metadata.topics` (the claim finder's
+  guess from the feeds' keywords) is not used.

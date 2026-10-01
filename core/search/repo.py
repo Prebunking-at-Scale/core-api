@@ -1,4 +1,4 @@
-from typing import Any, cast
+from typing import cast
 from uuid import UUID
 
 import psycopg
@@ -8,10 +8,10 @@ from core.narratives.models import TopicSummary
 from core.search.models import (
     COUNT_CAP,
     ChannelOption,
-    MatchSource,
     ClaimVideo,
     EntityRef,
     LanguageOption,
+    MatchSource,
     NarrativeRef,
     SearchClaim,
     SearchFilters,
@@ -22,13 +22,6 @@ from core.search.models import (
 from core.search.query import QUERIES
 
 _ID_COLUMN = {"narratives": "n.id", "claims": "c.id", "videos": "v.id"}
-
-
-def _as_uuid(value: Any) -> UUID | None:
-    try:
-        return UUID(str(value))
-    except ValueError:
-        return None
 
 
 class SearchRepository:
@@ -226,22 +219,21 @@ class SearchRepository:
                 NarrativeRef(id=row["id"], title=row["title"])
             )
 
-        # The claim's own topics are the ids in metadata.topics. The claim finder
-        # stores what the model answered, so anything that isn't a known topic id
-        # (a keyword, now and then) is left out.
-        topic_ids = {
-            topic_id
-            for row in rows.values()
-            for value in (row["metadata"] or {}).get("topics") or []
-            if (topic_id := _as_uuid(value))
-        }
-        topics: dict[UUID, TopicSummary] = {}
-        if topic_ids:
-            await self._session.execute(
-                "SELECT id, topic FROM topics WHERE id = ANY(%(ids)s)",
-                {"ids": list(topic_ids)},
-            )
-            topics = {row["id"]: TopicSummary(**row) for row in await self._session.fetchall()}
+        # The claim's own topics are those the narratives service's classifier assigned
+        # (claim_topics), never its narrative's.
+        await self._session.execute(
+            """
+            SELECT ct.claim_id, t.id, t.topic
+            FROM claim_topics ct
+            JOIN topics t ON t.id = ct.topic_id
+            WHERE ct.claim_id = ANY(%(ids)s)
+            ORDER BY t.topic
+            """,
+            {"ids": ids},
+        )
+        topics: dict[UUID, list[TopicSummary]] = {}
+        for row in await self._session.fetchall():
+            topics.setdefault(row["claim_id"], []).append(TopicSummary(id=row["id"], topic=row["topic"]))
 
         via = await self._entities_via_narrative(ids, entity_ids) if entity_ids else {}
 
@@ -251,12 +243,7 @@ class SearchRepository:
             if not claim_row:
                 continue
             row = claim_row
-            own_topics = []
-            for value in (row["metadata"] or {}).get("topics") or []:
-                topic_id = _as_uuid(value)
-                if topic_id in topics and topics[topic_id] not in own_topics:
-                    own_topics.append(topics[topic_id])
-            own_topics.sort(key=lambda t: t.topic)
+            own_topics = topics.get(claim_id, [])
             video = None
             if row["v_id"]:
                 video = ClaimVideo(

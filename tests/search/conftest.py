@@ -54,7 +54,7 @@ VIDEOS = {
 }
 
 CLAIMS = {
-    # name: (video, language, score, topics, text)
+    # name: (video, language, score, topics (claim_topics), text)
     "c1": ("v1", "en", 4.1, [CLIMATE], "The heatwave was caused by a weather weapon sprayed from planes."),
     "c2": ("v2", "es", 3.0, [], "Los aviones fumigan productos químicos para provocar sequías."),
     "c3": ("v3", "fr", 3.2, [], "Les avions répandent des produits chimiques."),
@@ -63,11 +63,13 @@ CLAIMS = {
     "c6": ("v5", "en", 3.5, [HEALTH], "Bill Gates funds 5G tracking."),
     "c7": ("v6", "de", 4.2, [CONFLICTS], "Die NATO schickt Wehrpflichtige in die Ukraine."),
     "c8": ("v2", "es", 2.0, [MIGRATION], "Los inmigrantes reciben pisos gratis."),
-    # "kerncentrale": the claim finder sometimes answers a keyword instead of a topic id
-    "c9": ("v1", "en", 2.5, [CLIMATE, "kerncentrale"], "Carbon taxes are a scam."),
+    "c9": ("v1", "en", 2.5, [CLIMATE], "Carbon taxes are a scam."),
     "c10": ("v4", "es", 3.0, [], "El grafeno de las vacunas se activa con 5G."),
     "c11": ("v6", "de", 3.9, [], "Die Grenzen werden geschlossen."),
 }
+
+# What the claim finder put in metadata.topics, where it differs: the search ignores it
+FINDER_TOPICS = {"c9": [HEALTH, "kerncentrale"]}
 
 NARRATIVES = {
     # name: (title, created_at, topics, entities, claims, spread_pattern)
@@ -85,6 +87,7 @@ def tables_to_truncate() -> list[str]:
     return [
         "videos",
         "video_claims",
+        "claim_topics",
         "narratives",
         "claim_narratives",
         "narrative_topics",
@@ -124,9 +127,13 @@ async def insert_search_data(conn: Any) -> SearchData:
                 ids[name],
                 ids[video],
                 text,
-                Jsonb({"language": language, "score": score, "topics": [str(t) for t in topics]}),
+                Jsonb({"language": language, "score": score, "topics": [str(t) for t in FINDER_TOPICS.get(name, [])]}),
             ),
         )
+        for topic in topics:
+            await conn.execute(
+                "INSERT INTO claim_topics (claim_id, topic_id) VALUES (%s, %s)", (ids[name], topic)
+            )
     for name, (title, created, topics, entities, claims, spread) in NARRATIVES.items():
         ids[name] = uuid4()
         await conn.execute(

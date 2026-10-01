@@ -101,8 +101,8 @@ class ClaimVideo(BaseModel):
 
 
 class SearchClaim(BaseModel):
-    """A claim result. Its topics are its own (metadata.topics), never its
-    narrative's. match_source is "narrative" when an entity filter only held through
+    """A claim result. Its topics are its own (claim_topics, from the narratives
+    service's classifier), never its narrative's. match_source is "narrative" when an entity filter only held through
     the claim's narrative, with those entities in via_entities."""
 
     id: UUID

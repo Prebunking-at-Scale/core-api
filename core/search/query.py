@@ -11,8 +11,6 @@ Only fixed SQL fragments are assembled here; every value goes through a paramete
 from dataclasses import dataclass, field
 from typing import Any
 
-from psycopg.types.json import Jsonb
-
 from core.search.models import SearchFilters
 
 
@@ -59,14 +57,14 @@ class Query:
     # Claim level ---------------------------------------------------------------
 
     def claim_topic(self, c: str) -> str | None:
-        """The claim's own topics: those the claim finder assigned (metadata.topics)."""
+        """The claim's own topics: those the narratives service's classifier assigned
+        (claim_topics), not the claim finder's metadata.topics."""
         if not self.filters.topic_ids:
             return None
-        parts = [
-            f"{c}.metadata @> {self.param(Jsonb({'topics': [str(t)]}))}"
-            for t in self.filters.topic_ids
-        ]
-        return "(" + " OR ".join(parts) + ")"
+        return (
+            f"EXISTS (SELECT 1 FROM claim_topics ct WHERE ct.claim_id = {c}.id"
+            f" AND ct.topic_id = ANY({self.param(self.filters.topic_ids)}))"
+        )
 
     def claim_language(self, c: str) -> str | None:
         if not self.filters.languages:

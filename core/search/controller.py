@@ -29,7 +29,7 @@ async def search_service(connection_factory: ConnectionFactory) -> SearchService
 
 def search_filters(
     topic_id: list[UUID] | None = Parameter(
-        default=None, description="Topics (OR). A claim's own topics, or a narrative's."
+        default=None, description="Topics (OR). A claim's own topics (claim_topics), or a narrative's."
     ),
     entity_id: list[UUID] | None = Parameter(
         default=None, description="Entities (OR), on narratives; claims and videos through them."
