@@ -20,12 +20,13 @@ from core.config import (
     VIRALITY_SCORE_LIKES_WEIGHT,
 )
 from core.entities.service import EntityService
-from core.models import Claim, Narrative, NarrativeSpreadPattern, Video
+from core.models import Narrative, NarrativeSpreadPattern, Video
 from core.narratives.api import NarrativesApiClient
 from core.narratives.models import (
     AnalysisIndicator,
     NarrativeAnalysisIndicatorsResponse,
     NarrativeAnalysisIndicatorType,
+    NarrativeClaim,
     NarrativeDetail,
     NarrativeInput,
     NarrativeListItem,
@@ -156,7 +157,7 @@ class NarrativeService:
 
     async def get_narrative_claims(
         self, narrative_id: UUID, limit: int, offset: int
-    ) -> tuple[list[Claim], int]:
+    ) -> tuple[list[NarrativeClaim], int]:
         async with self.repo() as repo:
             if not await repo.narrative_exists(narrative_id):
                 raise ValueError("narrative not found")

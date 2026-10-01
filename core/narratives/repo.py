@@ -15,6 +15,7 @@ from core.models import Claim, Entity, Narrative, NarrativeSpreadPattern, Topic,
 from core.narratives.models import (
     IndicatorPayload,
     NarrativeAnalysisIndicatorType,
+    NarrativeClaim,
     NarrativeDetail,
     NarrativeListItem,
     NarrativeStats,
@@ -1106,14 +1107,15 @@ class NarrativeRepository:
 
     async def _get_narrative_claims_paginated(
         self, narrative_id: UUID, limit: int, offset: int
-    ) -> list[Claim]:
-        """Get paginated claims for a narrative."""
+    ) -> list[NarrativeClaim]:
+        """Get paginated claims for a narrative, each with its video's upload date."""
         await self._session.execute(
             """
             SELECT c.id, c.video_id, c.claim, c.start_time_s, c.metadata,
-                   c.created_at, c.updated_at
+                   c.created_at, c.updated_at, v.uploaded_at
             FROM video_claims c
             JOIN claim_narratives cn ON c.id = cn.claim_id
+            LEFT JOIN videos v ON v.id = c.video_id
             WHERE cn.narrative_id = %(narrative_id)s
             ORDER BY c.start_time_s
             LIMIT %(limit)s OFFSET %(offset)s
@@ -1123,7 +1125,7 @@ class NarrativeRepository:
         claims = []
         for row in await self._session.fetchall():
             claim_data = dict(row)
-            claims.append(Claim(**claim_data))
+            claims.append(NarrativeClaim(**claim_data))
         return claims
 
     async def _get_narrative_videos_paginated(
@@ -1153,7 +1155,7 @@ class NarrativeRepository:
 
     async def get_narrative_claims(
         self, narrative_id: UUID, limit: int, offset: int
-    ) -> tuple[list[Claim], int]:
+    ) -> tuple[list[NarrativeClaim], int]:
         """Get paginated claims for a narrative with total count."""
         await self._session.execute(
             """

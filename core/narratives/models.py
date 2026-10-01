@@ -87,6 +87,13 @@ ViralNarrativeSummary = NarrativeSummary
 NarrativeListItem = NarrativeSummary
 
 
+class NarrativeClaim(Claim):
+    """A claim on a narrative's page, with its video's upload date: the date the
+    frontend shows for a claim."""
+
+    uploaded_at: datetime | None = None
+
+
 class NarrativeDetail(BaseModel):
     """Full narrative with preview of claims/videos and total counts."""
 
@@ -96,7 +103,7 @@ class NarrativeDetail(BaseModel):
     narrative_context: str | None = None
     topics: list[Topic] = []
     entities: list[Entity] = []
-    claims: list[Claim] = []  # Preview items
+    claims: list[NarrativeClaim] = []  # Preview items
     claim_count: int = 0  # Total count
     videos: list[Video] = []  # Preview items
     video_count: int = 0  # Total count
