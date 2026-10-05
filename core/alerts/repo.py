@@ -183,8 +183,17 @@ class AlertRepository:
                 """
                 INSERT INTO alerts_triggered (
                     alert_id, narrative_id, trigger_value, threshold_crossed, metadata
-                ) VALUES (
-                    %(alert_id)s, %(narrative_id)s, %(trigger_value)s, %(threshold_crossed)s, %(metadata)s
+                )
+                SELECT %(alert_id)s, %(narrative_id)s, %(trigger_value)s,
+                       %(threshold_crossed)s::integer, %(metadata)s
+                -- Topic and keyword alerts record threshold_crossed = NULL, and the UNIQUE
+                -- constraint below never conflicts on NULL: without this check they were
+                -- recorded (and e-mailed) again every run their narrative was touched.
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM alerts_triggered t
+                    WHERE t.alert_id = %(alert_id)s
+                      AND t.narrative_id = %(narrative_id)s
+                      AND t.threshold_crossed IS NOT DISTINCT FROM %(threshold_crossed)s::integer
                 )
                 ON CONFLICT (alert_id, narrative_id, threshold_crossed) DO NOTHING
                 RETURNING *
