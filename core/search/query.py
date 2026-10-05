@@ -8,6 +8,7 @@ puts them all inside one EXISTS over a claim and its video.
 Only fixed SQL fragments are assembled here; every value goes through a parameter.
 """
 
+import itertools
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -189,13 +190,19 @@ def videos_query(filters: SearchFilters) -> TabQuery:
             + ")"
         )
 
+    def videos_with_a_claim(conditions: list[str]) -> str:
+        return "v.id IN (SELECT c.video_id FROM video_claims c WHERE " + _and(list(conditions)) + ")"
+
     title = q.keywords_in("v.title")
     match_source = "'direct'"
     if title:
         claim_text = q.keywords_in("c.claim")
         assert claim_text
-        with_title = f"({title} AND {a_claim(others) if others else 'TRUE'})"
-        claim_part = f"({with_title} OR {a_claim([*others, claim_text])})"
+        # Two branches, each found through its own text index and built once, rather
+        # than "title OR claim" checked video by video (docs/search.md, "Speed").
+        titled = f"v.id IN (SELECT t.id FROM videos t WHERE {q.keywords_in('t.title')})"
+        with_title = f"({titled} AND {a_claim(others)})" if others else titled
+        claim_part = f"({with_title} OR {videos_with_a_claim([*others, claim_text])})"
         match_source = f"CASE WHEN {title} THEN 'direct' ELSE 'claims' END"
     elif others:
         claim_part = a_claim(others)
@@ -225,19 +232,36 @@ def narratives_query(filters: SearchFilters) -> TabQuery:
     own_title = None if has_content_filter else q.keywords_in("n.title")
     claim_text = q.keywords_in("c.claim")
 
-    per_claim: list[str | None] = [
-        f"({own_topic} OR {q.claim_topic('c')})" if own_topic else None,
-        f"({own_title} OR {claim_text})" if own_title else claim_text,
-        *content,
-    ]
-    a_claim = None
-    if any(per_claim):
-        a_claim = (
-            "EXISTS (SELECT 1 FROM claim_narratives cn"
+    # Filters that hold on the narrative or on a claim are written as separate
+    # branches ("the title matches" OR "a claim's text matches"), each using its own
+    # index; one "title OR claim text" condition would make Postgres read every claim
+    # (docs/search.md, "Speed").
+    either: list[tuple[str, str]] = []
+    if own_topic:
+        either.append((own_topic, q.claim_topic("c") or "FALSE"))
+    if own_title:
+        assert claim_text
+        either.append((own_title, claim_text))
+    claim_only = [x for x in [None if own_title else claim_text, *content] if x]
+
+    def with_a_claim(conditions: list[str]) -> str:
+        if not conditions:
+            return "EXISTS (SELECT 1 FROM claim_narratives cn WHERE cn.narrative_id = n.id)"
+        return (
+            "n.id IN (SELECT cn.narrative_id FROM claim_narratives cn"
             " JOIN video_claims c ON c.id = cn.claim_id"
             " LEFT JOIN videos v ON v.id = c.video_id"
-            " WHERE cn.narrative_id = n.id AND " + _and(per_claim) + ")"
+            " WHERE " + _and(list(conditions)) + ")"
         )
+
+    a_claim = None
+    if either or claim_only:
+        branches = []
+        for choice in itertools.product((0, 1), repeat=len(either)):
+            on_narrative = [pair[0] for pair, c in zip(either, choice) if c == 0]
+            on_claim = [pair[1] for pair, c in zip(either, choice) if c == 1]
+            branches.append(_and([*on_narrative, with_a_claim([*on_claim, *claim_only])]))
+        a_claim = branches[0] if len(branches) == 1 else "(" + " OR ".join(branches) + ")"
 
     spread = None
     if filters.spread_patterns:

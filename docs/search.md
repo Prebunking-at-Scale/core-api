@@ -60,6 +60,15 @@ claim**.
   listed for content that doesn't mention it. `match_source: "claims"` when the topic
   or keywords needed the claim.
 
+### Speed
+
+A filter that can hold on the narrative (or video) or on one of its claims is written
+as separate branches ("the title matches" OR "a claim's text matches"), each found
+through its own index and built once (`IN (SELECT …)`). Written as one condition
+("title OR claim text"), Postgres can't use the claim-text index and reads every claim:
+on dev's copy of production (273k claims) a keyword search took 14 s on the Narratives
+tab, 0.1 s after the change (October 2026).
+
 ### Counts
 
 Exact up to 10,000 (`COUNT_CAP`); above that, `total` is 10,000 with `capped: true`
