@@ -41,6 +41,16 @@ async def test_without_text_only_the_organisations_own_channels(
     assert [c["channel"] for c in await channels(api_key_client, organisation, platform="youtube")] == ["Le Réveil"]
 
 
+async def test_the_own_channels_are_never_cut_at_the_limit(
+    api_key_client: Client, data: SearchData, organisation: Organisation
+) -> None:
+    # "Ours" selects them all, so all of them come back, whatever the limit
+    for i in range(25):
+        await add_channel_feed(organisation, f"@feed{i:02d}", "youtube")
+    assert len(await channels(api_key_client, organisation)) == 25
+    assert len(await channels(api_key_client, organisation, limit=5)) == 25
+
+
 async def test_with_text_every_collected_channel_containing_it_own_first(
     api_key_client: Client, data: SearchData, organisation: Organisation
 ) -> None:

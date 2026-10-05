@@ -163,7 +163,8 @@ class SearchController(Controller):
             default=None,
             description=(
                 "Part of the channel name, ignoring case. Without it, only the "
-                "organisation's own channels (its channel feeds) are returned."
+                "organisation's own channels (its channel feeds) are returned, all of "
+                "them: limit only applies with text."
             ),
         ),
         platform: list[str] | None = None,

@@ -68,13 +68,14 @@ class SearchService:
         organisation_id: UUID | None,
         limit: int,
     ) -> list[ChannelOption]:
-        """With no text, the organisation's own channels; with text, every collected
-        channel containing it, the organisation's own first."""
+        """With no text, all the organisation's own channels (what "Ours" selects, so
+        never cut at the limit); with text, up to `limit` collected channels containing
+        it, the organisation's own first."""
         async with self.repo() as repo:
             if not text or not text.strip():
                 if not organisation_id:
                     return []
-                return (await repo.own_channels(organisation_id, platforms))[:limit]
+                return await repo.own_channels(organisation_id, platforms)
             return await repo.search_channels(
                 text.strip(), platforms, organisation_id, limit
             )

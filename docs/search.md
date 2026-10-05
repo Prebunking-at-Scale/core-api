@@ -67,8 +67,8 @@ Exact up to 10,000 (`COUNT_CAP`); above that, `total` is 10,000 with `capped: tr
 
 ### Options
 
-- **Channels:** without `text`, the organisation's own channels (its channel feeds, for
-  the "Ours" switch); with `text`, collected channels whose name contains it, the
+- **Channels:** without `text`, all the organisation's own channels (its channel feeds,
+  for the "Ours" switch; `limit` doesn't apply); with `text`, collected channels whose name contains it, the
   organisation's own first, then by number of videos. The frontend searches from 3
   characters: shorter texts can't use the trigram index.
 - **Languages:** read from every claim, cached for an hour per process.
