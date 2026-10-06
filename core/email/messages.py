@@ -1,6 +1,12 @@
+from html import escape
+from typing import TYPE_CHECKING
+
 import i18n
 
 from core import config
+
+if TYPE_CHECKING:
+    from core.alerts.models import DigestEntry
 
 button_style = (
     "background: #00533D; color: #ffffff; border-radius: 6px; display: block;"
@@ -81,60 +87,60 @@ def magic_link_message(token: str, locale: str) -> tuple[str, str]:
     return subject, body
 
 
-def alerts_message(
-    organisation_name: str, alerts: list[dict], locale: str
-) -> tuple[str, str]:
-    subject = f"Alert Summary for {organisation_name}"
+def alert_digest_message(entries: "list[DigestEntry]", summaries: dict) -> tuple[str, str]:
+    """The daily alerts e-mail (frontend docs/alerts.md, "Daily digest"), in English:
+    per triggered alert, new narratives, new claims in each followed narrative, then
+    new claims; each title in bold with the conditions it met, 5 per section.
+    `summaries[alert_id]` holds each condition's summary, by position."""
+    from core.alerts.models import DigestSection
 
-    alert_items_html = ""
-    for alert in alerts:
-        alert_name = alert.get("alert_name", "Unnamed Alert")
-        alert_type = alert["alert_type"]
-        narrative_title = alert["narrative_title"]
+    count = len(entries)
+    subject = f"{count} alert triggered" if count == 1 else f"{count} alerts triggered"
+    section_title = "margin: 1.2em 0 0.3em 0; font-size: 1em; color: #1F2937;"
+    item_style = "margin: 0.25em 0; color: #1F2937; line-height: 1.4;"
 
-        if alert_type == "narrative_views":
-            description = f"Narrative '{narrative_title}' reached {alert['trigger_value']:,} views (threshold: {alert['threshold']:,})"
-        elif alert_type == "narrative_claims_count":
-            description = f"Narrative '{narrative_title}' reached {alert['trigger_value']} claims (threshold: {alert['threshold']})"
-        elif alert_type == "narrative_videos_count":
-            description = f"Narrative '{narrative_title}' reached {alert['trigger_value']} videos (threshold: {alert['threshold']})"
-        elif alert_type == "narrative_with_topic":
-            description = (
-                f"New narrative '{narrative_title}' created with tracked topic"
+    def items_html(entry, section: DigestSection, indent: bool = False) -> str:
+        out = ""
+        for item in section.items:
+            met = " or ".join(summaries[entry.alert_id][n - 1] for n in item.conditions)
+            out += (
+                f'<p style="{item_style}{" padding-left: 1em;" if indent else ""}">'
+                f"&bull; <strong>{escape(item.title)}</strong> "
+                f'<span style="color: #6B7280;">({escape(met)})</span></p>'
             )
-        elif alert_type == "keyword":
-            description = (
-                f"Narrative '{narrative_title}' contains keyword '{alert['keyword']}'"
+        if section.total > len(section.items):
+            out += (
+                f'<p style="margin: 0.4em 0;{" padding-left: 1em;" if indent else ""}">'
+                f'<a href="{config.APP_BASE_URL}/alerts/{entry.alert_id}" '
+                f'style="color: #00533D; text-decoration: underline;">See all ({section.total})</a></p>'
             )
-        else:
-            description = f"Alert triggered for narrative '{narrative_title}'"
+        return out
 
-        alert_items_html += f"""
-        <div style="background: white; border-left: 4px solid #00533D; margin: 1em 0; padding: 1em; text-align: left;">
-            <h3 style="margin: 0 0 0.5em 0; color: #1F2937; font-size: 1.1em;">{alert_name}</h3>
-            <span style="display: inline-block; background: white; color: #333; border: 1px solid #333; padding: 2px 6px; border-radius: 3px; font-size: 0.7em; font-weight: 500; text-transform: uppercase;">
-                {alert_type.replace("_", " ")}
-            </span>
-            <p style="margin: 0.75em 0 0 0; color: #666;">{description}</p>
-            <p style="margin: 0.5em 0 0 0;">
-                <a href="{config.APP_BASE_URL}/narratives/{alert["narrative_id"]}" style="color: #00533D; text-decoration: underline;">
-                    View Narrative →
-                </a>
-            </p>
-        </div>
-        """
+    blocks = ""
+    for entry in entries:
+        block = (
+            '<h2 style="margin: 0; padding-bottom: 0.3em; border-bottom: 2px solid #00533D; '
+            f'color: #1F2937; font-size: 1.25em;">Alert triggered: {escape(entry.alert_name)}</h2>'
+        )
+        if entry.narratives.total:
+            block += f'<h3 style="{section_title}">New narratives</h3>' + items_html(entry, entry.narratives)
+        if entry.in_narratives:
+            block += f'<h3 style="{section_title}">New claims in selected narratives</h3>'
+            for group in entry.in_narratives:
+                block += (
+                    f'<p style="margin: 0.5em 0 0.2em 0; color: #374151;">In &ldquo;{escape(group.narrative_title)}&rdquo;</p>'
+                    + items_html(entry, group, indent=True)
+                )
+        if entry.claims.total:
+            block += f'<h3 style="{section_title}">New claims</h3>' + items_html(entry, entry.claims)
+        blocks += f'<div style="background: white; border-radius: 8px; margin: 1em 0; padding: 1em 1.2em;">{block}</div>'
 
     body = f"""
-    <div style="{container_style}">
-        <h1 style="color: #333;">Alert Summary</h1>
-        <p style="margin: 1em 0; color: #666;">The following alerts have been triggered for {organisation_name}:</p>
-        <div style="margin: 2em 0;">
-            {alert_items_html}
-        </div>
-        <p style="margin: 2em 0 0 0; color: #999; font-size: 0.9em;">
-            To manage your alerts, visit your dashboard settings.
+    <div style="{container_style} max-width: 640px; text-align: left; font-size: 1em;">
+        {blocks}
+        <p style="margin: 1.5em 0 0 0; color: #999; font-size: 0.85em; text-align: center;">
+            <a href="{config.APP_BASE_URL}/alerts" style="color: #999;">Manage your alerts</a>
         </p>
     </div>
     """
-
     return subject, body

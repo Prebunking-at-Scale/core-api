@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from core.entities.models import EntityInput
 from core.models import Claim, Entity, NarrativeSpreadPattern, Topic, Video
 
+
 class IndicatorPayload(TypedDict):
     """
     One analysis indicator as carried by get_bulk_analysis_indicators_for_date:
@@ -85,6 +86,10 @@ ViralNarrativeSummary = NarrativeSummary
 
 # Alias for list endpoints
 NarrativeListItem = NarrativeSummary
+
+
+class NarrativeMergeInput(BaseModel):
+    into: UUID
 
 
 class NarrativeClaim(Claim):

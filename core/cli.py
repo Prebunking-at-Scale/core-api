@@ -95,28 +95,19 @@ def start_narratives(num_claims):
 
 
 @click.command()
-def process_alerts():
-    """Process all active alerts and send notifications."""
-    
+def send_alert_digest():
+    """Send today's alerts e-mail to each person with a triggered alert (daily, 08:00
+    Europe/Madrid; see deployment/base/cron-alert-digest.yaml)."""
+
     async def main():
         pool = pool_factory(postgres_url)
         await pool.open()
         try:
-            click.echo("Processing alerts...")
-            alert_service = AlertService(connection_factory=pool.connection)
-            execution = await alert_service.process_alerts()
-            
-            click.echo(f"Alerts processed successfully!")
-            click.echo(f"  - Alerts checked: {execution.alerts_checked}")
-            click.echo(f"  - Alerts triggered: {execution.alerts_triggered}")
-            click.echo(f"  - Emails sent: {execution.emails_sent}")
-            
-        except Exception as e:
-            click.echo(f"Error processing alerts: {e}", err=True)
-            sys.exit(1)
+            sent, triggered = await AlertService(connection_factory=pool.connection).send_digests()
+            click.echo(f"Alert e-mails sent: {sent} ({triggered} alerts triggered)")
         finally:
             await pool.close()
-    
+
     asyncio.run(main())
 
 
@@ -171,7 +162,7 @@ def cli():
 
 
 cli.add_command(start_narratives)
-cli.add_command(process_alerts)
+cli.add_command(send_alert_digest)
 cli.add_command(run_narrative_analysis_indicators_pipeline)
 
 
