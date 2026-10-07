@@ -20,8 +20,8 @@ MatchSource = Literal["direct", "claims", "narrative"]
 
 class SearchFilters(BaseModel):
     """The search's filters, shared by the three tabs and the counts (docs/search.md).
-    Values within a filter are ORed; filters are ANDed. min_score/max_score only apply
-    to claims and spread_patterns only to narratives."""
+    Values within a filter are ORed; filters are ANDed. spread_patterns only apply to
+    narratives. Claims are never filtered by their score."""
 
     topic_ids: list[UUID] = []
     entity_ids: list[UUID] = []
@@ -32,8 +32,6 @@ class SearchFilters(BaseModel):
     channels: list[str] = []
     start_date: datetime | None = None
     end_date: datetime | None = None
-    min_score: float | None = None
-    max_score: float | None = None
     spread_patterns: list[NarrativeSpreadPattern] = []
 
     @field_validator("keywords", "languages", "platforms", "channels")

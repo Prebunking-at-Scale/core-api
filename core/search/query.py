@@ -72,14 +72,6 @@ class Query:
             return None
         return f"{c}.metadata->>'language' = ANY({self.param(self.filters.languages)})"
 
-    def claim_score(self, c: str) -> list[str]:
-        out = []
-        if self.filters.min_score is not None:
-            out.append(f"({c}.metadata->>'score')::float >= {self.param(self.filters.min_score)}")
-        if self.filters.max_score is not None:
-            out.append(f"({c}.metadata->>'score')::float <= {self.param(self.filters.max_score)}")
-        return out
-
     def claim_entity(self, c: str) -> str | None:
         """Entities live on narratives: a claim has one when one of its narratives does."""
         if not self.filters.entity_ids:
@@ -158,7 +150,6 @@ def claims_query(filters: SearchFilters) -> TabQuery:
             q.keywords_in("c.claim"),
             q.claim_language("c"),
             *q.video_conditions("v"),
-            *q.claim_score("c"),
             q.claim_entity("c"),
         ]
     )

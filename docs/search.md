@@ -36,8 +36,9 @@ are ORed; filters are ANDed.
 | `language` (repeated) | the claim's language |
 | `platform`, `channel` (repeated) | the video's; channel exact, ignoring case |
 | `start_date`, `end_date` | the video's upload date, inclusive |
-| `min_score`, `max_score` | claims only |
 | `spread_pattern` (repeated) | narratives only |
+
+Claims are never filtered by their score (decided October 2026).
 | `limit` (1–100, default 12), `offset` | paging |
 
 ### Matching

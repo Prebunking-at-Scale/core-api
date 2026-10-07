@@ -55,8 +55,6 @@ def search_filters(
     end_date: datetime | None = Parameter(
         default=None, description="Video upload date, inclusive."
     ),
-    min_score: float | None = Parameter(default=None, description="Claims only."),
-    max_score: float | None = Parameter(default=None, description="Claims only."),
     spread_pattern: list[NarrativeSpreadPattern] | None = Parameter(
         default=None, description="Narratives only (OR)."
     ),
@@ -71,8 +69,6 @@ def search_filters(
         channels=channel or [],
         start_date=start_date,
         end_date=end_date,
-        min_score=min_score,
-        max_score=max_score,
         spread_patterns=spread_pattern or [],
     )
 
