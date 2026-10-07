@@ -104,20 +104,20 @@ class AlertService:
         claims: dict[UUID, DigestItem] = {}
         in_narrative: dict[UUID, dict[UUID, DigestItem]] = {}
 
-        def add(found: dict[UUID, DigestItem], element_id: UUID, title: str, position: int) -> None:
+        def add(found: dict[UUID, DigestItem], element_id: UUID, title: str, link: str | None, position: int) -> None:
             if element_id in found:
                 found[element_id].conditions.append(position)
             else:
-                found[element_id] = DigestItem(id=element_id, title=title, conditions=[position])
+                found[element_id] = DigestItem(id=element_id, title=title, conditions=[position], link=link)
 
         for position, condition in enumerate(alert.conditions, start=1):
-            for element_id, title in await repo.matches(alert.id, condition, since):
+            for element_id, title, link in await repo.matches(alert.id, condition, since):
                 if condition.type == "new_narrative":
-                    add(narratives, element_id, title, position)
+                    add(narratives, element_id, title, link, position)
                 elif condition.type == "new_claim_in_narrative" and condition.narrative_id:
-                    add(in_narrative.setdefault(condition.narrative_id, {}), element_id, title, position)
+                    add(in_narrative.setdefault(condition.narrative_id, {}), element_id, title, link, position)
                 else:
-                    add(claims, element_id, title, position)
+                    add(claims, element_id, title, link, position)
 
         for group in in_narrative.values():
             for item in group.values():

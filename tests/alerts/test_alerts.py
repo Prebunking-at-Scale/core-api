@@ -193,6 +193,7 @@ async def test_no_backlog_once_only_and_the_email(
     assert subject == "1 alert triggered"
     assert "Alert triggered: Health watch" in html
     assert "<strong>Vaccines contain microchips to track people</strong>" in html
+    assert f'/narratives/{data["n_vax"]}"' in html  # the title links to the narrative
     assert "(Topic: Health)" in html
 
     # Once only
@@ -231,6 +232,8 @@ async def test_a_claim_joining_a_followed_narrative_counts_even_if_older(
     [group] = entry.in_narratives
     assert group.narrative_title == "Planes spray chemicals to control the weather"
     by_id = {i.id: i.conditions for i in group.items}
+    # A claim links to its video, at the moment it is said
+    assert all(i.link and i.link.startswith("/videos/") and "?t=12" in i.link for i in group.items)
     assert by_id == {data["c7"]: [1], data["c3"]: [1, 2]}
     # c3 is only listed under its narrative, not again under new claims
     assert entry.claims.total == 0

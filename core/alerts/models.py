@@ -84,6 +84,9 @@ class DigestItem(BaseModel):
     id: UUID
     title: str
     conditions: list[int]
+    # Where it opens in PAS (relative to the app): a narrative's page, or a claim's video
+    # at the moment it is said
+    link: str | None = None
 
 
 class DigestSection(BaseModel):

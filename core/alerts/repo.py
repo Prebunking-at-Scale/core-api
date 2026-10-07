@@ -32,6 +32,16 @@ def search_filters(filters: dict[str, Any]) -> SearchFilters:
     )
 
 
+def _link(element_id: UUID, video_id: UUID | None, start_time_s: float | None) -> str | None:
+    """Where an element opens in PAS: a narrative's page, or a claim's video at the
+    moment it is said (claims have no page of their own), as the claim cards do."""
+    if start_time_s is None:
+        return f"/narratives/{element_id}"
+    if video_id is None:
+        return None
+    return f"/videos/{video_id}?t={int(start_time_s)}"
+
+
 class AlertRepository:
     """Alerts belong to one person in one organisation: every read and write for the
     API is scoped to both."""
@@ -204,8 +214,8 @@ class AlertRepository:
 
     async def matches(
         self, alert_id: UUID, condition: AlertCondition, counting_since: datetime
-    ) -> list[tuple[UUID, str]]:
-        """(id, title) of what one condition matches now and its alert hasn't reported:
+    ) -> list[tuple[UUID, str, str | None]]:
+        """(id, title, link) of what one condition matches now and its alert hasn't reported:
         elements that appeared after the alert's starting point (and in the last
         CANDIDATE_WINDOW_DAYS), with the search's own matching. Newest first."""
         filters = search_filters(condition.filters)
@@ -218,7 +228,8 @@ class AlertRepository:
         if condition.type == "new_narrative":
             query = QUERIES["narratives"](filters)
             sql = f"""
-                SELECT n.id, n.title, n.created_at AS appeared FROM narratives n
+                SELECT n.id, n.title, NULL::uuid AS video_id, NULL::float AS start_time_s,
+                       n.created_at AS appeared FROM narratives n
                 WHERE {query.where_sql}
                   AND n.created_at >= %(_since)s
                   AND n.created_at >= CURRENT_TIMESTAMP - %(_window)s::interval
@@ -237,7 +248,8 @@ class AlertRepository:
                 joined = "JOIN claim_narratives fn ON fn.claim_id = c.id AND fn.narrative_id = %(_narrative)s"
                 params["_narrative"] = condition.narrative_id
             sql = f"""
-                SELECT c.id, c.claim AS title, {appeared} AS appeared FROM {query.from_sql} {joined}
+                SELECT c.id, c.claim AS title, c.video_id, c.start_time_s,
+                       {appeared} AS appeared FROM {query.from_sql} {joined}
                 WHERE {query.where_sql}
                   AND {appeared} >= %(_since)s
                   AND {appeared} >= CURRENT_TIMESTAMP - %(_window)s::interval
@@ -246,7 +258,10 @@ class AlertRepository:
                 ORDER BY {appeared} DESC LIMIT %(_cap)s
             """
         await self._session.execute(sql, {**query.params, **params})
-        return [(row["id"], row["title"]) for row in await self._session.fetchall()]
+        return [
+            (row["id"], row["title"], _link(row["id"], row["video_id"], row["start_time_s"]))
+            for row in await self._session.fetchall()
+        ]
 
     async def record_reports(self, alert_id: UUID, rows: list[dict[str, Any]]) -> None:
         if not rows:

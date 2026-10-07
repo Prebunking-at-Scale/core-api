@@ -99,13 +99,22 @@ def alert_digest_message(entries: "list[DigestEntry]", summaries: dict) -> tuple
     section_title = "margin: 1.2em 0 0.3em 0; font-size: 1em; color: #1F2937;"
     item_style = "margin: 0.25em 0; color: #1F2937; line-height: 1.4;"
 
+    def title_html(item) -> str:
+        title = f"<strong>{escape(item.title)}</strong>"
+        if not item.link:
+            return title
+        return (
+            f'<a href="{escape(config.APP_BASE_URL + item.link)}" '
+            f'style="color: #1F2937; text-decoration: underline;">{title}</a>'
+        )
+
     def items_html(entry, section: DigestSection, indent: bool = False) -> str:
         out = ""
         for item in section.items:
             met = " or ".join(summaries[entry.alert_id][n - 1] for n in item.conditions)
             out += (
                 f'<p style="{item_style}{" padding-left: 1em;" if indent else ""}">'
-                f"&bull; <strong>{escape(item.title)}</strong> "
+                f"&bull; {title_html(item)} "
                 f'<span style="color: #6B7280;">({escape(met)})</span></p>'
             )
         if section.total > len(section.items):
