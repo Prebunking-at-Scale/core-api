@@ -79,11 +79,11 @@ class AlertService:
                 raise NotFoundError()
             await repo.delete(alert_id)
 
-    async def narratives_by_title(self, text: str, limit: int) -> list[NarrativeOption]:
+    async def narratives_matching(self, text: str, limit: int) -> list[NarrativeOption]:
         if len(text.strip()) < 2:
             return []
         async with self.repo() as repo:
-            return [NarrativeOption(**row) for row in await repo.narratives_by_title(text.strip(), limit)]
+            return [NarrativeOption(**row) for row in await repo.narratives_matching(text.strip(), limit)]
 
     # The daily e-mail -----------------------------------------------------------
 

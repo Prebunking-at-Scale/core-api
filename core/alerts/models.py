@@ -49,6 +49,8 @@ class AlertRule(BaseModel):
 class NarrativeOption(BaseModel):
     id: UUID
     title: str
+    # "title" when the text is in the narrative's title, "claims" when only in its claims
+    matched_in: Literal["title", "claims"]
 
 
 class AlertConditionInput(BaseModel):

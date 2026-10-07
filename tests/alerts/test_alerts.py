@@ -315,18 +315,24 @@ async def test_topic_and_keyword_alerts_are_carried_over_and_thresholds_dropped(
     assert by_name["Vacunas"].enabled is False
 
 
-async def test_narratives_to_follow_are_found_by_title_only(
+async def test_narratives_to_follow_by_title_first_then_by_their_claims(
     auth_client: Client, auth_service: AuthService, organisation: Organisation, data: SearchData
 ) -> None:
     alice = await person(auth_service, organisation)
 
-    async def titles(text: str) -> list[str]:
+    async def found(text: str) -> list[tuple[str, str]]:
         response = await auth_client.get("/api/alerts/narratives", params={"text": text}, headers=alice.headers)
         assert response.status_code == 200, response.text
-        return [n["title"] for n in response.json()["data"]]
+        return [(n["title"], n["matched_in"]) for n in response.json()["data"]]
 
-    # In the title, whatever the case
-    assert await titles("PLANES spray") == ["Planes spray chemicals to control the weather"]
-    # Only in its claims ("weather weapon" is in c1, a claim of that narrative): not found
-    assert await titles("weather weapon") == []
-    assert await titles("x") == []  # too short
+    # "weather" is in n_chem's title, and in c1, a claim of n_chem and of n_climate
+    assert await found("WEATHER") == [
+        ("Planes spray chemicals to control the weather", "title"),
+        ("Climate change is a hoax", "claims"),
+    ]
+    # Only in the claims
+    assert await found("weather weapon") == [
+        ("Planes spray chemicals to control the weather", "claims"),
+        ("Climate change is a hoax", "claims"),
+    ]
+    assert await found("x") == []  # too short

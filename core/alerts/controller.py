@@ -43,17 +43,21 @@ class AlertController(Controller):
 
     @get(
         path="/narratives",
-        summary="Narratives to follow: titles containing the text (2 characters or more)",
-        description="Only the title, ignoring case, accents and hyphens; newest first.",
+        summary="Narratives to follow, by the text (2 characters or more)",
+        description=(
+            "Those with the text in their title first, then those with it only in one of "
+            "their claims (matched_in: title | claims); each newest first; case, accents "
+            "and hyphens ignored."
+        ),
     )
-    async def narratives_by_title(
+    async def narratives_matching(
         self,
         alert_service: AlertService,
         organisation: Organisation,
         text: str = "",
         limit: int = Parameter(default=20, ge=1, le=50),
     ) -> JSON[list[NarrativeOption]]:
-        return JSON(await alert_service.narratives_by_title(text, limit))
+        return JSON(await alert_service.narratives_matching(text, limit))
 
     @get(path="/digest-preview", summary="What your next alerts e-mail would contain, so far")
     async def digest_preview(

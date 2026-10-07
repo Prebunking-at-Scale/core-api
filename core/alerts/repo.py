@@ -156,18 +156,41 @@ class AlertRepository:
             {"source": source_id, "target": target_id},
         )
 
-    async def narratives_by_title(self, text: str, limit: int) -> list[dict[str, Any]]:
-        """Narratives whose title contains the text, ignoring case, accents and hyphens
-        (the search's normalize_text and its title index), newest first."""
-        pattern = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    async def narratives_matching(self, text: str, limit: int) -> list[dict[str, Any]]:
+        """Narratives with the text in their title, then those with it only in one of
+        their claims, each newest first, ignoring case, accents and hyphens (the search's
+        normalize_text and its trigram indexes)."""
+        params = {
+            "pattern": text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_"),
+            "limit": limit,
+        }
         await self._session.execute(
             """
-            SELECT id, title FROM narratives
-            WHERE normalize_text(title) LIKE ('%%' || normalize_text(%(pattern)s) || '%%')
-            ORDER BY created_at DESC, id DESC
+            WITH by_title AS (
+                SELECT id, title, created_at, 'title' AS matched_in FROM narratives
+                WHERE normalize_text(title) LIKE ('%%' || normalize_text(%(pattern)s) || '%%')
+                ORDER BY created_at DESC, id DESC
+                LIMIT %(limit)s
+            ),
+            by_claims AS (
+                SELECT n.id, n.title, n.created_at, 'claims' AS matched_in FROM narratives n
+                WHERE n.id IN (
+                    SELECT cn.narrative_id FROM claim_narratives cn
+                    JOIN video_claims c ON c.id = cn.claim_id
+                    WHERE normalize_text(c.claim) LIKE ('%%' || normalize_text(%(pattern)s) || '%%')
+                )
+                AND n.id NOT IN (SELECT id FROM by_title)
+                AND normalize_text(n.title) NOT LIKE ('%%' || normalize_text(%(pattern)s) || '%%')
+                ORDER BY n.created_at DESC, n.id DESC
+                LIMIT %(limit)s
+            )
+            SELECT id, title, matched_in FROM (
+                SELECT *, 0 AS grp FROM by_title UNION ALL SELECT *, 1 FROM by_claims
+            ) found
+            ORDER BY grp, created_at DESC, id DESC
             LIMIT %(limit)s
             """,
-            {"pattern": pattern, "limit": limit},
+            params,
         )
         return await self._session.fetchall()
 
