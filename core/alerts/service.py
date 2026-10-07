@@ -83,7 +83,12 @@ class AlertService:
         if len(text.strip()) < 2:
             return []
         async with self.repo() as repo:
-            return [NarrativeOption(**row) for row in await repo.narratives_matching(text.strip(), limit)]
+            found = [NarrativeOption(**row) for row in await repo.narratives_matching(text.strip(), limit)]
+        # Room for both kinds: up to half each, and what one doesn't use goes to the other
+        by_title = [n for n in found if n.matched_in == "title"]
+        by_claims = [n for n in found if n.matched_in == "claims"]
+        titles = min(len(by_title), max(limit // 2, limit - len(by_claims)))
+        return by_title[:titles] + by_claims[: limit - titles]
 
     # The daily e-mail -----------------------------------------------------------
 

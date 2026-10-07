@@ -336,3 +336,16 @@ async def test_narratives_to_follow_by_title_first_then_by_their_claims(
         ("Climate change is a hoax", "claims"),
     ]
     assert await found("x") == []  # too short
+
+
+async def test_narratives_to_follow_leave_room_for_both_kinds(
+    auth_client: Client, auth_service: AuthService, organisation: Organisation, data: SearchData, conn_factory: Any
+) -> None:
+    alice = await person(auth_service, organisation)
+    for i in range(6):
+        await sql(conn_factory, "INSERT INTO narratives (title, description) VALUES (%s, '')", (f"Weather story {i}",))
+    response = await auth_client.get("/api/alerts/narratives", params={"text": "weather", "limit": 4}, headers=alice.headers)
+    kinds = [n["matched_in"] for n in response.json()["data"]]
+    # 7 titles, 1 narrative only through a claim (n_climate): the claims kind is shown,
+    # and the room it doesn't use goes to titles
+    assert kinds == ["title", "title", "title", "claims"]

@@ -158,7 +158,7 @@ class AlertRepository:
 
     async def narratives_matching(self, text: str, limit: int) -> list[dict[str, Any]]:
         """Narratives with the text in their title, then those with it only in one of
-        their claims, each newest first, ignoring case, accents and hyphens (the search's
+        their claims, each newest first and up to `limit` each, ignoring case, accents and hyphens (the search's
         normalize_text and its trigram indexes)."""
         params = {
             "pattern": text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_"),
@@ -188,7 +188,6 @@ class AlertRepository:
                 SELECT *, 0 AS grp FROM by_title UNION ALL SELECT *, 1 FROM by_claims
             ) found
             ORDER BY grp, created_at DESC, id DESC
-            LIMIT %(limit)s
             """,
             params,
         )
