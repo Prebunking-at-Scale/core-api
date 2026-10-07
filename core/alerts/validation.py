@@ -7,7 +7,6 @@ from uuid import UUID
 from core.alerts.models import (
     ALLOWED_FILTERS,
     CONDITION_TYPES,
-    LIST_FILTERS,
     MAX_CONDITIONS,
     NAME_MAX_LENGTH,
     AlertConditionInput,
@@ -36,26 +35,20 @@ def clean_filters(type_: str, filters: dict[str, Any]) -> tuple[dict[str, Any], 
         if key not in allowed:
             errors.append("filter_not_allowed")
             continue
-        if key in LIST_FILTERS:
-            if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() for v in value):
+        if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() for v in value):
+            errors.append("invalid_filter")
+            continue
+        values = list(dict.fromkeys(v.strip() for v in value))
+        if key in _UUID_FILTERS:
+            try:
+                values = [str(UUID(v)) for v in values]
+            except ValueError:
                 errors.append("invalid_filter")
                 continue
-            values = list(dict.fromkeys(v.strip() for v in value))
-            if key in _UUID_FILTERS:
-                try:
-                    values = [str(UUID(v)) for v in values]
-                except ValueError:
-                    errors.append("invalid_filter")
-                    continue
-            if key == "spread_pattern" and not set(values) <= _SPREAD_PATTERNS:
-                errors.append("invalid_filter")
-                continue
-            kept[key] = values
-        else:  # min_score, max_score
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 5:
-                errors.append("invalid_filter")
-                continue
-            kept[key] = float(value)
+        if key == "spread_pattern" and not set(values) <= _SPREAD_PATTERNS:
+            errors.append("invalid_filter")
+            continue
+        kept[key] = values
     if "keyword" in kept and filters.get("keyword_mode") == "all":
         kept["keyword_mode"] = "all"
     return kept, errors

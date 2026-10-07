@@ -28,8 +28,6 @@ def search_filters(filters: dict[str, Any]) -> SearchFilters:
         languages=filters.get("language", []),
         platforms=filters.get("platform", []),
         channels=filters.get("channel", []),
-        min_score=filters.get("min_score"),
-        max_score=filters.get("max_score"),
         spread_patterns=filters.get("spread_pattern", []),
     )
 

@@ -56,8 +56,6 @@ def condition_summary(condition: AlertCondition, names: dict[str, str]) -> str:
     add("Channel", f.get("channel", []))
     add("Entities", [names.get(v, v) for v in f.get("entity_id", [])])
     add("Spread pattern", [SPREAD_PATTERNS.get(v, v) for v in f.get("spread_pattern", [])])
-    if "min_score" in f or "max_score" in f:
-        parts.append(f"Score {f.get('min_score', 0):g}–{f.get('max_score', 5):g}")
     if not parts:
         return "any new claim" if condition.type == "new_claim_in_narrative" else "no filters"
     return " · ".join(parts)

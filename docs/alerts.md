@@ -15,7 +15,8 @@ migrations 26–27. Tests: `tests/alerts/`.
 - Its conditions (`alert_rule_conditions`), combined with OR, are `new_narrative`,
   `new_claim` or `new_claim_in_narrative` (with `narrative_id`), each with the search's
   filters (`filters` JSON: `topic_id`, `keyword` + `keyword_mode`, `language`,
-  `platform`, `channel`, `entity_id`, `spread_pattern`, `min_score`, `max_score`; which
+  `platform`, `channel`, `entity_id`, `spread_pattern`; claims are never filtered by
+  their score; which
   ones each type allows is `ALLOWED_FILTERS`).
 - `counting_since` is the starting point: only what appears after it is reported. It's
   reset when the conditions change or the alert is enabled again.

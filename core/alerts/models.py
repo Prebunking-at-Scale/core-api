@@ -17,7 +17,8 @@ NAME_MAX_LENGTH = 120
 MAX_CONDITIONS = 20
 
 LIST_FILTERS = ("topic_id", "keyword", "language", "platform", "channel", "entity_id", "spread_pattern")
-_CLAIM_FILTERS = ("topic_id", "keyword", "language", "platform", "channel", "min_score", "max_score")
+# Claims are never filtered by their priority score
+_CLAIM_FILTERS = ("topic_id", "keyword", "language", "platform", "channel")
 
 # Which filters each type of condition may use (docs/alerts.md, "Filters available
 # per type"), as in the frontend's utils/alertRules.ts.

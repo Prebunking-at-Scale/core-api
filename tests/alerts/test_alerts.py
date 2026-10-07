@@ -142,12 +142,15 @@ async def test_what_an_alert_needs(
         },
         "empty_condition": {"name": "x", "conditions": [{"type": "new_narrative", "filters": {"keyword": []}}]},
         "filter_not_allowed": {"name": "x", "conditions": [{"type": "new_narrative", "filters": {"min_score": 3}}]},
+        # Claims are never filtered by their score
+        "filter_not_allowed ": {"name": "x", "conditions": [{"type": "new_claim", "filters": {"min_score": 3}}]},
         "invalid_filter": {"name": "x", "conditions": [{"type": "new_narrative", "filters": {"topic_id": ["nope"]}}]},
     }
-    for code, body in cases.items():
+    for case, body in cases.items():
+        code = case.strip()
         response = await auth_client.post("/api/alerts", json=body, headers=alice.headers)
-        assert response.status_code == 422, code
-        assert code in response.json()["extra"]["errors"], (code, response.json())
+        assert response.status_code == 422, case
+        assert code in response.json()["extra"]["errors"], (case, response.json())
 
     # A condition following a narrative may have no filters: every new claim of it
     body = {"name": "Follow", "conditions": [{"type": "new_claim_in_narrative", "narrative_id": narrative, "filters": {}}]}
