@@ -215,9 +215,12 @@ async def test_upload_date_bounds_are_inclusive(api_key_client: Client, data: Se
 # Tab-specific filters, counts, paging, order ----------------------------------------
 
 
-async def test_score_and_spread_pattern_only_count_on_their_own_tab(api_key_client: Client, data: SearchData) -> None:
+async def test_spread_pattern_only_counts_on_narratives_and_score_never_filters(
+    api_key_client: Client, data: SearchData
+) -> None:
+    # min_score isn't a filter: claims are never filtered by their score
     params = {"min_score": 4.5, "spread_pattern": "viral"}
-    assert set(await matched(api_key_client, data, "claims", **params)) == {"c4"}
+    assert set(await matched(api_key_client, data, "claims", **params)) == set(CLAIMS)
     assert set(await matched(api_key_client, data, "narratives", **params)) == {"n_vax"}
     assert set(await matched(api_key_client, data, "videos", **params)) == set(VIDEOS)
 
