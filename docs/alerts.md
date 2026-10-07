@@ -48,7 +48,8 @@ the e-mail is sent: if sending fails, the matches go out next time.
 ## API
 
 `/api/alerts` (`GET`, `POST`), `/api/alerts/{id}` (`GET`, `PUT`, `DELETE`),
-`GET /api/alerts/digest-preview`. Only your own alerts; anything
+`GET /api/alerts/digest-preview`, and `GET /api/alerts/narratives?text=` (narratives to
+follow, by title only, for the "Belongs to this narrative" picker). Only your own alerts; anything
 else is 404. Invalid input is 422 with the codes in `extra.errors`
 (`core/alerts/models.py`, `AlertValidationError`).
 

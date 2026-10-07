@@ -10,6 +10,7 @@ from core.alerts.models import (
     DigestItem,
     DigestNarrativeGroup,
     DigestSection,
+    NarrativeOption,
 )
 from core.alerts.repo import AlertRepository
 from core.alerts.summary import condition_summary
@@ -77,6 +78,12 @@ class AlertService:
             if not await repo.get_own(organisation_id, user_id, alert_id):
                 raise NotFoundError()
             await repo.delete(alert_id)
+
+    async def narratives_by_title(self, text: str, limit: int) -> list[NarrativeOption]:
+        if len(text.strip()) < 2:
+            return []
+        async with self.repo() as repo:
+            return [NarrativeOption(**row) for row in await repo.narratives_by_title(text.strip(), limit)]
 
     # The daily e-mail -----------------------------------------------------------
 

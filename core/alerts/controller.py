@@ -2,8 +2,9 @@ from uuid import UUID
 
 from litestar import Controller, delete, get, post, put
 from litestar.di import Provide
+from litestar.params import Parameter
 
-from core.alerts.models import AlertRule, AlertRuleInput, DigestEntry
+from core.alerts.models import AlertRule, AlertRuleInput, DigestEntry, NarrativeOption
 from core.alerts.service import AlertService
 from core.auth.models import Organisation, User
 from core.response import JSON
@@ -39,6 +40,20 @@ class AlertController(Controller):
         self, alert_service: AlertService, organisation: Organisation, user: User, data: AlertRuleInput
     ) -> JSON[AlertRule]:
         return JSON(await alert_service.create(organisation.id, user.id, data))
+
+    @get(
+        path="/narratives",
+        summary="Narratives to follow: titles containing the text (2 characters or more)",
+        description="Only the title, ignoring case, accents and hyphens; newest first.",
+    )
+    async def narratives_by_title(
+        self,
+        alert_service: AlertService,
+        organisation: Organisation,
+        text: str = "",
+        limit: int = Parameter(default=20, ge=1, le=50),
+    ) -> JSON[list[NarrativeOption]]:
+        return JSON(await alert_service.narratives_by_title(text, limit))
 
     @get(path="/digest-preview", summary="What your next alerts e-mail would contain, so far")
     async def digest_preview(

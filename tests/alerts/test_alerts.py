@@ -313,3 +313,20 @@ async def test_topic_and_keyword_alerts_are_carried_over_and_thresholds_dropped(
     assert by_name["Health"].conditions[0].filters == {"topic_id": [str(HEALTH)]}
     assert by_name["Vacunas"].conditions[0].filters == {"keyword": ["vacuna"]}
     assert by_name["Vacunas"].enabled is False
+
+
+async def test_narratives_to_follow_are_found_by_title_only(
+    auth_client: Client, auth_service: AuthService, organisation: Organisation, data: SearchData
+) -> None:
+    alice = await person(auth_service, organisation)
+
+    async def titles(text: str) -> list[str]:
+        response = await auth_client.get("/api/alerts/narratives", params={"text": text}, headers=alice.headers)
+        assert response.status_code == 200, response.text
+        return [n["title"] for n in response.json()["data"]]
+
+    # In the title, whatever the case
+    assert await titles("PLANES spray") == ["Planes spray chemicals to control the weather"]
+    # Only in its claims ("weather weapon" is in c1, a claim of that narrative): not found
+    assert await titles("weather weapon") == []
+    assert await titles("x") == []  # too short

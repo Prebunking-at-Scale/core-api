@@ -46,6 +46,11 @@ class AlertRule(BaseModel):
     last_match_at: datetime | None = None
 
 
+class NarrativeOption(BaseModel):
+    id: UUID
+    title: str
+
+
 class AlertConditionInput(BaseModel):
     type: str
     narrative_id: UUID | None = None

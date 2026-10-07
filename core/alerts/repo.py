@@ -156,6 +156,21 @@ class AlertRepository:
             {"source": source_id, "target": target_id},
         )
 
+    async def narratives_by_title(self, text: str, limit: int) -> list[dict[str, Any]]:
+        """Narratives whose title contains the text, ignoring case, accents and hyphens
+        (the search's normalize_text and its title index), newest first."""
+        pattern = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        await self._session.execute(
+            """
+            SELECT id, title FROM narratives
+            WHERE normalize_text(title) LIKE ('%%' || normalize_text(%(pattern)s) || '%%')
+            ORDER BY created_at DESC, id DESC
+            LIMIT %(limit)s
+            """,
+            {"pattern": pattern, "limit": limit},
+        )
+        return await self._session.fetchall()
+
     async def names(self, conditions: list[AlertCondition]) -> dict[str, str]:
         return await names_for(self._session, conditions)
 
