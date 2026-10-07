@@ -64,7 +64,7 @@ class AlertRepository:
         return [AlertRule(**row, conditions=conditions.get(row["id"], [])) for row in rows]
 
     _SELECT = """
-        SELECT a.id, a.name, a.enabled, a.position, a.created_at,
+        SELECT a.id, a.name, a.enabled, a.created_at,
                (SELECT max(r.reported_at) FROM alert_rule_reports r WHERE r.alert_id = a.id) AS last_match_at
         FROM alert_rules a
     """
@@ -73,7 +73,7 @@ class AlertRepository:
         await self._session.execute(
             self._SELECT
             + " WHERE a.organisation_id = %(organisation_id)s AND a.user_id = %(user_id)s"
-            + " ORDER BY a.position, a.created_at",
+            + " ORDER BY a.created_at DESC, a.id",
             {"organisation_id": organisation_id, "user_id": user_id},
         )
         return await self._with_conditions(await self._session.fetchall())
@@ -116,18 +116,10 @@ class AlertRepository:
         enabled: bool,
         conditions: list[AlertConditionInput],
     ) -> UUID:
-        # New alerts go first in the panel
         await self._session.execute(
             """
-            UPDATE alert_rules SET position = position + 1
-            WHERE organisation_id = %(organisation_id)s AND user_id = %(user_id)s
-            """,
-            {"organisation_id": organisation_id, "user_id": user_id},
-        )
-        await self._session.execute(
-            """
-            INSERT INTO alert_rules (organisation_id, user_id, name, enabled, position)
-            VALUES (%(organisation_id)s, %(user_id)s, %(name)s, %(enabled)s, 1)
+            INSERT INTO alert_rules (organisation_id, user_id, name, enabled)
+            VALUES (%(organisation_id)s, %(user_id)s, %(name)s, %(enabled)s)
             RETURNING id
             """,
             {"organisation_id": organisation_id, "user_id": user_id, "name": name, "enabled": enabled},
@@ -158,21 +150,6 @@ class AlertRepository:
 
     async def delete(self, alert_id: UUID) -> None:
         await self._session.execute("DELETE FROM alert_rules WHERE id = %(id)s", {"id": alert_id})
-
-    async def reorder(self, organisation_id: UUID, user_id: UUID, ids: list[UUID]) -> None:
-        """The given alerts first, in that order; any others keep their order after."""
-        await self._session.execute(
-            """
-            WITH wanted AS (SELECT id, ord FROM unnest(%(ids)s::uuid[]) WITH ORDINALITY AS t(id, ord)),
-            ranked AS (
-                SELECT a.id, row_number() OVER (ORDER BY w.ord NULLS LAST, a.position, a.created_at) AS pos
-                FROM alert_rules a LEFT JOIN wanted w ON w.id = a.id
-                WHERE a.organisation_id = %(organisation_id)s AND a.user_id = %(user_id)s
-            )
-            UPDATE alert_rules a SET position = ranked.pos FROM ranked WHERE ranked.id = a.id
-            """,
-            {"ids": ids, "organisation_id": organisation_id, "user_id": user_id},
-        )
 
     async def follow_merged_narrative(self, source_id: UUID, target_id: UUID) -> None:
         """Conditions that followed a narrative merged into another follow the target."""

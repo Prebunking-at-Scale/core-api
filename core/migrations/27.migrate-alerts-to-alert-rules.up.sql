@@ -6,15 +6,12 @@ BEGIN;
 -- Counting starts now, so nobody gets old matches. Today's tables are left as they are.
 
 CREATE TEMP TABLE carried ON COMMIT DROP AS
-SELECT
-    gen_random_uuid() AS new_id,
-    a.*,
-    row_number() OVER (PARTITION BY a.user_id, a.organisation_id ORDER BY a.created_at, a.id) AS pos
+SELECT gen_random_uuid() AS new_id, a.*
 FROM alerts a
 WHERE a.alert_type IN ('narrative_with_topic', 'keyword');
 
-INSERT INTO alert_rules (id, organisation_id, user_id, name, enabled, position, created_at)
-SELECT new_id, organisation_id, user_id, left(trim(name), 120), enabled, pos, created_at
+INSERT INTO alert_rules (id, organisation_id, user_id, name, enabled, created_at)
+SELECT new_id, organisation_id, user_id, left(trim(name), 120), enabled, created_at
 FROM carried
 WHERE length(trim(name)) > 0;
 

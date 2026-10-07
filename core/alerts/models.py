@@ -39,7 +39,6 @@ class AlertRule(BaseModel):
     id: UUID
     name: str
     enabled: bool
-    position: int
     conditions: list[AlertCondition]
     created_at: datetime
     # When it last reported something, for the list
@@ -56,10 +55,6 @@ class AlertRuleInput(BaseModel):
     name: str
     enabled: bool = True
     conditions: list[AlertConditionInput]
-
-
-class AlertOrderInput(BaseModel):
-    ids: list[UUID]
 
 
 class AlertValidationError(HTTPException):

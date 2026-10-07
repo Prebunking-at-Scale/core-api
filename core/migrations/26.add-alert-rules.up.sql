@@ -15,15 +15,14 @@ CREATE TABLE alert_rules (
     user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     name text NOT NULL CHECK (length(trim(name)) BETWEEN 1 AND 120),
     enabled boolean NOT NULL DEFAULT true,
-    -- Order in the alerts panel, and in the e-mail
-    position integer NOT NULL,
     -- The starting point: only what appears after it is reported (no backlog). Reset
     -- when the conditions change or the alert is enabled again.
     counting_since TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX alert_rules_owner_idx ON alert_rules (user_id, organisation_id, position);
+-- The alerts panel and the e-mail list a person's alerts newest first
+CREATE INDEX alert_rules_owner_idx ON alert_rules (user_id, organisation_id, created_at DESC);
 
 CREATE TABLE alert_rule_conditions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

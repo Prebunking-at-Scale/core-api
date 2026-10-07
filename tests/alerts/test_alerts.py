@@ -154,17 +154,14 @@ async def test_what_an_alert_needs(
     assert (await auth_client.post("/api/alerts", json=body, headers=alice.headers)).status_code == 201
 
 
-async def test_the_panel_order(auth_client: Client, auth_service: AuthService, organisation: Organisation) -> None:
+async def test_alerts_are_listed_newest_first(
+    auth_client: Client, auth_service: AuthService, organisation: Organisation
+) -> None:
     alice = await person(auth_service, organisation)
-    ids = []
     for name in ("First", "Second", "Third"):
-        response = await auth_client.post("/api/alerts", json=narrative_alert(name), headers=alice.headers)
-        ids.append(response.json()["data"]["id"])
+        await auth_client.post("/api/alerts", json=narrative_alert(name), headers=alice.headers)
     listed = (await auth_client.get("/api/alerts", headers=alice.headers)).json()["data"]
-    assert [a["name"] for a in listed] == ["Third", "Second", "First"]  # newest first
-
-    response = await auth_client.put("/api/alerts/order", json={"ids": ids}, headers=alice.headers)
-    assert [a["name"] for a in response.json()["data"]] == ["First", "Second", "Third"]
+    assert [a["name"] for a in listed] == ["Third", "Second", "First"]
 
 
 # Matching and the e-mail -------------------------------------------------------------

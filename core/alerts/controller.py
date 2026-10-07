@@ -3,7 +3,7 @@ from uuid import UUID
 from litestar import Controller, delete, get, post, put
 from litestar.di import Provide
 
-from core.alerts.models import AlertOrderInput, AlertRule, AlertRuleInput, DigestEntry
+from core.alerts.models import AlertRule, AlertRuleInput, DigestEntry
 from core.alerts.service import AlertService
 from core.auth.models import Organisation, User
 from core.response import JSON
@@ -28,7 +28,7 @@ class AlertController(Controller):
     tags = ["alerts"]
     dependencies = {"alert_service": Provide(alert_service)}
 
-    @get(path="/", summary="Your alerts, in the order of your alerts panel")
+    @get(path="/", summary="Your alerts, newest first (the order of the panel and of the e-mail)")
     async def list_alerts(
         self, alert_service: AlertService, organisation: Organisation, user: User
     ) -> JSON[list[AlertRule]]:
@@ -45,12 +45,6 @@ class AlertController(Controller):
         self, alert_service: AlertService, organisation: Organisation, user: User
     ) -> JSON[list[DigestEntry]]:
         return JSON(await alert_service.digest_preview(organisation.id, user.id))
-
-    @put(path="/order", summary="Set the order of your alerts panel (and of the e-mail)")
-    async def reorder_alerts(
-        self, alert_service: AlertService, organisation: Organisation, user: User, data: AlertOrderInput
-    ) -> JSON[list[AlertRule]]:
-        return JSON(await alert_service.reorder(organisation.id, user.id, data.ids))
 
     @get(path="/{alert_id:uuid}", summary="One of your alerts")
     async def get_alert(

@@ -10,7 +10,8 @@ migrations 26–27. Tests: `tests/alerts/`.
 ## Model
 
 - An alert (`alert_rules`) belongs to the person who created it, in one organisation,
-  and is e-mailed to them only. `position` is its place in their panel and e-mail.
+  and is e-mailed to them only. Their alerts are listed newest first, in the panel and
+  in the e-mail; the order can't be changed.
 - Its conditions (`alert_rule_conditions`), combined with OR, are `new_narrative`,
   `new_claim` or `new_claim_in_narrative` (with `narrative_id`), each with the search's
   filters (`filters` JSON: `topic_id`, `keyword` + `keyword_mode`, `language`,
@@ -38,7 +39,7 @@ and removes the links that change, so a link keeps its date.
 
 `uv run python -m core.cli send-alert-digest`, run by the `core-api-process-alerts`
 CronJob at 08:00 Europe/Madrid. Per person (active, in an active organisation), one
-English e-mail with their triggered alerts in panel order: new narratives, new claims in
+English e-mail with their triggered alerts, newest first: new narratives, new claims in
 each followed narrative, new claims; each element once with the conditions it met; 5 per
 section and "See all" to `/alerts/{id}`. Reports are recorded in the same transaction as
 the e-mail is sent: if sending fails, the matches go out next time.
@@ -46,7 +47,7 @@ the e-mail is sent: if sending fails, the matches go out next time.
 ## API
 
 `/api/alerts` (`GET`, `POST`), `/api/alerts/{id}` (`GET`, `PUT`, `DELETE`),
-`PUT /api/alerts/order`, `GET /api/alerts/digest-preview`. Only your own alerts; anything
+`GET /api/alerts/digest-preview`. Only your own alerts; anything
 else is 404. Invalid input is 422 with the codes in `extra.errors`
 (`core/alerts/models.py`, `AlertValidationError`).
 

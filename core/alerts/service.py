@@ -78,11 +78,6 @@ class AlertService:
                 raise NotFoundError()
             await repo.delete(alert_id)
 
-    async def reorder(self, organisation_id: UUID, user_id: UUID, ids: list[UUID]) -> list[AlertRule]:
-        async with self.repo() as repo:
-            await repo.reorder(organisation_id, user_id, ids)
-            return await repo.list_own(organisation_id, user_id)
-
     # The daily e-mail -----------------------------------------------------------
 
     async def _evaluate(
@@ -156,7 +151,7 @@ class AlertService:
             return entries
 
     async def send_digests(self) -> tuple[int, int]:
-        """One e-mail per person with their triggered alerts, in panel order. An
+        """One e-mail per person with their triggered alerts, newest first. An
         alert's reports are recorded in the same transaction as its e-mail is sent:
         if sending fails, nothing is recorded and the matches go out next time.
         Returns (e-mails sent, alerts triggered)."""
