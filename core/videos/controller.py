@@ -1,6 +1,7 @@
 import logging
 import os
 from collections import Counter
+from datetime import datetime
 from uuid import UUID
 
 from harmful_claim_finder.transcript_search import get_claims
@@ -258,6 +259,22 @@ class VideoController(Controller):
         channel: str | None = Parameter(None, query="channel"),
         text: str | None = Parameter(None, query="text"),
         language: str | None = Parameter(None, query="language"),
+        start_date: datetime | None = Parameter(
+            None,
+            query="start_date",
+            description=(
+                "Keep only videos posted (videos.uploaded_at) on or after this "
+                "time; the bound is inclusive."
+            ),
+        ),
+        end_date: datetime | None = Parameter(
+            None,
+            query="end_date",
+            description=(
+                "Keep only videos posted (videos.uploaded_at) on or before this "
+                "time; the bound is inclusive."
+            ),
+        ),
         limit: int = Parameter(25, query="limit", gt=0, le=100),
         offset: int = Parameter(0, query="offset", ge=0),
     ) -> PaginatedJSON[list[AnalysedVideo]]:
@@ -268,6 +285,8 @@ class VideoController(Controller):
             channel=channel,
             text=text,
             language=language,
+            start_date=start_date,
+            end_date=end_date,
         )
 
         # Fetch claims and narratives for each video

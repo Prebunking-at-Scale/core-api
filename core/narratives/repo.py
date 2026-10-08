@@ -15,6 +15,7 @@ from core.models import Claim, Entity, Narrative, NarrativeSpreadPattern, Topic,
 from core.narratives.models import (
     IndicatorPayload,
     NarrativeAnalysisIndicatorType,
+    NarrativeClaim,
     NarrativeDetail,
     NarrativeListItem,
     NarrativeStats,
@@ -233,6 +234,8 @@ class NarrativeRepository:
         end_date: datetime | None = None,
         first_content_start: datetime | None = None,
         first_content_end: datetime | None = None,
+        created_start: datetime | None = None,
+        created_end: datetime | None = None,
         spread_patterns: list[str] | None = None,
     ) -> int:
         query = """
@@ -247,6 +250,8 @@ class NarrativeRepository:
             end_date=end_date,
             first_content_start=first_content_start,
             first_content_end=first_content_end,
+            created_start=created_start,
+            created_end=created_end,
             spread_patterns=spread_patterns,
         )
         query += where_statement
@@ -265,6 +270,8 @@ class NarrativeRepository:
         end_date: datetime | None = None,
         first_content_start: datetime | None = None,
         first_content_end: datetime | None = None,
+        created_start: datetime | None = None,
+        created_end: datetime | None = None,
         spread_patterns: list[str] | None = None,
     ) -> tuple[str, dict[str, Any]]:
         query = ""
@@ -298,12 +305,35 @@ class NarrativeRepository:
             )
             params["text"] = f"%{text}%"
 
-        if start_date:
-            where_conditions.append("n.created_at >= %(start_date)s")
-            params["start_date"] = start_date
-        if end_date:
-            where_conditions.append("n.created_at <= %(end_date)s")
-            params["end_date"] = end_date
+        # Match on the videos behind a narrative's claims, not n.created_at
+        # (when the pipeline recorded it). A narrative is in range if any one of
+        # its claims was posted in the window; every claim counts, unlike
+        # first_content_* below, which only weighs the oldest.
+        if start_date or end_date:
+            date_conditions = []
+            if start_date:
+                date_conditions.append("dv.uploaded_at >= %(start_date)s")
+                params["start_date"] = start_date
+            if end_date:
+                date_conditions.append("dv.uploaded_at <= %(end_date)s")
+                params["end_date"] = end_date
+            where_conditions.append(
+                "n.id IN ("
+                "SELECT dcn.narrative_id "
+                "FROM claim_narratives dcn "
+                "JOIN video_claims dvc ON dcn.claim_id = dvc.id "
+                "JOIN videos dv ON dvc.video_id = dv.id "
+                "WHERE " + " AND ".join(date_conditions) + ")"
+            )
+
+        # When the narrative was created (recorded by the pipeline), as opposed to
+        # start_date/end_date above, which are about when its videos were posted.
+        if created_start:
+            where_conditions.append("n.created_at >= %(created_start)s")
+            params["created_start"] = created_start
+        if created_end:
+            where_conditions.append("n.created_at <= %(created_end)s")
+            params["created_end"] = created_end
 
         if spread_patterns:
             where_conditions.append("n.spread_pattern = ANY(%(spread_patterns)s)")
@@ -355,6 +385,8 @@ class NarrativeRepository:
         end_date: datetime | None = None,
         first_content_start: datetime | None = None,
         first_content_end: datetime | None = None,
+        created_start: datetime | None = None,
+        created_end: datetime | None = None,
         language: str | None = None,
         spread_patterns: list[str] | None = None,
         sort: str | None = None,
@@ -399,13 +431,33 @@ class NarrativeRepository:
             )
             params["text"] = f"%{text}%"
 
-        if start_date:
-            filter_conditions.append("n.created_at >= %(start_date)s")
-            params["start_date"] = start_date
+        # Same rule as _build_get_all_narratives_where_statement: any claim
+        # posted in the window by its video's uploaded_at, not n.created_at.
+        if start_date or end_date:
+            date_conditions = []
+            if start_date:
+                date_conditions.append("dv.uploaded_at >= %(start_date)s")
+                params["start_date"] = start_date
+            if end_date:
+                date_conditions.append("dv.uploaded_at <= %(end_date)s")
+                params["end_date"] = end_date
+            filter_conditions.append(
+                "n.id IN ("
+                "SELECT dcn.narrative_id "
+                "FROM claim_narratives dcn "
+                "JOIN video_claims dvc ON dcn.claim_id = dvc.id "
+                "JOIN videos dv ON dvc.video_id = dv.id "
+                "WHERE " + " AND ".join(date_conditions) + ")"
+            )
 
-        if end_date:
-            filter_conditions.append("n.created_at <= %(end_date)s")
-            params["end_date"] = end_date
+        # When the narrative was created (recorded by the pipeline), as opposed to
+        # start_date/end_date above, which are about when its videos were posted.
+        if created_start:
+            filter_conditions.append("n.created_at >= %(created_start)s")
+            params["created_start"] = created_start
+        if created_end:
+            filter_conditions.append("n.created_at <= %(created_end)s")
+            params["created_end"] = created_end
 
         if spread_patterns:
             filter_conditions.append("n.spread_pattern = ANY(%(spread_patterns)s)")
@@ -1055,14 +1107,15 @@ class NarrativeRepository:
 
     async def _get_narrative_claims_paginated(
         self, narrative_id: UUID, limit: int, offset: int
-    ) -> list[Claim]:
-        """Get paginated claims for a narrative."""
+    ) -> list[NarrativeClaim]:
+        """Get paginated claims for a narrative, each with its video's upload date."""
         await self._session.execute(
             """
             SELECT c.id, c.video_id, c.claim, c.start_time_s, c.metadata,
-                   c.created_at, c.updated_at
+                   c.created_at, c.updated_at, v.uploaded_at
             FROM video_claims c
             JOIN claim_narratives cn ON c.id = cn.claim_id
+            LEFT JOIN videos v ON v.id = c.video_id
             WHERE cn.narrative_id = %(narrative_id)s
             ORDER BY c.start_time_s
             LIMIT %(limit)s OFFSET %(offset)s
@@ -1072,7 +1125,7 @@ class NarrativeRepository:
         claims = []
         for row in await self._session.fetchall():
             claim_data = dict(row)
-            claims.append(Claim(**claim_data))
+            claims.append(NarrativeClaim(**claim_data))
         return claims
 
     async def _get_narrative_videos_paginated(
@@ -1102,7 +1155,7 @@ class NarrativeRepository:
 
     async def get_narrative_claims(
         self, narrative_id: UUID, limit: int, offset: int
-    ) -> tuple[list[Claim], int]:
+    ) -> tuple[list[NarrativeClaim], int]:
         """Get paginated claims for a narrative with total count."""
         await self._session.execute(
             """
@@ -1165,6 +1218,30 @@ class NarrativeRepository:
         video and sum across the narrative — that's the cumulative engagement
         state at end of day. Per-day deltas are derived by LAG so the original
         response shape (cumulative_* + per-day delta fields) is preserved.
+
+        Each day's `views` is also split into `views_from_new_videos` and
+        `views_from_existing`, because the two are different kinds of fact and a
+        chart that draws them identically misleads. video_stats is scraped sparsely,
+        so consecutive points can be months apart, and whatever the renderer draws
+        between them is an assertion the data never made:
+
+            existing videos, re-measured   they gained views somewhere inside the
+                                           gap and nothing dates it more precisely.
+                                           A ramp spreads them evenly, which claims
+                                           no particular shape — the neutral guess.
+            a video appearing               it brought its whole view count on a day
+                                           we know exactly. That is a step. Drawn as
+                                           a ramp it becomes months of growth the
+                                           narrative did not have, and a one-day
+                                           event reads as a sustained trend.
+
+        Observed on a narrative created 2026-09-16 from a claim first seen in May:
+        the chart showed a four-month climb, while the acceleration axis reported the
+        arrival as a single day's +18%. Both were right about their own endpoints;
+        only the line between them was invented.
+
+        The split is exact — the two always sum to `views` — so callers that ignore
+        it keep the series they had.
         """
         if not await self.narrative_exists(narrative_id):
             return None
@@ -1209,28 +1286,56 @@ class NarrativeRepository:
                     ORDER BY dl.video_id, dl.day DESC
                 ) latest ON TRUE
             ),
+            first_seen AS (
+                -- The day each video enters the narrative's series: the first day we
+                -- have any measurement of it. Everything it had accumulated before we
+                -- saw it arrives with it on that day, as a step.
+                SELECT video_id, MIN(day) AS first_day
+                FROM daily_latest
+                GROUP BY video_id
+            ),
             per_day AS (
-                -- End-of-day cumulative state across all videos in the narrative.
+                -- End-of-day cumulative state across all videos in the narrative,
+                -- plus how much of that day's state is videos appearing for the
+                -- first time. FILTER isolates the arrivals without a second pass.
+                SELECT
+                    c.day,
+                    COUNT(DISTINCT c.video_id) AS videos_with_stats,
+                    COALESCE(SUM(c.views), 0)    AS cum_views,
+                    COALESCE(SUM(c.likes), 0)    AS cum_likes,
+                    COALESCE(SUM(c.comments), 0) AS cum_comments,
+                    COALESCE(SUM(c.views) FILTER (WHERE fs.first_day = c.day), 0)
+                        AS arrival_views
+                FROM carried c
+                JOIN first_seen fs ON fs.video_id = c.video_id
+                GROUP BY c.day
+            ),
+            deltas AS (
                 SELECT
                     day,
-                    COUNT(DISTINCT video_id) AS videos_with_stats,
-                    COALESCE(SUM(views), 0)    AS cum_views,
-                    COALESCE(SUM(likes), 0)    AS cum_likes,
-                    COALESCE(SUM(comments), 0) AS cum_comments
-                FROM carried
-                GROUP BY day
+                    videos_with_stats,
+                    cum_views, cum_likes, cum_comments,
+                    arrival_views,
+                    GREATEST(cum_views    - LAG(cum_views,    1, 0::bigint) OVER (ORDER BY day), 0) AS views,
+                    GREATEST(cum_likes    - LAG(cum_likes,    1, 0::bigint) OVER (ORDER BY day), 0) AS likes,
+                    GREATEST(cum_comments - LAG(cum_comments, 1, 0::bigint) OVER (ORDER BY day), 0) AS comments
+                FROM per_day
             )
             SELECT
                 day AS date,
                 videos_with_stats AS video_count,
-                GREATEST(cum_views    - LAG(cum_views,    1, 0::bigint) OVER (ORDER BY day), 0) AS views,
-                GREATEST(cum_likes    - LAG(cum_likes,    1, 0::bigint) OVER (ORDER BY day), 0) AS likes,
-                GREATEST(cum_comments - LAG(cum_comments, 1, 0::bigint) OVER (ORDER BY day), 0) AS comments,
+                views, likes, comments,
                 videos_with_stats AS cumulative_video_count,
                 cum_views    AS cumulative_views,
                 cum_likes    AS cumulative_likes,
-                cum_comments AS cumulative_comments
-            FROM per_day
+                cum_comments AS cumulative_comments,
+                -- LEAST guards the one case where the two disagree: if a video's
+                -- reported views fall, the day's delta can be smaller than what the
+                -- arrivals brought. The split then reports what the day actually
+                -- moved, and the pair still sums to `views` rather than exceeding it.
+                LEAST(arrival_views, views)        AS views_from_new_videos,
+                views - LEAST(arrival_views, views) AS views_from_existing
+            FROM deltas
             ORDER BY day
         """
 
@@ -1250,6 +1355,8 @@ class NarrativeRepository:
                     cumulative_comments=row["cumulative_comments"],
                     video_count=row["video_count"],
                     cumulative_video_count=row["cumulative_video_count"],
+                    views_from_new_videos=row["views_from_new_videos"],
+                    views_from_existing=row["views_from_existing"],
                 )
             )
 

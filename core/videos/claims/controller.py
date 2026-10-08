@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -141,6 +142,22 @@ class RootClaimController(Controller):
         language: str | None = Parameter(None, query="language"),
         min_score: float | None = Parameter(None, query="min_score"),
         max_score: float | None = Parameter(None, query="max_score"),
+        start_date: datetime | None = Parameter(
+            None,
+            query="start_date",
+            description=(
+                "Keep only claims whose video was posted (videos.uploaded_at) "
+                "on or after this time; the bound is inclusive."
+            ),
+        ),
+        end_date: datetime | None = Parameter(
+            None,
+            query="end_date",
+            description=(
+                "Keep only claims whose video was posted (videos.uploaded_at) "
+                "on or before this time; the bound is inclusive."
+            ),
+        ),
         limit: int = Parameter(100, query="limit", gt=0, le=1000),
         offset: int = Parameter(0, query="offset", ge=0),
     ) -> PaginatedJSON[list[EnrichedClaim]]:
@@ -152,6 +169,8 @@ class RootClaimController(Controller):
             language=language,
             min_score=min_score,
             max_score=max_score,
+            start_date=start_date,
+            end_date=end_date,
         )
         page = (offset // limit) + 1 if limit > 0 else 1
         return PaginatedJSON(

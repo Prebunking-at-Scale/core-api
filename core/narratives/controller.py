@@ -8,9 +8,10 @@ from litestar.exceptions import NotFoundException
 
 from core.auth.guards import super_admin
 from core.errors import ConflictError
-from core.models import Claim, Narrative, NarrativeSpreadPattern, Video
+from core.models import Narrative, NarrativeSpreadPattern, Video
 from core.narratives.models import (
     NarrativeAnalysisIndicatorsResponse,
+    NarrativeClaim,
     NarrativeDetail,
     NarrativeInput,
     NarrativePatchInput,
@@ -79,7 +80,7 @@ class NarrativeController(Controller):
         narrative_id: UUID,
         limit: int = 25,
         offset: int = 0,
-    ) -> PaginatedJSON[list[Claim]]:
+    ) -> PaginatedJSON[list[NarrativeClaim]]:
         try:
             claims, total = await narrative_service.get_narrative_claims(
                 narrative_id, limit=limit, offset=offset
@@ -139,6 +140,8 @@ class NarrativeController(Controller):
         end_date: datetime | None = None,
         first_content_start: datetime | None = None,
         first_content_end: datetime | None = None,
+        created_start: datetime | None = None,
+        created_end: datetime | None = None,
         language: str | None = None,
         spread_pattern: list[NarrativeSpreadPattern] | None = None,
         sort: str | None = None,
@@ -155,6 +158,8 @@ class NarrativeController(Controller):
             end_date=end_date,
             first_content_start=first_content_start,
             first_content_end=first_content_end,
+            created_start=created_start,
+            created_end=created_end,
             language=language,
             spread_patterns=[sp.value for sp in spread_pattern] if spread_pattern else None,
             sort=sort,

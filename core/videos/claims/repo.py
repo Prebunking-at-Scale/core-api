@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -262,15 +263,32 @@ class ClaimRepository:
         language: str | None = None,
         min_score: float | None = None,
         max_score: float | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> tuple[list[EnrichedClaim], int]:
         # Build the query conditionally
         where_conditions = []
         joins = [" "]
-        params: dict[str, int | UUID | str | float] = {"limit": limit, "offset": offset}
+        params: dict[str, int | UUID | str | float | datetime] = {
+            "limit": limit,
+            "offset": offset,
+        }
 
         if topic_id:
             joins.append("JOIN claim_topics ct ON c.id = ct.claim_id AND ct.topic_id = %(topic_id)s ")
             params["topic_id"] = topic_id
+
+        # We want when the content was posted, which lives on the video, not
+        # c.created_at (when the claim was extracted). Join only when a bound is
+        # set, so the unfiltered query keeps its shape.
+        if start_date or end_date:
+            joins.append("JOIN videos v ON c.video_id = v.id ")
+            if start_date:
+                where_conditions.append("v.uploaded_at >= %(start_date)s")
+                params["start_date"] = start_date
+            if end_date:
+                where_conditions.append("v.uploaded_at <= %(end_date)s")
+                params["end_date"] = end_date
 
         if text:
             where_conditions.append("LOWER(c.claim) LIKE LOWER(%(text)s)")

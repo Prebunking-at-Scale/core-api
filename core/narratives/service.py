@@ -20,12 +20,13 @@ from core.config import (
     VIRALITY_SCORE_LIKES_WEIGHT,
 )
 from core.entities.service import EntityService
-from core.models import Claim, Narrative, NarrativeSpreadPattern, Video
+from core.models import Narrative, NarrativeSpreadPattern, Video
 from core.narratives.api import NarrativesApiClient
 from core.narratives.models import (
     AnalysisIndicator,
     NarrativeAnalysisIndicatorsResponse,
     NarrativeAnalysisIndicatorType,
+    NarrativeClaim,
     NarrativeDetail,
     NarrativeInput,
     NarrativeListItem,
@@ -156,7 +157,7 @@ class NarrativeService:
 
     async def get_narrative_claims(
         self, narrative_id: UUID, limit: int, offset: int
-    ) -> tuple[list[Claim], int]:
+    ) -> tuple[list[NarrativeClaim], int]:
         async with self.repo() as repo:
             if not await repo.narrative_exists(narrative_id):
                 raise ValueError("narrative not found")
@@ -231,6 +232,8 @@ class NarrativeService:
         end_date: datetime | None = None,
         first_content_start: datetime | None = None,
         first_content_end: datetime | None = None,
+        created_start: datetime | None = None,
+        created_end: datetime | None = None,
         language: str | None = None,
         spread_patterns: list[str] | None = None,
         sort: str | None = None,
@@ -246,6 +249,8 @@ class NarrativeService:
                 end_date=end_date,
                 first_content_start=first_content_start,
                 first_content_end=first_content_end,
+                created_start=created_start,
+                created_end=created_end,
                 language=language,
                 spread_patterns=spread_patterns,
                 sort=sort,
@@ -258,6 +263,8 @@ class NarrativeService:
                 end_date=end_date,
                 first_content_start=first_content_start,
                 first_content_end=first_content_end,
+                created_start=created_start,
+                created_end=created_end,
                 language=language,
                 spread_patterns=spread_patterns,
             )

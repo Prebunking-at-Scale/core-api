@@ -87,6 +87,13 @@ ViralNarrativeSummary = NarrativeSummary
 NarrativeListItem = NarrativeSummary
 
 
+class NarrativeClaim(Claim):
+    """A claim on a narrative's page, with its video's upload date: the date the
+    frontend shows for a claim."""
+
+    uploaded_at: datetime | None = None
+
+
 class NarrativeDetail(BaseModel):
     """Full narrative with preview of claims/videos and total counts."""
 
@@ -96,7 +103,7 @@ class NarrativeDetail(BaseModel):
     narrative_context: str | None = None
     topics: list[Topic] = []
     entities: list[Entity] = []
-    claims: list[Claim] = []  # Preview items
+    claims: list[NarrativeClaim] = []  # Preview items
     claim_count: int = 0  # Total count
     videos: list[Video] = []  # Preview items
     video_count: int = 0  # Total count
@@ -123,6 +130,23 @@ class NarrativeStatsDataPoint(BaseModel):
     cumulative_comments: int = 0
     video_count: int = 0
     cumulative_video_count: int = 0
+
+    # `views` split by where it came from, because the two are different kinds of
+    # fact and a chart should not draw them the same way.
+    #
+    #   views_from_new_videos  a video appeared this day and brought its views with
+    #                          it. A discontinuity on a date we know exactly: draw a
+    #                          step. Spreading it across the preceding gap asserts
+    #                          growth on days the narrative did not hold the video.
+    #   views_from_existing    videos already in the narrative were re-measured and
+    #                          had gained views since we last looked. That growth is
+    #                          real but undated — it happened somewhere inside the
+    #                          gap — so a straight ramp is the neutral estimate.
+    #
+    # They always sum to `views`. On the first point of a series everything is an
+    # arrival, which is correct: the narrative had nothing before it.
+    views_from_new_videos: int = 0
+    views_from_existing: int = 0
 
 
 class NarrativeStatsTotals(BaseModel):

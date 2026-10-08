@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import AsyncContextManager
 from uuid import UUID
 
@@ -54,10 +55,19 @@ class VideoService:
         channel: str | None = None,
         text: str | None = None,
         language: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
     ) -> tuple[list[Video], int]:
         async with self.repo() as repo:
             return await repo.get_videos_paginated(
-                limit, offset, platform, channel, text, language
+                limit,
+                offset,
+                platform,
+                channel,
+                text,
+                language,
+                start_date,
+                end_date,
             )
 
     async def get_narratives_for_video(self, video_id: UUID) -> list[Narrative]:
