@@ -191,7 +191,7 @@ async def test_no_backlog_once_only_and_the_email(
     assert await service.send_digests() == (1, 1)
     [(to, subject, html)] = emailer.sent
     assert subject == "1 alert triggered"
-    assert "Alert triggered: Health watch" in html
+    assert "Alert: Health watch" in html
     assert "<strong>Vaccines contain microchips to track people</strong>" in html
     assert f'/narratives/{data["n_vax"]}"' in html  # the title links to the narrative
     assert "(Topic: Health)" in html

@@ -129,7 +129,7 @@ def alert_digest_message(entries: "list[DigestEntry]", summaries: dict) -> tuple
     for entry in entries:
         block = (
             '<h2 style="margin: 0; padding-bottom: 0.3em; border-bottom: 2px solid #00533D; '
-            f'color: #1F2937; font-size: 1.25em;">Alert triggered: {escape(entry.alert_name)}</h2>'
+            f'color: #1F2937; font-size: 1.25em;">Alert: {escape(entry.alert_name)}</h2>'
         )
         if entry.narratives.total:
             block += f'<h3 style="{section_title}">New narratives</h3>' + items_html(entry, entry.narratives)
