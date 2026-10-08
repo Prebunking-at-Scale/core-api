@@ -1,176 +1,117 @@
+"""The alerts of the frontend's docs/alerts.md: an alert belongs to the person who
+created it, is e-mailed to them only, and has conditions combined with OR. Each
+condition watches new narratives, new claims, or new claims in one narrative, with the
+search's filters."""
+
 from datetime import datetime
-from enum import Enum
 from typing import Any, Literal
-from uuid import UUID, uuid4
+from uuid import UUID
 
-from pydantic import BaseModel, Field, ConfigDict, model_validator
+from litestar.exceptions import HTTPException
+from pydantic import BaseModel
+
+ConditionType = Literal["new_narrative", "new_claim", "new_claim_in_narrative"]
+CONDITION_TYPES: tuple[ConditionType, ...] = ("new_narrative", "new_claim", "new_claim_in_narrative")
+
+NAME_MAX_LENGTH = 120
+MAX_CONDITIONS = 20
+
+LIST_FILTERS = ("topic_id", "keyword", "language", "platform", "channel", "entity_id", "spread_pattern")
+# Claims are never filtered by their priority score
+_CLAIM_FILTERS = ("topic_id", "keyword", "language", "platform", "channel")
+
+# Which filters each type of condition may use (docs/alerts.md, "Filters available
+# per type"), as in the frontend's utils/alertRules.ts.
+ALLOWED_FILTERS: dict[str, tuple[str, ...]] = {
+    "new_narrative": ("topic_id", "keyword", "language", "platform", "channel", "entity_id", "spread_pattern"),
+    "new_claim": (*_CLAIM_FILTERS, "entity_id"),
+    "new_claim_in_narrative": _CLAIM_FILTERS,
+}
 
 
-class AlertType(str, Enum):
-    NARRATIVE_VIEWS = "narrative_views"
-    NARRATIVE_CLAIMS_COUNT = "narrative_claims_count"
-    NARRATIVE_VIDEOS_COUNT = "narrative_videos_count"
-    NARRATIVE_WITH_TOPIC = "narrative_with_topic"
-    KEYWORD = "keyword"
-
-
-class AlertScope(str, Enum):
-    GENERAL = "general"
-    SPECIFIC = "specific"
-
-
-class Alert(BaseModel):
-    id: UUID = Field(default_factory=uuid4)
-    user_id: UUID
-    organisation_id: UUID
-    name: str
-    alert_type: AlertType
-    scope: AlertScope
+class AlertCondition(BaseModel):
+    id: UUID
+    type: ConditionType
     narrative_id: UUID | None = None
-    threshold: int | None = None
-    topic_id: UUID | None = None
-    keyword: str | None = None
+    filters: dict[str, Any] = {}
+
+
+class AlertRule(BaseModel):
+    id: UUID
+    name: str
+    enabled: bool
+    conditions: list[AlertCondition]
+    created_at: datetime
+    # When it last reported something, for the list
+    last_match_at: datetime | None = None
+
+
+class NarrativeOption(BaseModel):
+    id: UUID
+    title: str
+    # "title" when the text is in the narrative's title, "claims" when only in its claims
+    matched_in: Literal["title", "claims"]
+
+
+class AlertConditionInput(BaseModel):
+    type: str
+    narrative_id: UUID | None = None
+    filters: dict[str, Any] = {}
+
+
+class AlertRuleInput(BaseModel):
+    name: str
     enabled: bool = True
-    metadata: dict[str, Any] = {}
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
+    conditions: list[AlertConditionInput]
 
 
-class AlertExecution(BaseModel):
-    id: UUID = Field(default_factory=uuid4)
-    executed_at: datetime
-    alerts_checked: int
-    alerts_triggered: int
-    emails_sent: int
-    metadata: dict[str, Any] = {}
+class AlertValidationError(HTTPException):
+    """422 with the codes of utils/alertRules.ts in `extra.errors`: name_required,
+    name_too_long, conditions_required, too_many_conditions, invalid_type,
+    narrative_required, narrative_not_allowed, empty_condition, filter_not_allowed,
+    invalid_filter."""
+
+    status_code = 422
+
+    def __init__(self, errors: list[str]) -> None:
+        super().__init__(detail=errors[0], extra={"errors": errors})
 
 
-class AlertTriggered(BaseModel):
-    id: UUID = Field(default_factory=uuid4)
-    alert_id: UUID
+# The daily e-mail ------------------------------------------------------------------
+
+
+class DigestItem(BaseModel):
+    id: UUID
+    title: str
+    conditions: list[int]
+    # Where it opens in PAS (relative to the app): a narrative's page, or a claim's video
+    # at the moment it is said
+    link: str | None = None
+
+
+class DigestSection(BaseModel):
+    items: list[DigestItem] = []
+    total: int = 0
+
+
+class DigestNarrativeGroup(DigestSection):
     narrative_id: UUID
-    triggered_at: datetime
-    trigger_value: int | None = None
-    threshold_crossed: int | None = None
-    notification_sent: bool = False
-    metadata: dict[str, Any] = {}
+    narrative_title: str
 
 
-class CreateAlertRequest(BaseModel):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "examples": [
-                {
-                    "name": "High View Count Alert",
-                    "alert_type": "narrative_views",
-                    "scope": "general",
-                    "threshold": 100000,
-                    "metadata": {"description": "Alert when any narrative exceeds 100000 views"}
-                },
-                {
-                    "name": "Claims Threshold Alert",
-                    "alert_type": "narrative_claims_count",
-                    "scope": "specific",
-                    "narrative_id": "123e4567-e89b-12d3-a456-426614174000",
-                    "threshold": 50,
-                    "metadata": {"description": "Alert when specific narrative has 50+ claims"}
-                },
-                {
-                    "name": "Climate Topic Monitor",
-                    "alert_type": "narrative_with_topic",
-                    "scope": "general",
-                    "topic_id": "456e7890-e89b-12d3-a456-426614174000",
-                    "metadata": {"description": "Alert for new narratives with climate topic"}
-                },
-                {
-                    "name": "Vaccine Keyword Tracker",
-                    "alert_type": "keyword",
-                    "scope": "general",
-                    "keyword": "vaccine",
-                    "metadata": {"description": "Alert when narratives mention 'vaccine'"}
-                }
-            ]
-        }
-    )
-    
-    name: str = Field(..., description="Name to identify the alert", min_length=1, max_length=255)
-    alert_type: AlertType = Field(..., description="Type of alert to create")
-    scope: AlertScope = Field(..., description="Scope of the alert (general for all narratives, specific for one)")
-    narrative_id: UUID | None = Field(None, description="Required for specific scope alerts. Cannot be used with general scope")
-    threshold: int | None = Field(None, description="Required for narrative_views, narrative_claims_count, narrative_videos_count alerts", ge=1)
-    topic_id: UUID | None = Field(None, description="Required for narrative_with_topic alerts only")
-    keyword: str | None = Field(None, description="Required for keyword alerts only", min_length=1, max_length=255)
-    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata for the alert")
-    
-    @model_validator(mode='after')
-    def validate_alert_fields(self):
-        # Validate scope and narrative_id combination
-        if self.scope == AlertScope.GENERAL and self.narrative_id is not None:
-            raise ValueError("General scope alerts cannot have a narrative_id")
-        
-        if self.scope == AlertScope.SPECIFIC and self.narrative_id is None:
-            raise ValueError("Specific scope alerts require a narrative_id")
-        
-        # Validate alert type specific fields
-        threshold_types = {
-            AlertType.NARRATIVE_VIEWS,
-            AlertType.NARRATIVE_CLAIMS_COUNT,
-            AlertType.NARRATIVE_VIDEOS_COUNT
-        }
-        
-        if self.alert_type in threshold_types:
-            if self.threshold is None:
-                raise ValueError(f"{self.alert_type.value} alerts require a threshold")
-            if self.topic_id is not None:
-                raise ValueError(f"{self.alert_type.value} alerts cannot have a topic_id")
-            if self.keyword is not None:
-                raise ValueError(f"{self.alert_type.value} alerts cannot have a keyword")
-        
-        elif self.alert_type == AlertType.NARRATIVE_WITH_TOPIC:
-            if self.topic_id is None:
-                raise ValueError("narrative_with_topic alerts require a topic_id")
-            if self.threshold is not None:
-                raise ValueError("narrative_with_topic alerts cannot have a threshold")
-            if self.keyword is not None:
-                raise ValueError("narrative_with_topic alerts cannot have a keyword")
-            if self.scope != AlertScope.GENERAL:
-                raise ValueError("narrative_with_topic alerts must have general scope")
-        
-        elif self.alert_type == AlertType.KEYWORD:
-            if self.keyword is None:
-                raise ValueError("keyword alerts require a keyword")
-            if self.threshold is not None:
-                raise ValueError("keyword alerts cannot have a threshold")
-            if self.topic_id is not None:
-                raise ValueError("keyword alerts cannot have a topic_id")
-            if self.scope != AlertScope.GENERAL:
-                raise ValueError("keyword alerts must have general scope")
-        
-        return self
+class DigestEntry(BaseModel):
+    """One triggered alert: new narratives, new claims in each followed narrative,
+    then the other new claims. Up to DIGEST_SECTION_LIMIT items per section."""
+
+    alert_id: UUID
+    alert_name: str
+    narratives: DigestSection = DigestSection()
+    in_narratives: list[DigestNarrativeGroup] = []
+    claims: DigestSection = DigestSection()
+
+    @property
+    def total(self) -> int:
+        return self.narratives.total + self.claims.total + sum(g.total for g in self.in_narratives)
 
 
-class UpdateAlertRequest(BaseModel):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "examples": [
-                {
-                    "name": "Updated Alert Name",
-                    "enabled": False
-                },
-                {
-                    "name": "High Priority Alert",
-                    "threshold": 2000,
-                    "enabled": True
-                },
-                {
-                    "keyword": "climate change"
-                }
-            ]
-        }
-    )
-    
-    name: str | None = Field(None, description="New name for the alert", min_length=1, max_length=255)
-    enabled: bool | None = Field(None, description="Enable or disable the alert")
-    threshold: int | None = Field(None, description="New threshold value", ge=1)
-    keyword: str | None = Field(None, description="New keyword to search for", min_length=1, max_length=255)
-    metadata: dict[str, Any] = {}
+DIGEST_SECTION_LIMIT = 5

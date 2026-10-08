@@ -6,486 +6,295 @@ import psycopg
 from psycopg.rows import DictRow
 from psycopg.types.json import Jsonb
 
-from core.alerts.models import Alert, AlertExecution, AlertScope, AlertTriggered, AlertType
-from core.errors import ConflictError
+from core.alerts.models import AlertCondition, AlertConditionInput, AlertRule
+from core.alerts.summary import names_for
+from core.search.models import SearchFilters
+from core.search.query import QUERIES
+
+# How far back an element may have appeared and still be reported: an element can
+# match a few days after it appears (a claim gets its topic or its narrative later).
+CANDIDATE_WINDOW_DAYS = 7
+# Matches counted per condition and run, at most
+MATCH_CAP = 10_000
+
+
+def search_filters(filters: dict[str, Any]) -> SearchFilters:
+    """A condition's filters as the search's, so alerts match exactly like Research."""
+    return SearchFilters(
+        topic_ids=filters.get("topic_id", []),
+        entity_ids=filters.get("entity_id", []),
+        keywords=filters.get("keyword", []),
+        keyword_mode=filters.get("keyword_mode", "any"),
+        languages=filters.get("language", []),
+        platforms=filters.get("platform", []),
+        channels=filters.get("channel", []),
+        spread_patterns=filters.get("spread_pattern", []),
+    )
+
+
+def _link(element_id: UUID, video_id: UUID | None, start_time_s: float | None) -> str | None:
+    """Where an element opens in PAS: a narrative's page, or a claim's video at the
+    moment it is said (claims have no page of their own), as the claim cards do."""
+    if start_time_s is None:
+        return f"/narratives/{element_id}"
+    if video_id is None:
+        return None
+    return f"/videos/{video_id}?t={int(start_time_s)}"
 
 
 class AlertRepository:
+    """Alerts belong to one person in one organisation: every read and write for the
+    API is scoped to both."""
+
     def __init__(self, session: psycopg.AsyncCursor[DictRow]) -> None:
         self._session = session
 
-    async def create_alert(
-        self,
-        user_id: UUID,
-        organisation_id: UUID,
-        name: str,
-        alert_type: AlertType,
-        scope: AlertScope,
-        narrative_id: UUID | None = None,
-        threshold: int | None = None,
-        topic_id: UUID | None = None,
-        keyword: str | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> Alert:
-        try:
-            await self._session.execute(
-                """
-                INSERT INTO alerts (
-                    user_id, organisation_id, name, alert_type, scope,
-                    narrative_id, threshold, topic_id, keyword, metadata
-                ) VALUES (
-                    %(user_id)s, %(organisation_id)s, %(name)s, %(alert_type)s, %(scope)s,
-                    %(narrative_id)s, %(threshold)s, %(topic_id)s, %(keyword)s, %(metadata)s
-                )
-                RETURNING *
-                """,
-                {
-                    "user_id": user_id,
-                    "organisation_id": organisation_id,
-                    "name": name,
-                    "alert_type": alert_type.value,
-                    "scope": scope.value,
-                    "narrative_id": narrative_id,
-                    "threshold": threshold,
-                    "topic_id": topic_id,
-                    "keyword": keyword,
-                    "metadata": Jsonb(metadata or {}),
-                },
+    # Reading ---------------------------------------------------------------------
+
+    async def _with_conditions(self, rows: list[DictRow]) -> list[AlertRule]:
+        if not rows:
+            return []
+        ids = [row["id"] for row in rows]
+        await self._session.execute(
+            """
+            SELECT id, alert_id, type, narrative_id, filters
+            FROM alert_rule_conditions
+            WHERE alert_id = ANY(%(ids)s)
+            ORDER BY alert_id, position
+            """,
+            {"ids": ids},
+        )
+        conditions: dict[UUID, list[AlertCondition]] = {}
+        for row in await self._session.fetchall():
+            conditions.setdefault(row["alert_id"], []).append(
+                AlertCondition(id=row["id"], type=row["type"], narrative_id=row["narrative_id"], filters=row["filters"])
             )
-        except psycopg.errors.UniqueViolation:
-            raise ConflictError("Alert already exists")
+        return [AlertRule(**row, conditions=conditions.get(row["id"], [])) for row in rows]
 
-        row = await self._session.fetchone()
-        if not row:
-            raise ValueError("Failed to create alert")
+    _SELECT = """
+        SELECT a.id, a.name, a.enabled, a.created_at,
+               (SELECT max(r.reported_at) FROM alert_rule_reports r WHERE r.alert_id = a.id) AS last_match_at
+        FROM alert_rules a
+    """
 
-        return Alert(**row)
-
-    async def get_alert(self, alert_id: UUID) -> Alert | None:
+    async def list_own(self, organisation_id: UUID, user_id: UUID) -> list[AlertRule]:
         await self._session.execute(
-            "SELECT * FROM alerts WHERE id = %(alert_id)s",
-            {"alert_id": alert_id},
+            self._SELECT
+            + " WHERE a.organisation_id = %(organisation_id)s AND a.user_id = %(user_id)s"
+            + " ORDER BY a.created_at DESC, a.id",
+            {"organisation_id": organisation_id, "user_id": user_id},
         )
-        row = await self._session.fetchone()
-        return Alert(**row) if row else None
+        return await self._with_conditions(await self._session.fetchall())
 
-    async def get_user_alerts(
-        self,
-        user_id: UUID,
-        organisation_id: UUID,
-        enabled_only: bool = False,
-        limit: int = 100,
-        offset: int = 0,
-    ) -> tuple[list[Alert], int]:
-        base_params = {"user_id": user_id, "organisation_id": organisation_id}
-        
-        # Build WHERE clause conditionally
-        where_conditions = ["user_id = %(user_id)s", "organisation_id = %(organisation_id)s"]
-        if enabled_only:
-            where_conditions.append("enabled = TRUE")
-        where_clause = " AND ".join(where_conditions)
-
-        # Get total count
+    async def get_own(self, organisation_id: UUID, user_id: UUID, alert_id: UUID) -> AlertRule | None:
         await self._session.execute(
-            f"SELECT COUNT(*) FROM alerts WHERE {where_clause}",
-            base_params,
+            self._SELECT
+            + " WHERE a.id = %(id)s AND a.organisation_id = %(organisation_id)s AND a.user_id = %(user_id)s",
+            {"id": alert_id, "organisation_id": organisation_id, "user_id": user_id},
         )
-        count_row = await self._session.fetchone()
-        total = count_row["count"] if count_row else 0
+        found = await self._with_conditions(await self._session.fetchall())
+        return found[0] if found else None
 
-        # Get paginated results
-        await self._session.execute(
-            f"""
-            SELECT * FROM alerts
-            WHERE {where_clause}
-            ORDER BY created_at DESC
-            LIMIT %(limit)s OFFSET %(offset)s
-            """,
-            {**base_params, "limit": limit, "offset": offset},
-        )
-        rows = await self._session.fetchall()
-        alerts = [Alert(**row) for row in rows]
+    # Writing ---------------------------------------------------------------------
 
-        return alerts, total
-
-    async def update_alert(
-        self,
-        alert_id: UUID,
-        name: str | None = None,
-        enabled: bool | None = None,
-        threshold: int | None = None,
-        keyword: str | None = None,
-    ) -> Alert | None:
-        updates = []
-        params: dict[str, UUID | str | bool | int] = {"alert_id": alert_id}
-
-        if name is not None:
-            updates.append("name = %(name)s")
-            params["name"] = name
-
-        if enabled is not None:
-            updates.append("enabled = %(enabled)s")
-            params["enabled"] = enabled
-
-        if threshold is not None:
-            updates.append("threshold = %(threshold)s")
-            params["threshold"] = threshold
-
-        if keyword is not None:
-            updates.append("keyword = %(keyword)s")
-            params["keyword"] = keyword
-
-        if not updates:
-            return await self.get_alert(alert_id)
-
-        updates.append("updated_at = CURRENT_TIMESTAMP")
-
-        await self._session.execute(
-            f"""
-            UPDATE alerts
-            SET {', '.join(updates)}
-            WHERE id = %(alert_id)s
-            RETURNING *
-            """,
-            params,
-        )
-        row = await self._session.fetchone()
-        return Alert(**row) if row else None
-
-    async def delete_alert(self, alert_id: UUID) -> bool:
-        await self._session.execute(
-            "DELETE FROM alerts WHERE id = %(alert_id)s",
-            {"alert_id": alert_id},
-        )
-        return self._session.rowcount > 0
-
-    async def get_active_alerts(self) -> list[Alert]:
-        await self._session.execute(
+    async def _write_conditions(self, alert_id: UUID, conditions: list[AlertConditionInput]) -> None:
+        await self._session.execute("DELETE FROM alert_rule_conditions WHERE alert_id = %(id)s", {"id": alert_id})
+        await self._session.executemany(
             """
-            SELECT * FROM alerts
-            WHERE enabled = TRUE
-            ORDER BY created_at
-            """
-        )
-        rows = await self._session.fetchall()
-        return [Alert(**row) for row in rows]
-
-    async def record_alert_trigger(
-        self,
-        alert_id: UUID,
-        narrative_id: UUID,
-        trigger_value: int | None = None,
-        threshold_crossed: int | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> AlertTriggered | None:
-        try:
-            await self._session.execute(
-                """
-                INSERT INTO alerts_triggered (
-                    alert_id, narrative_id, trigger_value, threshold_crossed, metadata
-                ) VALUES (
-                    %(alert_id)s, %(narrative_id)s, %(trigger_value)s, %(threshold_crossed)s, %(metadata)s
-                )
-                ON CONFLICT (alert_id, narrative_id, threshold_crossed) DO NOTHING
-                RETURNING *
-                """,
+            INSERT INTO alert_rule_conditions (alert_id, position, type, narrative_id, filters)
+            VALUES (%(alert_id)s, %(position)s, %(type)s, %(narrative_id)s, %(filters)s)
+            """,
+            [
                 {
                     "alert_id": alert_id,
-                    "narrative_id": narrative_id,
-                    "trigger_value": trigger_value,
-                    "threshold_crossed": threshold_crossed,
-                    "metadata": Jsonb(metadata or {}),
-                },
-            )
-            row = await self._session.fetchone()
-            return AlertTriggered(**row) if row else None
-        except psycopg.errors.UniqueViolation:
-            return None  # Alert already triggered for this combination
+                    "position": position,
+                    "type": c.type,
+                    "narrative_id": c.narrative_id,
+                    "filters": Jsonb(c.filters),
+                }
+                for position, c in enumerate(conditions, start=1)
+            ],
+        )
 
-    async def mark_notification_sent(self, triggered_id: UUID) -> bool:
+    async def create(
+        self,
+        organisation_id: UUID,
+        user_id: UUID,
+        name: str,
+        enabled: bool,
+        conditions: list[AlertConditionInput],
+    ) -> UUID:
         await self._session.execute(
             """
-            UPDATE alerts_triggered
-            SET notification_sent = TRUE
-            WHERE id = %(triggered_id)s
+            INSERT INTO alert_rules (organisation_id, user_id, name, enabled)
+            VALUES (%(organisation_id)s, %(user_id)s, %(name)s, %(enabled)s)
+            RETURNING id
             """,
-            {"triggered_id": triggered_id},
+            {"organisation_id": organisation_id, "user_id": user_id, "name": name, "enabled": enabled},
         )
-        return self._session.rowcount > 0
+        row = await self._session.fetchone()
+        assert row
+        await self._write_conditions(row["id"], conditions)
+        return row["id"]
 
-    async def get_pending_notifications(
-        self, since: datetime | None = None
-    ) -> list[AlertTriggered]:
-        where_clause = "WHERE notification_sent = FALSE"
-        params = {}
-
-        if since:
-            where_clause += " AND triggered_at >= %(since)s"
-            params["since"] = since
-
+    async def replace(
+        self,
+        alert_id: UUID,
+        name: str,
+        enabled: bool,
+        conditions: list[AlertConditionInput],
+        restart_counting: bool,
+    ) -> None:
         await self._session.execute(
-            f"""
-            SELECT * FROM alerts_triggered
-            {where_clause}
-            ORDER BY triggered_at
+            """
+            UPDATE alert_rules
+            SET name = %(name)s, enabled = %(enabled)s, updated_at = CURRENT_TIMESTAMP,
+                counting_since = CASE WHEN %(restart)s THEN CURRENT_TIMESTAMP ELSE counting_since END
+            WHERE id = %(id)s
+            """,
+            {"id": alert_id, "name": name, "enabled": enabled, "restart": restart_counting},
+        )
+        await self._write_conditions(alert_id, conditions)
+
+    async def delete(self, alert_id: UUID) -> None:
+        await self._session.execute("DELETE FROM alert_rules WHERE id = %(id)s", {"id": alert_id})
+
+    async def follow_merged_narrative(self, source_id: UUID, target_id: UUID) -> None:
+        """Conditions that followed a narrative merged into another follow the target."""
+        await self._session.execute(
+            "UPDATE alert_rule_conditions SET narrative_id = %(target)s WHERE narrative_id = %(source)s",
+            {"source": source_id, "target": target_id},
+        )
+
+    async def narratives_matching(self, text: str, limit: int) -> list[dict[str, Any]]:
+        """Narratives with the text in their title, then those with it only in one of
+        their claims, each newest first and up to `limit` each, ignoring case, accents and hyphens (the search's
+        normalize_text and its trigram indexes)."""
+        params = {
+            "pattern": text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_"),
+            "limit": limit,
+        }
+        await self._session.execute(
+            """
+            WITH by_title AS (
+                SELECT id, title, created_at, 'title' AS matched_in FROM narratives
+                WHERE normalize_text(title) LIKE ('%%' || normalize_text(%(pattern)s) || '%%')
+                ORDER BY created_at DESC, id DESC
+                LIMIT %(limit)s
+            ),
+            by_claims AS (
+                SELECT n.id, n.title, n.created_at, 'claims' AS matched_in FROM narratives n
+                WHERE n.id IN (
+                    SELECT cn.narrative_id FROM claim_narratives cn
+                    JOIN video_claims c ON c.id = cn.claim_id
+                    WHERE normalize_text(c.claim) LIKE ('%%' || normalize_text(%(pattern)s) || '%%')
+                )
+                AND n.id NOT IN (SELECT id FROM by_title)
+                AND normalize_text(n.title) NOT LIKE ('%%' || normalize_text(%(pattern)s) || '%%')
+                ORDER BY n.created_at DESC, n.id DESC
+                LIMIT %(limit)s
+            )
+            SELECT id, title, matched_in FROM (
+                SELECT *, 0 AS grp FROM by_title UNION ALL SELECT *, 1 FROM by_claims
+            ) found
+            ORDER BY grp, created_at DESC, id DESC
             """,
             params,
         )
-        rows = await self._session.fetchall()
-        return [AlertTriggered(**row) for row in rows]
+        return await self._session.fetchall()
 
-    async def record_execution(
-        self,
-        alerts_checked: int,
-        alerts_triggered: int,
-        emails_sent: int,
-        metadata: dict[str, Any] | None = None,
-    ) -> AlertExecution:
-        await self._session.execute(
+    async def names(self, conditions: list[AlertCondition]) -> dict[str, str]:
+        return await names_for(self._session, conditions)
+
+    async def narrative_titles(self, ids: list[UUID]) -> dict[UUID, str]:
+        await self._session.execute("SELECT id, title FROM narratives WHERE id = ANY(%(ids)s)", {"ids": ids})
+        return {row["id"]: row["title"] for row in await self._session.fetchall()}
+
+    # Matching --------------------------------------------------------------------
+
+    async def matches(
+        self, alert_id: UUID, condition: AlertCondition, counting_since: datetime
+    ) -> list[tuple[UUID, str, str | None]]:
+        """(id, title, link) of what one condition matches now and its alert hasn't reported:
+        elements that appeared after the alert's starting point (and in the last
+        CANDIDATE_WINDOW_DAYS), with the search's own matching. Newest first."""
+        filters = search_filters(condition.filters)
+        params: dict[str, Any] = {
+            "_alert": alert_id,
+            "_since": counting_since,
+            "_window": f"{CANDIDATE_WINDOW_DAYS} days",
+            "_cap": MATCH_CAP,
+        }
+        if condition.type == "new_narrative":
+            query = QUERIES["narratives"](filters)
+            sql = f"""
+                SELECT n.id, n.title, NULL::uuid AS video_id, NULL::float AS start_time_s,
+                       n.created_at AS appeared FROM narratives n
+                WHERE {query.where_sql}
+                  AND n.created_at >= %(_since)s
+                  AND n.created_at >= CURRENT_TIMESTAMP - %(_window)s::interval
+                  AND NOT EXISTS (SELECT 1 FROM alert_rule_reports r WHERE r.alert_id = %(_alert)s
+                                  AND r.element_kind = 'narrative' AND r.element_id = n.id)
+                ORDER BY n.created_at DESC LIMIT %(_cap)s
             """
-            INSERT INTO alert_executions (
-                alerts_checked, alerts_triggered, emails_sent, metadata
-            ) VALUES (
-                %(alerts_checked)s, %(alerts_triggered)s, %(emails_sent)s, %(metadata)s
-            )
-            RETURNING *
+        else:
+            query = QUERIES["claims"](filters)
+            if condition.type == "new_claim":
+                appeared = "c.created_at"
+                joined = ""
+            else:
+                # Joining the followed narrative is what counts, even for an older claim
+                appeared = "fn.created_at"
+                joined = "JOIN claim_narratives fn ON fn.claim_id = c.id AND fn.narrative_id = %(_narrative)s"
+                params["_narrative"] = condition.narrative_id
+            sql = f"""
+                SELECT c.id, c.claim AS title, c.video_id, c.start_time_s,
+                       {appeared} AS appeared FROM {query.from_sql} {joined}
+                WHERE {query.where_sql}
+                  AND {appeared} >= %(_since)s
+                  AND {appeared} >= CURRENT_TIMESTAMP - %(_window)s::interval
+                  AND NOT EXISTS (SELECT 1 FROM alert_rule_reports r WHERE r.alert_id = %(_alert)s
+                                  AND r.element_kind = 'claim' AND r.element_id = c.id)
+                ORDER BY {appeared} DESC LIMIT %(_cap)s
+            """
+        await self._session.execute(sql, {**query.params, **params})
+        return [
+            (row["id"], row["title"], _link(row["id"], row["video_id"], row["start_time_s"]))
+            for row in await self._session.fetchall()
+        ]
+
+    async def record_reports(self, alert_id: UUID, rows: list[dict[str, Any]]) -> None:
+        if not rows:
+            return
+        await self._session.executemany(
+            """
+            INSERT INTO alert_rule_reports (alert_id, element_kind, element_id, conditions, section, in_narrative_id)
+            VALUES (%(alert_id)s, %(kind)s, %(id)s, %(conditions)s, %(section)s, %(in_narrative_id)s)
+            ON CONFLICT DO NOTHING
             """,
-            {
-                "alerts_checked": alerts_checked,
-                "alerts_triggered": alerts_triggered,
-                "emails_sent": emails_sent,
-                "metadata": Jsonb(metadata or {}),
-            },
+            [{"alert_id": alert_id, **row} for row in rows],
         )
-        row = await self._session.fetchone()
-        if not row:
-            raise ValueError("Failed to record execution")
 
-        return AlertExecution(**row)
+    # The daily run ---------------------------------------------------------------
 
-    async def get_last_execution(self) -> AlertExecution | None:
+    async def recipients_with_alerts(self) -> list[DictRow]:
+        """Each person with an enabled alert, while they and their organisation are
+        active: (user_id, organisation_id, email)."""
         await self._session.execute(
             """
-            SELECT * FROM alert_executions
-            ORDER BY executed_at DESC
-            LIMIT 1
+            SELECT DISTINCT a.user_id, a.organisation_id, u.email
+            FROM alert_rules a
+            JOIN users u ON u.id = a.user_id
+            JOIN organisations o ON o.id = a.organisation_id AND o.deactivated IS NULL
+            JOIN organisation_users ou ON ou.user_id = a.user_id AND ou.organisation_id = a.organisation_id
+                 AND ou.deactivated IS NULL
+            WHERE a.enabled
             """
         )
+        return await self._session.fetchall()
+
+    async def counting_since(self, alert_id: UUID) -> datetime:
+        await self._session.execute("SELECT counting_since FROM alert_rules WHERE id = %(id)s", {"id": alert_id})
         row = await self._session.fetchone()
-        return AlertExecution(**row) if row else None
-
-    async def check_narrative_stats_alerts(
-        self, since: datetime | None = None
-    ) -> list[tuple[Alert, UUID, int]]:
-        """Check for narrative stats alerts that should be triggered.
-        Returns list of (alert, narrative_id, current_value) tuples."""
-        
-        # For general alerts, check all narratives
-        # For specific alerts, only check the specified narrative
-        query = """
-            WITH narrative_stats AS (
-                SELECT 
-                    n.id AS narrative_id,
-                    SUM(COALESCE(v.views, 0)) AS total_views,
-                    COUNT(DISTINCT cn.claim_id) AS claims_count,
-                    COUNT(DISTINCT v.id) AS videos_count
-                FROM narratives n
-                LEFT JOIN claim_narratives cn ON n.id = cn.narrative_id
-                LEFT JOIN video_claims c ON cn.claim_id = c.id
-                LEFT JOIN videos v ON c.video_id = v.id
-                WHERE 
-                    -- Only include narratives created or with videos updated since last check
-                    (%(since)s::timestamp IS NULL 
-                     OR n.created_at >= %(since)s::timestamp
-                     OR EXISTS (
-                        SELECT 1 FROM claim_narratives cn2
-                        JOIN video_claims vc2 ON cn2.claim_id = vc2.id
-                        JOIN videos v2 ON vc2.video_id = v2.id
-                        WHERE cn2.narrative_id = n.id
-                        AND v2.updated_at >= %(since)s::timestamp
-                     ))
-                GROUP BY n.id
-            ),
-            relevant_alerts AS (
-                SELECT
-                    a.id,
-                    a.user_id,
-                    a.organisation_id,
-                    a.name,
-                    a.alert_type,
-                    a.scope,
-                    a.narrative_id AS specific_narrative,
-                    a.threshold,
-                    a.topic_id,
-                    a.keyword,
-                    a.enabled,
-                    a.metadata,
-                    a.created_at,
-                    a.updated_at
-                FROM alerts a
-                WHERE
-                    a.enabled = TRUE
-                    AND a.alert_type IN (
-                        'narrative_views',
-                        'narrative_claims_count',
-                        'narrative_videos_count'
-                    )
-            )
-            SELECT
-                ra.*,
-                ns.narrative_id,
-                CASE ra.alert_type
-                    WHEN 'narrative_views' THEN ns.total_views
-                    WHEN 'narrative_claims_count' THEN ns.claims_count
-                    WHEN 'narrative_videos_count' THEN ns.videos_count
-                END AS current_value
-            FROM relevant_alerts ra
-            -- join general alerts to all narratives
-            LEFT JOIN narrative_stats ns
-                ON ra.scope = 'general'
-            -- join specific alerts only to their narrative
-                OR (ra.scope = 'specific' 
-                    AND ra.specific_narrative = ns.narrative_id)
-            WHERE
-                CASE ra.alert_type
-                    WHEN 'narrative_views' THEN ns.total_views
-                    WHEN 'narrative_claims_count' THEN ns.claims_count
-                    WHEN 'narrative_videos_count' THEN ns.videos_count
-                END >= ra.threshold
-        """
-        
-        params = {"since": since.isoformat() if since else None}
-        await self._session.execute(query, params)
-        rows = await self._session.fetchall()
-        
-        results = []
-        for row in rows:
-            alert = Alert(
-                id=row["id"],
-                user_id=row["user_id"],
-                organisation_id=row["organisation_id"],
-                name=row.get("name", "Unnamed Alert"),
-                alert_type=row["alert_type"],
-                scope=row["scope"],
-                narrative_id=row["specific_narrative"],
-                threshold=row["threshold"],
-                topic_id=row["topic_id"],
-                keyword=row["keyword"],
-                enabled=row["enabled"],
-                metadata=row["metadata"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-            )
-            results.append((alert, row["narrative_id"], row["current_value"]))
-        
-        return results
-
-    async def check_topic_alerts(
-        self, since: datetime | None = None
-    ) -> list[tuple[Alert, UUID]]:
-        """Check for new narratives with tracked topics.
-        Returns list of (alert, narrative_id) tuples."""
-        
-        query = """
-            SELECT DISTINCT a.id, a.user_id, a.organisation_id, a.name, a.alert_type, 
-                   a.scope, a.threshold, a.topic_id, a.keyword, a.enabled, 
-                   a.metadata, a.created_at, a.updated_at, nt.narrative_id
-            FROM alerts a
-            JOIN narrative_topics nt ON a.topic_id = nt.topic_id
-            JOIN narratives n ON nt.narrative_id = n.id
-            WHERE a.enabled = TRUE
-            AND a.alert_type = 'narrative_with_topic'
-            AND (%(since)s::timestamp IS NULL 
-                 OR n.created_at >= %(since)s::timestamp
-                 OR EXISTS (
-                    SELECT 1 FROM claim_narratives cn
-                    JOIN video_claims vc ON cn.claim_id = vc.id
-                    JOIN videos v ON vc.video_id = v.id
-                    WHERE cn.narrative_id = n.id
-                    AND v.updated_at >= %(since)s::timestamp
-                 ))
-        """
-        
-        params = {"since": since.isoformat() if since else None}
-        await self._session.execute(query, params)
-        rows = await self._session.fetchall()
-        
-        results = []
-        for row in rows:
-            alert = Alert(
-                id=row["id"],
-                user_id=row["user_id"],
-                organisation_id=row["organisation_id"],
-                name=row.get("name", "Unnamed Alert"),
-                alert_type=row["alert_type"],
-                scope=row["scope"],
-                narrative_id=None,
-                threshold=row["threshold"],
-                topic_id=row["topic_id"],
-                keyword=row["keyword"],
-                enabled=row["enabled"],
-                metadata=row["metadata"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-            )
-            results.append((alert, row["narrative_id"]))
-        
-        return results
-
-    async def check_keyword_alerts(
-        self, since: datetime | None = None
-    ) -> list[tuple[Alert, UUID]]:
-        """Check for narratives containing tracked keywords.
-        Returns list of (alert, narrative_id) tuples."""
-        
-        query = """
-            WITH recent_narratives AS (
-                SELECT n.id, n.title, n.description 
-                FROM narratives n
-                WHERE (%(since)s::timestamp IS NULL 
-                       OR n.created_at >= %(since)s::timestamp
-                       OR EXISTS (
-                          SELECT 1 FROM claim_narratives cn
-                          JOIN video_claims vc ON cn.claim_id = vc.id
-                          JOIN videos v ON vc.video_id = v.id
-                          WHERE cn.narrative_id = n.id
-                          AND v.updated_at >= %(since)s::timestamp
-                       ))
-            )
-            SELECT DISTINCT a.id, a.user_id, a.organisation_id, a.name, a.alert_type,
-                   a.scope, a.threshold, a.topic_id, a.keyword, a.enabled,
-                   a.metadata, a.created_at, a.updated_at, n.id as narrative_id
-            FROM alerts a
-            JOIN recent_narratives n ON (
-                LOWER(n.title) LIKE LOWER('%%' || a.keyword || '%%')
-                OR LOWER(n.description) LIKE LOWER('%%' || a.keyword || '%%')
-            )
-            WHERE a.enabled = TRUE
-            AND a.alert_type = 'keyword'
-        """
-        
-        params = {"since": since.isoformat() if since else None}
-        await self._session.execute(query, params)
-        rows = await self._session.fetchall()
-        
-        results = []
-        for row in rows:
-            alert = Alert(
-                id=row["id"],
-                user_id=row["user_id"],
-                organisation_id=row["organisation_id"],
-                name=row.get("name", "Unnamed Alert"),
-                alert_type=row["alert_type"],
-                scope=row["scope"],
-                narrative_id=None,
-                threshold=row["threshold"],
-                topic_id=row["topic_id"],
-                keyword=row["keyword"],
-                enabled=row["enabled"],
-                metadata=row["metadata"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-            )
-            results.append((alert, row["narrative_id"]))
-        
-        return results
+        assert row
+        return row["counting_since"]
