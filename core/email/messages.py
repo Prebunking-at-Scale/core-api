@@ -117,6 +117,18 @@ def alert_digest_message(entries: "list[DigestEntry]", summaries: dict) -> tuple
                 f"&bull; {title_html(item)} "
                 f'<span style="color: #6B7280;">({escape(met)})</span></p>'
             )
+            if item.shared_with:
+                out += (
+                    '<p style="margin: 0.2em 0 0 1em; color: #6B7280;">Other narratives shared together are:</p>'
+                    '<ul style="margin: 0.1em 0 0.4em 0; padding-left: 2.2em; color: #6B7280;">'
+                )
+                for shared in item.shared_with:
+                    videos = "1 shared video" if shared.shared_videos == 1 else f"{shared.shared_videos} shared videos"
+                    out += (
+                        f'<li style="margin: 0.1em 0;"><a href="{config.APP_BASE_URL}/narratives/{shared.id}" '
+                        f'style="color: #374151; text-decoration: underline;">{escape(shared.title)}</a> ({videos})</li>'
+                    )
+                out += "</ul>"
         if section.total > len(section.items):
             out += (
                 f'<p style="margin: 0.4em 0;{" padding-left: 1em;" if indent else ""}">'

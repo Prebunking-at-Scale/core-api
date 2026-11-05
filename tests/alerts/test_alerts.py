@@ -202,6 +202,43 @@ async def test_no_backlog_once_only_and_the_email(
     assert listed[0].id == alert.id and listed[0].last_match_at is not None
 
 
+async def test_a_new_narrative_lists_the_narratives_shared_together_with_it(
+    conn_factory: Any, auth_service: AuthService, organisation: Organisation, data: SearchData, emailer: FakeEmailer
+) -> None:
+    alice = await person(auth_service, organisation)
+    service = AlertService(conn_factory)
+    from core.alerts.models import AlertRuleInput
+
+    await service.create(organisation.id, alice.id, AlertRuleInput(**narrative_alert("Climate watch", topic_id=[str(CLIMATE)])))
+    await sql(conn_factory, "UPDATE narratives SET created_at = CURRENT_TIMESTAMP + interval '1 second' WHERE id = %s", (data["n_climate"],))
+
+    # "Climate change is a hoax" shares video v1 with "Planes spray chemicals", and no other
+    [entry] = await service.digest_preview(organisation.id, alice.id)
+    [item] = entry.narratives.items
+    assert [(s.id, s.shared_videos) for s in item.shared_with] == [(data["n_chem"], 1)]
+
+    assert await service.send_digests() == (1, 1)
+    [(_, _, html)] = emailer.sent
+    assert "Other narratives shared together are:" in html
+    assert f'/narratives/{data["n_chem"]}"' in html
+    assert "Planes spray chemicals to control the weather</a> (1 shared video)" in html
+
+
+async def test_a_narrative_sharing_no_videos_lists_none(
+    conn_factory: Any, auth_service: AuthService, organisation: Organisation, data: SearchData, emailer: FakeEmailer
+) -> None:
+    alice = await person(auth_service, organisation)
+    service = AlertService(conn_factory)
+    from core.alerts.models import AlertRuleInput
+
+    await service.create(organisation.id, alice.id, AlertRuleInput(**narrative_alert()))
+    await sql(conn_factory, "UPDATE narratives SET created_at = CURRENT_TIMESTAMP + interval '1 second' WHERE id = %s", (data["n_vax"],))
+
+    assert await service.send_digests() == (1, 1)
+    [(_, _, html)] = emailer.sent
+    assert "Other narratives shared together are:" not in html
+
+
 async def test_a_claim_joining_a_followed_narrative_counts_even_if_older(
     conn_factory: Any, auth_service: AuthService, organisation: Organisation, data: SearchData, emailer: FakeEmailer
 ) -> None:

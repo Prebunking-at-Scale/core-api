@@ -80,6 +80,14 @@ class AlertValidationError(HTTPException):
 # The daily e-mail ------------------------------------------------------------------
 
 
+class SharedNarrative(BaseModel):
+    """A narrative that appears in the same videos as a reported one."""
+
+    id: UUID
+    title: str
+    shared_videos: int
+
+
 class DigestItem(BaseModel):
     id: UUID
     title: str
@@ -87,6 +95,8 @@ class DigestItem(BaseModel):
     # Where it opens in PAS (relative to the app): a narrative's page, or a claim's video
     # at the moment it is said
     link: str | None = None
+    # New narratives only: the others shared together with it, most shared videos first
+    shared_with: list[SharedNarrative] = []
 
 
 class DigestSection(BaseModel):

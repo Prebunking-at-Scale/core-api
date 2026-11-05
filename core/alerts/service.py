@@ -136,6 +136,8 @@ class AlertService:
             ],
             claims=_section(claims),
         )
+        for item in entry.narratives.items:
+            item.shared_with = await repo.shared_narratives(item.id, DIGEST_SECTION_LIMIT)
         rows = [
             {"kind": "narrative", "id": i.id, "conditions": i.conditions, "section": "narratives", "in_narrative_id": None}
             for i in narratives.values()

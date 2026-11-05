@@ -6,7 +6,12 @@ import psycopg
 from psycopg.rows import DictRow
 from psycopg.types.json import Jsonb
 
-from core.alerts.models import AlertCondition, AlertConditionInput, AlertRule
+from core.alerts.models import (
+    AlertCondition,
+    AlertConditionInput,
+    AlertRule,
+    SharedNarrative,
+)
 from core.alerts.summary import names_for
 from core.search.models import SearchFilters
 from core.search.query import QUERIES
@@ -209,6 +214,31 @@ class AlertRepository:
     async def narrative_titles(self, ids: list[UUID]) -> dict[UUID, str]:
         await self._session.execute("SELECT id, title FROM narratives WHERE id = ANY(%(ids)s)", {"ids": ids})
         return {row["id"]: row["title"] for row in await self._session.fetchall()}
+
+    async def shared_narratives(self, narrative_id: UUID, limit: int) -> list[SharedNarrative]:
+        """The narratives shared together with this one: those with a claim in any of
+        its videos, by how many videos they share with it."""
+        await self._session.execute(
+            """
+            WITH its_videos AS (
+                SELECT DISTINCT vc.video_id
+                FROM video_claims vc
+                JOIN claim_narratives cn ON cn.claim_id = vc.id
+                WHERE cn.narrative_id = %(narrative_id)s
+            )
+            SELECT n.id, n.title, COUNT(DISTINCT vc.video_id) AS shared_videos
+            FROM its_videos iv
+            JOIN video_claims vc ON vc.video_id = iv.video_id
+            JOIN claim_narratives cn ON cn.claim_id = vc.id
+            JOIN narratives n ON n.id = cn.narrative_id
+            WHERE cn.narrative_id <> %(narrative_id)s
+            GROUP BY n.id, n.title
+            ORDER BY shared_videos DESC, n.title
+            LIMIT %(limit)s
+            """,
+            {"narrative_id": narrative_id, "limit": limit},
+        )
+        return [SharedNarrative(**row) for row in await self._session.fetchall()]
 
     # Matching --------------------------------------------------------------------
 
