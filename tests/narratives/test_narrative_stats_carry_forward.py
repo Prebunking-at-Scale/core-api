@@ -375,3 +375,86 @@ async def test_visited_but_flat_stays_in_the_cohort(conn_factory):
     row = next(r for r in rows if r["narrative_id"] == narrative_id)
     assert row["daily_view_gain"] == 0.0
     assert row["baseline_views"] == 100.0
+
+
+async def test_stats_split_arrivals_from_measured_growth(conn_factory):
+    """The Brazil shape: an old video re-measured, and a new video appearing.
+
+    A was first seen on 20 May and is re-measured on 16 September, 300 views up —
+    growth that happened somewhere inside that gap and cannot be dated more
+    precisely. B appears on 16 September carrying 148 views, on a day we know
+    exactly. The day's delta of 448 is therefore 300 ramp + 148 step, and a chart
+    that draws the whole 448 as a slope across 77 days turns a one-day event into
+    a four-month trend.
+    """
+    async with conn_factory() as conn:
+        cur = conn.cursor()
+        narrative_id = await _make_narrative(cur)
+        a = await _insert_video(
+            cur,
+            views_by_date={"2026-05-20": 300, "2026-07-01": 600, "2026-09-16": 900},
+        )
+        b = await _insert_video(cur, views_by_date={"2026-09-16": 148})
+        await _link_videos_to_narrative(cur, narrative_id, [a, b])
+
+        repo = NarrativeRepository(conn.cursor())
+        stats = await repo.get_narrative_stats(narrative_id)
+
+    assert stats is not None
+    got = [
+        (
+            p.date.isoformat()[:10],
+            p.cumulative_views,
+            p.views,
+            p.views_from_new_videos,
+            p.views_from_existing,
+        )
+        for p in stats.time_series
+    ]
+    assert got == [
+        # the series opens with A arriving: everything it had is a step
+        ("2026-05-20", 300, 300, 300, 0),
+        # A re-measured: pure ramp, nothing appeared
+        ("2026-07-01", 600, 300, 0, 300),
+        # both at once — this is the day the old chart drew as one long slope
+        ("2026-09-16", 1048, 448, 148, 300),
+    ]
+    # the split is exhaustive, so an existing caller reading `views` is unaffected
+    for p in stats.time_series:
+        assert p.views_from_new_videos + p.views_from_existing == p.views
+
+
+async def test_stats_split_counts_several_videos_appearing_at_once(conn_factory):
+    """Two videos appearing the same day are one combined step, not a ramp each."""
+    async with conn_factory() as conn:
+        cur = conn.cursor()
+        narrative_id = await _make_narrative(cur)
+        a = await _insert_video(cur, views_by_date={"2026-01-01": 100, "2026-03-01": 160})
+        b = await _insert_video(cur, views_by_date={"2026-03-01": 40})
+        c = await _insert_video(cur, views_by_date={"2026-03-01": 25})
+        await _link_videos_to_narrative(cur, narrative_id, [a, b, c])
+
+        repo = NarrativeRepository(conn.cursor())
+        stats = await repo.get_narrative_stats(narrative_id)
+
+    march = next(p for p in stats.time_series if p.date.isoformat()[:10] == "2026-03-01")
+    assert march.views == 125              # A's 60 + B's 40 + C's 25
+    assert march.views_from_new_videos == 65   # B and C together
+    assert march.views_from_existing == 60     # A's re-measured growth
+
+
+async def test_stats_split_reports_nothing_new_when_no_video_appeared(conn_factory):
+    """A day where only existing videos moved has an empty arrival component."""
+    async with conn_factory() as conn:
+        cur = conn.cursor()
+        narrative_id = await _make_narrative(cur)
+        a = await _insert_video(cur, views_by_date={"2026-01-01": 100, "2026-01-09": 450})
+        await _link_videos_to_narrative(cur, narrative_id, [a])
+
+        repo = NarrativeRepository(conn.cursor())
+        stats = await repo.get_narrative_stats(narrative_id)
+
+    later = stats.time_series[-1]
+    assert later.views == 350
+    assert later.views_from_new_videos == 0
+    assert later.views_from_existing == 350
