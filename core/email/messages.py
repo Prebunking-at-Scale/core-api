@@ -119,7 +119,7 @@ def alert_digest_message(entries: "list[DigestEntry]", summaries: dict) -> tuple
             )
             if item.shared_with:
                 out += (
-                    '<p style="margin: 0.2em 0 0 1em; color: #6B7280;">Other narratives shared together are:</p>'
+                    '<p style="margin: 0.2em 0 0 1em; color: #6B7280;">Connected narratives:</p>'
                     '<ul style="margin: 0.1em 0 0.4em 0; padding-left: 2.2em; color: #6B7280;">'
                 )
                 for shared in item.shared_with:
@@ -156,9 +156,20 @@ def alert_digest_message(entries: "list[DigestEntry]", summaries: dict) -> tuple
             block += f'<h3 style="{section_title}">New claims</h3>' + items_html(entry, entry.claims)
         blocks += f'<div style="background: white; border-radius: 8px; margin: 1em 0; padding: 1em 1.2em;">{block}</div>'
 
+    # What "Connected narratives" means, only when the e-mail lists some
+    connected_note = ""
+    if any(item.shared_with for entry in entries for item in entry.narratives.items):
+        connected_note = (
+            '<p style="margin: 1.5em 0 0 0; color: #6B7280; font-size: 0.85em; line-height: 1.4;">'
+            "Connected narratives are shared in the same videos, meaning that the two narratives are often "
+            "expressed together. If a new narrative matched your filters, you can expect connected narratives "
+            "to follow soon.</p>"
+        )
+
     body = f"""
     <div style="{container_style} max-width: 640px; text-align: left; font-size: 1em;">
         {blocks}
+        {connected_note}
         <p style="margin: 1.5em 0 0 0; color: #999; font-size: 0.85em; text-align: center;">
             <a href="{config.APP_BASE_URL}/alerts" style="color: #999;">Manage your alerts</a>
         </p>

@@ -219,9 +219,12 @@ async def test_a_new_narrative_lists_the_narratives_shared_together_with_it(
 
     assert await service.send_digests() == (1, 1)
     [(_, _, html)] = emailer.sent
-    assert "Other narratives shared together are:" in html
+    assert "Connected narratives:" in html
     assert f'/narratives/{data["n_chem"]}"' in html
     assert "Planes spray chemicals to control the weather</a> (1 shared video)" in html
+    # What they are is explained once, at the bottom
+    assert html.count("Connected narratives are shared in the same videos") == 1
+    assert html.index("Connected narratives are shared in the same videos") > html.index("Planes spray chemicals")
 
 
 async def test_a_narrative_sharing_no_videos_lists_none(
@@ -236,7 +239,7 @@ async def test_a_narrative_sharing_no_videos_lists_none(
 
     assert await service.send_digests() == (1, 1)
     [(_, _, html)] = emailer.sent
-    assert "Other narratives shared together are:" not in html
+    assert "Connected narratives" not in html
 
 
 async def test_a_claim_joining_a_followed_narrative_counts_even_if_older(
