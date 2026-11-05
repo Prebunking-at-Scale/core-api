@@ -854,12 +854,16 @@ class NarrativeRepository:
                 return None
 
         if claim_ids is not None:
+            # Only the links that change: a link keeps the date its claim joined the
+            # narrative (claim_narratives.created_at), which alerts that follow a
+            # narrative rely on.
             await self._session.execute(
                 """
                 DELETE FROM claim_narratives
                 WHERE narrative_id = %(narrative_id)s
+                  AND NOT (claim_id = ANY(%(claim_ids)s))
                 """,
-                {"narrative_id": narrative_id},
+                {"narrative_id": narrative_id, "claim_ids": list(claim_ids)},
             )
 
             if claim_ids:
@@ -867,6 +871,7 @@ class NarrativeRepository:
                     """
                     INSERT INTO claim_narratives (claim_id, narrative_id)
                     VALUES (%(claim_id)s, %(narrative_id)s)
+                    ON CONFLICT (claim_id, narrative_id) DO NOTHING
                     """,
                     [
                         {"claim_id": claim_id, "narrative_id": narrative_id}
@@ -923,6 +928,40 @@ class NarrativeRepository:
         videos = await self._get_narrative_videos(narrative_id)
         return Narrative(
             **row, claims=claims, topics=topics, entities=entities, videos=videos
+        )
+
+    async def merge_narrative(self, source_id: UUID, target_id: UUID) -> None:
+        """Moves the source's claims, topics and entities into the target, and points
+        the alert conditions that followed the source to the target. The caller
+        deletes the source. Moved claims join the target now."""
+        params = {"source": source_id, "target": target_id}
+        await self._session.execute(
+            """
+            INSERT INTO claim_narratives (claim_id, narrative_id)
+            SELECT claim_id, %(target)s FROM claim_narratives WHERE narrative_id = %(source)s
+            ON CONFLICT (claim_id, narrative_id) DO NOTHING
+            """,
+            params,
+        )
+        await self._session.execute(
+            """
+            INSERT INTO narrative_topics (narrative_id, topic_id)
+            SELECT %(target)s, topic_id FROM narrative_topics WHERE narrative_id = %(source)s
+            ON CONFLICT DO NOTHING
+            """,
+            params,
+        )
+        await self._session.execute(
+            """
+            INSERT INTO narrative_entities (narrative_id, entity_id)
+            SELECT %(target)s, entity_id FROM narrative_entities WHERE narrative_id = %(source)s
+            ON CONFLICT DO NOTHING
+            """,
+            params,
+        )
+        await self._session.execute(
+            "UPDATE alert_rule_conditions SET narrative_id = %(target)s WHERE narrative_id = %(source)s",
+            params,
         )
 
     async def delete_narrative(self, narrative_id: UUID) -> None:

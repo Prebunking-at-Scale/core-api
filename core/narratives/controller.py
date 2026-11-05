@@ -4,7 +4,7 @@ from uuid import UUID
 
 from litestar import Controller, delete, get, patch, post
 from litestar.di import Provide
-from litestar.exceptions import NotFoundException
+from litestar.exceptions import NotFoundException, ValidationException
 
 from core.auth.guards import super_admin
 from core.errors import ConflictError
@@ -14,6 +14,7 @@ from core.narratives.models import (
     NarrativeClaim,
     NarrativeDetail,
     NarrativeInput,
+    NarrativeMergeInput,
     NarrativePatchInput,
     NarrativeStats,
     NarrativeSummary,
@@ -292,6 +293,28 @@ class NarrativeController(Controller):
         narrative_id: UUID,
     ) -> None:
         await narrative_service.delete_narrative(narrative_id)
+
+    @post(
+        path="/{narrative_id:uuid}/merge",
+        summary="Merge this narrative into another, then delete it",
+        description=(
+            "Moves its claims, topics and entities into `into`; alerts that followed it "
+            "follow `into` from now on. 404 if either narrative doesn't exist, 400 if "
+            "they are the same."
+        ),
+        guards=[super_admin],
+        status_code=204,
+    )
+    async def merge_narrative(
+        self,
+        narrative_service: NarrativeService,
+        narrative_id: UUID,
+        data: NarrativeMergeInput,
+    ) -> None:
+        try:
+            await narrative_service.merge_narrative(narrative_id, data.into)
+        except ValueError as error:
+            raise ValidationException(detail=str(error))
 
     @get(
         path="/{narrative_id:uuid}/indicators",

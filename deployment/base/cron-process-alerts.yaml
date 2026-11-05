@@ -6,7 +6,10 @@ metadata:
     app: core-api
     component: alerts-processor
 spec:
-  schedule: "0 */4 * * *"
+  # The daily alerts e-mail (frontend docs/alerts.md): 08:00 Madrid time for everyone.
+  # The name stays from the previous 4-hourly job, so deploys update it in place.
+  schedule: "0 8 * * *"
+  timeZone: "Europe/Madrid"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 12
   failedJobsHistoryLimit: 12
@@ -36,7 +39,7 @@ spec:
               image: europe-west4-docker.pkg.dev/pas-shared/pas/core-api
               imagePullPolicy: Always
               command: ["/bin/sh", "-c"]
-              args: ["uv run python -m core.cli process-alerts"]
+              args: ["uv run python -m core.cli send-alert-digest"]
               resources:
                 requests:
                   cpu: 500m

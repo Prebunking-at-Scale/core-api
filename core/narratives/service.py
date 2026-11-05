@@ -20,6 +20,7 @@ from core.config import (
     VIRALITY_SCORE_LIKES_WEIGHT,
 )
 from core.entities.service import EntityService
+from core.errors import NotFoundError
 from core.models import Narrative, NarrativeSpreadPattern, Video
 from core.narratives.api import NarrativesApiClient
 from core.narratives.models import (
@@ -326,6 +327,20 @@ class NarrativeService:
                 )
 
         return updated
+
+    async def merge_narrative(self, source_id: UUID, target_id: UUID) -> None:
+        """Merges one narrative into another and deletes it: its claims, topics and
+        entities move to the target, and alerts that followed it follow the target."""
+        if source_id == target_id:
+            raise ValueError("a narrative can't be merged into itself")
+        async with self.repo() as repo:
+            source = await repo.get_narrative(source_id)
+            if not source or not await repo.get_narrative(target_id):
+                raise NotFoundError()
+            await repo.merge_narrative(source_id, target_id)
+            if source.metadata.get("narrative_id"):
+                await self._delete_external_narrative(source.metadata["narrative_id"])
+            await repo.delete_narrative(source_id)
 
     async def delete_narrative(self, narrative_id: UUID) -> None:
         async with self.repo() as repo:
