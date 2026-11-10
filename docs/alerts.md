@@ -58,9 +58,11 @@ else is 404. Invalid input is 422 with the codes in `extra.errors`
 claims, topics and entities into another, points the conditions that followed it to
 the target, and deletes it.
 
-## Migration of today's alerts (27)
+## Migration of today's alerts (27, 28)
 
 Topic and keyword alerts become alerts with one `new_narrative` condition (the topic, or
-the keyword, now matched like the search: title or any claim). Threshold alerts are not
-carried over. Today's `alerts`, `alerts_triggered` and `alert_executions` are kept until
+the keyword, now matched like the search: title or any claim). Threshold alerts that
+follow one narrative (scope `specific`) become alerts with one `new_claim_in_narrative`
+condition on that narrative and no filters (28). Threshold alerts on every narrative
+(scope `general`) are not carried over. Today's `alerts`, `alerts_triggered` and `alert_executions` are kept until
 the new alerts have been checked in production.

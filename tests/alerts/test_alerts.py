@@ -358,6 +358,40 @@ async def test_topic_and_keyword_alerts_are_carried_over_and_thresholds_dropped(
     assert by_name["Vacunas"].enabled is False
 
 
+async def test_threshold_alerts_on_one_narrative_follow_its_new_claims(
+    conn_factory: Any, auth_service: AuthService, organisation: Organisation, data: SearchData
+) -> None:
+    alice = await person(auth_service, organisation)
+    rows = [
+        ("Chemtrails views", "narrative_views", "specific", data["n_chem"], True),
+        ("Chemtrails claims", "narrative_claims_count", "specific", data["n_chem"], False),
+        ("Big ones", "narrative_views", "general", None, True),
+    ]
+    for name, alert_type, scope, narrative_id, enabled in rows:
+        await sql(
+            conn_factory,
+            """
+            INSERT INTO alerts (user_id, organisation_id, name, alert_type, scope, narrative_id, threshold, enabled)
+            VALUES (%s, %s, %s, %s, %s, %s, 1000, %s)
+            """,
+            (alice.id, organisation.id, name, alert_type, scope, narrative_id, enabled),
+        )
+    for migration in ("27.migrate-alerts-to-alert-rules", "28.migrate-narrative-thresholds-to-alert-rules"):
+        async with conn_factory() as conn:
+            await conn.execute(Path(f"core/migrations/{migration}.up.sql").read_text())
+
+    carried = await AlertService(conn_factory).list_own(organisation.id, alice.id)
+    by_name = {a.name: a for a in carried}
+    assert set(by_name) == {"Chemtrails views", "Chemtrails claims"}  # not the general one
+    for alert in by_name.values():
+        assert len(alert.conditions) == 1
+        assert alert.conditions[0].type == "new_claim_in_narrative"
+        assert alert.conditions[0].narrative_id == data["n_chem"]
+        assert alert.conditions[0].filters == {}
+    assert by_name["Chemtrails views"].enabled is True
+    assert by_name["Chemtrails claims"].enabled is False
+
+
 async def test_narratives_to_follow_by_title_first_then_by_their_claims(
     auth_client: Client, auth_service: AuthService, organisation: Organisation, data: SearchData
 ) -> None:
