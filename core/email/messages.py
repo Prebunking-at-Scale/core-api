@@ -129,12 +129,6 @@ def alert_digest_message(entries: "list[DigestEntry]", summaries: dict) -> tuple
                         f'style="color: #374151; text-decoration: underline;">{escape(shared.title)}</a> ({videos})</li>'
                     )
                 out += "</ul>"
-        if section.total > len(section.items):
-            out += (
-                f'<p style="margin: 0.4em 0;{" padding-left: 1em;" if indent else ""}">'
-                f'<a href="{config.APP_BASE_URL}/alerts/{entry.alert_id}" '
-                f'style="color: #00533D; text-decoration: underline;">See all ({section.total})</a></p>'
-            )
         return out
 
     blocks = ""

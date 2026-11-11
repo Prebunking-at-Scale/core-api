@@ -301,6 +301,31 @@ async def test_a_claim_joining_a_followed_narrative_counts_even_if_older(
     assert entry.claims.total == 0
 
 
+async def test_the_email_lists_every_match_with_no_limit_per_section(
+    conn_factory: Any, auth_service: AuthService, organisation: Organisation, data: SearchData, emailer: FakeEmailer
+) -> None:
+    alice = await person(auth_service, organisation)
+    service = AlertService(conn_factory)
+    from core.alerts.models import AlertRuleInput
+
+    await service.create(
+        organisation.id,
+        alice.id,
+        AlertRuleInput(name="Everything", conditions=[{"type": "new_claim", "filters": {"language": ["en", "es", "fr", "de"]}}]),
+    )
+    await sql(conn_factory, "UPDATE alert_rules SET counting_since = CURRENT_TIMESTAMP - interval '1 hour'")
+
+    # All 11 claims of the test data are new: every one is listed
+    [entry] = await service.digest_preview(organisation.id, alice.id)
+    assert entry.claims.total == 11 and len(entry.claims.items) == 11
+
+    assert await service.send_digests() == (1, 1)
+    [(_, _, html)] = emailer.sent
+    assert "Los inmigrantes reciben pisos gratis." in html and "Die Grenzen werden geschlossen." in html
+    assert html.count("/videos/") == 11
+    assert "See all" not in html
+
+
 async def test_a_merged_narrative_is_followed_in_its_target(
     api_key_client: Client, conn_factory: Any, auth_service: AuthService, organisation: Organisation, data: SearchData
 ) -> None:
