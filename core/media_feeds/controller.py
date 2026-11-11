@@ -218,7 +218,7 @@ class MediaFeedController(Controller):
         guards=[organisation_admin],
         dto=ChannelFeedDTO,
         return_dto=None,
-        raises=[ConflictError],
+        raises=[ConflictError, ValidationException],
     )
     async def create_channel_feed(
         self,
@@ -326,7 +326,7 @@ class MediaFeedController(Controller):
         guards=[organisation_admin],
         dto=KeywordFeedDTO,
         return_dto=None,
-        raises=[ConflictError],
+        raises=[ConflictError, ValidationException],
     )
     async def create_keyword_feed(
         self,
@@ -374,6 +374,7 @@ class MediaFeedController(Controller):
         guards=[organisation_admin],
         dto=KeywordFeedDTO,
         return_dto=None,
+        raises=[ValidationException],
     )
     async def update_keyword_feed(
         self,

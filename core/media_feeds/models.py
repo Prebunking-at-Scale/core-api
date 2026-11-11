@@ -11,6 +11,12 @@ from pydantic import BaseModel, Field, JsonValue, field_validator
 Platform = Literal["youtube", "instagram", "tiktok"]
 VALID_PLATFORMS: tuple[str, ...] = get_args(Platform)
 
+# Per-organisation caps on active feeds (AI-2290). Each is the largest
+# organisation in production on 2026-11-11 plus 50%, rounded up:
+# teyit had 586 active channels, delfi had 421 keywords.
+MAX_CHANNEL_FEEDS_PER_ORGANISATION = 900
+MAX_KEYWORDS_PER_ORGANISATION = 650
+
 
 class MediaFeed(BaseModel, abc.ABC):
     id: UUID = Field(default_factory=uuid4)
@@ -31,9 +37,15 @@ class ChannelFeed(MediaFeed):
     platform: Platform
 
 
+class FeedLimits(BaseModel):
+    max_channel_feeds: int
+    max_keywords: int
+
+
 class AllFeeds(BaseModel):
     channel_feeds: list[ChannelFeed]
     keyword_feeds: list[KeywordFeed]
+    limits: FeedLimits
 
 
 class Cursor(BaseModel):
