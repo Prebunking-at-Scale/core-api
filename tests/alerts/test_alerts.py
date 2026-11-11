@@ -202,7 +202,7 @@ async def test_no_backlog_once_only_and_the_email(
     assert listed[0].id == alert.id and listed[0].last_match_at is not None
 
 
-async def test_a_new_narrative_lists_the_narratives_shared_together_with_it(
+async def test_a_new_narrative_without_a_language_filter_lists_no_connected_narratives(
     conn_factory: Any, auth_service: AuthService, organisation: Organisation, data: SearchData, emailer: FakeEmailer
 ) -> None:
     alice = await person(auth_service, organisation)
@@ -210,6 +210,28 @@ async def test_a_new_narrative_lists_the_narratives_shared_together_with_it(
     from core.alerts.models import AlertRuleInput
 
     await service.create(organisation.id, alice.id, AlertRuleInput(**narrative_alert("Climate watch", topic_id=[str(CLIMATE)])))
+    await sql(conn_factory, "UPDATE narratives SET created_at = CURRENT_TIMESTAMP + interval '1 second' WHERE id = %s", (data["n_climate"],))
+
+    # It shares video v1 with "Planes spray chemicals", but the alert has no language
+    [entry] = await service.digest_preview(organisation.id, alice.id)
+    [item] = entry.narratives.items
+    assert item.shared_with == []
+
+    assert await service.send_digests() == (1, 1)
+    [(_, _, html)] = emailer.sent
+    assert "Connected narratives" not in html
+
+
+async def test_a_new_narrative_with_a_language_filter_lists_the_narratives_shared_together_with_it(
+    conn_factory: Any, auth_service: AuthService, organisation: Organisation, data: SearchData, emailer: FakeEmailer
+) -> None:
+    alice = await person(auth_service, organisation)
+    service = AlertService(conn_factory)
+    from core.alerts.models import AlertRuleInput
+
+    await service.create(
+        organisation.id, alice.id, AlertRuleInput(**narrative_alert("Climate watch", topic_id=[str(CLIMATE)], language=["en"]))
+    )
     await sql(conn_factory, "UPDATE narratives SET created_at = CURRENT_TIMESTAMP + interval '1 second' WHERE id = %s", (data["n_climate"],))
 
     # "Climate change is a hoax" shares video v1 with "Planes spray chemicals", and no other

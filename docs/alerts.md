@@ -42,8 +42,11 @@ and removes the links that change, so a link keeps its date.
 CronJob at 08:00 Europe/Madrid. Per person (active, in an active organisation), one
 English e-mail with their triggered alerts, newest first: new narratives, new claims in
 each followed narrative, new claims; each element once with the conditions it met; 5 per
-section and "See all" to `/alerts/{id}`. Reports are recorded in the same transaction as
-the e-mail is sent: if sending fails, the matches go out next time.
+section and "See all" to `/alerts/{id}`. Under a new narrative that met a `new_narrative`
+condition with a `language` filter, the e-mail lists its connected narratives (those with
+a claim in any of its videos, by shared videos); without a language filter it lists none.
+Reports are recorded in the same transaction as the e-mail is sent: if sending fails, the
+matches go out next time.
 
 ## API
 
