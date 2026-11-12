@@ -2,6 +2,7 @@ import asyncio
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
+from psycopg.errors import InvalidTextRepresentation
 from pytest import MonkeyPatch, fixture, raises
 from testing.postgresql import Postgresql
 
@@ -65,7 +66,7 @@ async def test_a_failed_migration_releases_the_lock(
         monkeypatch,
         b"BEGIN; INSERT INTO migration_runs VALUES ('not a number'); COMMIT;",
     )
-    with raises(Exception):
+    with raises(InvalidTextRepresentation):
         await migrate(empty_db, 1)
 
     use_script(monkeypatch, b"BEGIN; INSERT INTO migration_runs VALUES (1); COMMIT;")

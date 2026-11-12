@@ -36,9 +36,8 @@ async def migrate(
     """
 
     async with connection_factory() as conn:
-        # One run at a time across workers and pods. Session-level, so it outlives the
-        # COMMIT in each migration file; LOCK TABLE ended there, and a waiting worker
-        # ran the same migration again.
+        # One run at a time across workers and pods. Session-level, because a
+        # transaction-level lock ends at the COMMIT in each migration file.
         await (await conn.execute("SELECT pg_advisory_lock(%s)", (_LOCK_KEY,))).close()
         try:
             await _migrate(conn, target_version)
