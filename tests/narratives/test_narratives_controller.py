@@ -100,8 +100,69 @@ async def test_get_narrative(
     assert "total_comments" in response_data
     assert "platforms" in response_data
     assert "language_count" in response_data
+    assert "languages" in response_data
     assert "topics" in response_data
     assert "entities" in response_data
+
+
+async def test_get_narrative_languages_cover_all_claims(
+    api_key_client: AsyncTestClient[Litestar],
+) -> None:
+    """languages and language_count are computed over every claim, not the preview."""
+    video_resp = await api_key_client.post(
+        "/api/videos/",
+        json={
+            "title": f"Languages Test Video {uuid4()}",
+            "description": "Video created for languages test",
+            "platform": "youtube",
+            "source_url": f"https://example.com/{uuid4()}",
+            "destination_path": "",
+            "uploaded_at": None,
+            "metadata": {},
+        },
+    )
+    assert video_resp.status_code == 201
+    video_id = video_resp.json()["data"]["id"]
+
+    claims_resp = await api_key_client.post(
+        f"/api/videos/{video_id}/claims",
+        json={
+            "claims": [
+                {
+                    "id": str(uuid4()),
+                    "claim": f"Claim {i}",
+                    "start_time_s": float(i * 10),
+                    "metadata": metadata,
+                }
+                for i, metadata in enumerate(
+                    [{"language": "en"}, {"language": "es"}, {"language": "en"}, {}]
+                )
+            ]
+        },
+    )
+    assert claims_resp.status_code == 201
+    claim_ids = [UUID(c["id"]) for c in claims_resp.json()["data"]["claims"]]
+
+    create_resp = await api_key_client.post(
+        "/api/narratives/",
+        json=NarrativeInput(
+            title="Languages Test",
+            description="Testing languages list",
+            claim_ids=claim_ids,
+        ).model_dump(mode="json"),
+    )
+    assert create_resp.status_code == 201
+    narrative_id = create_resp.json()["data"]["id"]
+
+    # claims_limit=1 so the preview holds a single claim; languages must still cover all four
+    response = await api_key_client.get(
+        f"/api/narratives/{narrative_id}?claims_limit=1"
+    )
+    assert response.status_code == 200
+    response_data = response.json()["data"]
+    assert len(response_data["claims"]) == 1
+    assert sorted(response_data["languages"]) == ["en", "es"]
+    assert response_data["language_count"] == 2
 
 
 async def test_get_narrative_with_custom_limits(
