@@ -8,6 +8,9 @@ from psycopg.rows import DictRow
 
 log = logging.getLogger(__name__)
 
+# Any number, as long as nothing else on the database takes an advisory lock with it
+_LOCK_KEY = 7_302_118_465
+
 
 async def migrate(
     connection_factory: Callable[[], psycopg.AsyncConnection[DictRow]],
@@ -33,54 +36,67 @@ async def migrate(
     """
 
     async with connection_factory() as conn:
-        create_table = await conn.execute("""
-            CREATE TABLE IF NOT EXISTS migrations (
-                id serial PRIMARY KEY,
-                version INTEGER NOT NULL,
-                direction TEXT NOT NULL,
-                performed timestamp NOT NULL DEFAULT NOW()
-            )
-        """)
-        await create_table.close()
+        # One run at a time across workers and pods. Session-level, so it outlives the
+        # COMMIT in each migration file; LOCK TABLE ended there, and a waiting worker
+        # ran the same migration again.
+        await (await conn.execute("SELECT pg_advisory_lock(%s)", (_LOCK_KEY,))).close()
+        try:
+            await _migrate(conn, target_version)
+        finally:
+            # A failed migration leaves an aborted transaction, where the unlock fails
+            await conn.rollback()
+            await (
+                await conn.execute("SELECT pg_advisory_unlock(%s)", (_LOCK_KEY,))
+            ).close()
 
-        await (
-            await conn.execute("LOCK TABLE migrations IN ACCESS EXCLUSIVE MODE")
-        ).close()
 
-        initial_version = 0
-        cur = await conn.execute(
-            "SELECT version FROM migrations ORDER BY id DESC LIMIT 1"
+async def _migrate(conn: psycopg.AsyncConnection[DictRow], target_version: int) -> None:
+    create_table = await conn.execute("""
+        CREATE TABLE IF NOT EXISTS migrations (
+            id serial PRIMARY KEY,
+            version INTEGER NOT NULL,
+            direction TEXT NOT NULL,
+            performed timestamp NOT NULL DEFAULT NOW()
         )
-        if (row := await cur.fetchone()) is not None and "version" in row:
-            initial_version = row["version"]
-        await cur.close()
+    """)
+    await create_table.close()
+    await conn.commit()
 
-        log.info(f"Migration Current: {initial_version} Target: {target_version}")
-        if initial_version < target_version:
-            direction = "up"
-            change = 1
-            offset = 1
-        elif initial_version > target_version:
-            direction = "down"
-            change = -1
-            offset = 0
-        else:
-            log.info("No migration needed. Already at target version.")
-            return
+    initial_version = 0
+    cur = await conn.execute("SELECT version FROM migrations ORDER BY id DESC LIMIT 1")
+    if (row := await cur.fetchone()) is not None and "version" in row:
+        initial_version = row["version"]
+    await cur.close()
 
-        for i in range(initial_version + offset, target_version + offset, change):
-            scripts = _get_migration_script(i, direction)
-            for name, script in scripts.items():
-                log.info(f"Running migration {name}: version {i} {direction}...")
-                await (await conn.execute(script)).close()
-                current_version = i if direction == "up" else i - 1
-                log.info(f"Current version: {current_version}")
-                await (
-                    await conn.execute(
-                        "INSERT INTO migrations (version, direction) VALUES (%s, %s);",
-                        (current_version, direction),
-                    )
-                ).close()
+    log.info(f"Migration Current: {initial_version} Target: {target_version}")
+    if initial_version < target_version:
+        direction = "up"
+        change = 1
+        offset = 1
+    elif initial_version > target_version:
+        direction = "down"
+        change = -1
+        offset = 0
+    else:
+        log.info("No migration needed. Already at target version.")
+        return
+
+    for i in range(initial_version + offset, target_version + offset, change):
+        scripts = _get_migration_script(i, direction)
+        for name, script in scripts.items():
+            log.info(f"Running migration {name}: version {i} {direction}...")
+            await (await conn.execute(script)).close()
+            current_version = i if direction == "up" else i - 1
+            log.info(f"Current version: {current_version}")
+            await (
+                await conn.execute(
+                    "INSERT INTO migrations (version, direction) VALUES (%s, %s);",
+                    (current_version, direction),
+                )
+            ).close()
+            # Commit each version as it is recorded: a later failure would roll it
+            # back, and the next worker in line must see it
+            await conn.commit()
 
 
 def _get_migration_script(version: int, direction: str) -> dict[str, bytes]:
