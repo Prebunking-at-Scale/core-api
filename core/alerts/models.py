@@ -111,7 +111,8 @@ class DigestNarrativeGroup(DigestSection):
 
 class DigestEntry(BaseModel):
     """One triggered alert: new narratives, new claims in each followed narrative,
-    then the other new claims. Up to DIGEST_SECTION_LIMIT items per section."""
+    then the other new claims. Every item is listed: the e-mail is the only place
+    they appear."""
 
     alert_id: UUID
     alert_name: str
@@ -124,4 +125,5 @@ class DigestEntry(BaseModel):
         return self.narratives.total + self.claims.total + sum(g.total for g in self.in_narratives)
 
 
-DIGEST_SECTION_LIMIT = 5
+# Connected narratives listed under a new narrative (context, not matches)
+CONNECTED_NARRATIVES_LIMIT = 5

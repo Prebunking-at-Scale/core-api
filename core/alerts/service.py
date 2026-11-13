@@ -3,7 +3,7 @@ from typing import AsyncContextManager
 from uuid import UUID
 
 from core.alerts.models import (
-    DIGEST_SECTION_LIMIT,
+    CONNECTED_NARRATIVES_LIMIT,
     AlertRule,
     AlertRuleInput,
     DigestEntry,
@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 
 def _section(found: dict[UUID, DigestItem]) -> DigestSection:
     items = list(found.values())
-    return DigestSection(items=items[:DIGEST_SECTION_LIMIT], total=len(items))
+    return DigestSection(items=items, total=len(items))
 
 
 class AlertService:
@@ -136,8 +136,16 @@ class AlertService:
             ],
             claims=_section(claims),
         )
+        # Connected narratives only under a new narrative that met a condition with a
+        # language filter
+        with_language = {
+            position
+            for position, condition in enumerate(alert.conditions, start=1)
+            if condition.type == "new_narrative" and condition.filters.get("language")
+        }
         for item in entry.narratives.items:
-            item.shared_with = await repo.shared_narratives(item.id, DIGEST_SECTION_LIMIT)
+            if with_language.intersection(item.conditions):
+                item.shared_with = await repo.shared_narratives(item.id, CONNECTED_NARRATIVES_LIMIT)
         rows = [
             {"kind": "narrative", "id": i.id, "conditions": i.conditions, "section": "narratives", "in_narrative_id": None}
             for i in narratives.values()

@@ -202,7 +202,7 @@ async def test_no_backlog_once_only_and_the_email(
     assert listed[0].id == alert.id and listed[0].last_match_at is not None
 
 
-async def test_a_new_narrative_lists_the_narratives_shared_together_with_it(
+async def test_a_new_narrative_without_a_language_filter_lists_no_connected_narratives(
     conn_factory: Any, auth_service: AuthService, organisation: Organisation, data: SearchData, emailer: FakeEmailer
 ) -> None:
     alice = await person(auth_service, organisation)
@@ -210,6 +210,28 @@ async def test_a_new_narrative_lists_the_narratives_shared_together_with_it(
     from core.alerts.models import AlertRuleInput
 
     await service.create(organisation.id, alice.id, AlertRuleInput(**narrative_alert("Climate watch", topic_id=[str(CLIMATE)])))
+    await sql(conn_factory, "UPDATE narratives SET created_at = CURRENT_TIMESTAMP + interval '1 second' WHERE id = %s", (data["n_climate"],))
+
+    # It shares video v1 with "Planes spray chemicals", but the alert has no language
+    [entry] = await service.digest_preview(organisation.id, alice.id)
+    [item] = entry.narratives.items
+    assert item.shared_with == []
+
+    assert await service.send_digests() == (1, 1)
+    [(_, _, html)] = emailer.sent
+    assert "Connected narratives" not in html
+
+
+async def test_a_new_narrative_with_a_language_filter_lists_the_narratives_shared_together_with_it(
+    conn_factory: Any, auth_service: AuthService, organisation: Organisation, data: SearchData, emailer: FakeEmailer
+) -> None:
+    alice = await person(auth_service, organisation)
+    service = AlertService(conn_factory)
+    from core.alerts.models import AlertRuleInput
+
+    await service.create(
+        organisation.id, alice.id, AlertRuleInput(**narrative_alert("Climate watch", topic_id=[str(CLIMATE)], language=["en"]))
+    )
     await sql(conn_factory, "UPDATE narratives SET created_at = CURRENT_TIMESTAMP + interval '1 second' WHERE id = %s", (data["n_climate"],))
 
     # "Climate change is a hoax" shares video v1 with "Planes spray chemicals", and no other
@@ -277,6 +299,31 @@ async def test_a_claim_joining_a_followed_narrative_counts_even_if_older(
     assert by_id == {data["c7"]: [1], data["c3"]: [1, 2]}
     # c3 is only listed under its narrative, not again under new claims
     assert entry.claims.total == 0
+
+
+async def test_the_email_lists_every_match_with_no_limit_per_section(
+    conn_factory: Any, auth_service: AuthService, organisation: Organisation, data: SearchData, emailer: FakeEmailer
+) -> None:
+    alice = await person(auth_service, organisation)
+    service = AlertService(conn_factory)
+    from core.alerts.models import AlertRuleInput
+
+    await service.create(
+        organisation.id,
+        alice.id,
+        AlertRuleInput(name="Everything", conditions=[{"type": "new_claim", "filters": {"language": ["en", "es", "fr", "de"]}}]),
+    )
+    await sql(conn_factory, "UPDATE alert_rules SET counting_since = CURRENT_TIMESTAMP - interval '1 hour'")
+
+    # All 11 claims of the test data are new: every one is listed
+    [entry] = await service.digest_preview(organisation.id, alice.id)
+    assert entry.claims.total == 11 and len(entry.claims.items) == 11
+
+    assert await service.send_digests() == (1, 1)
+    [(_, _, html)] = emailer.sent
+    assert "Los inmigrantes reciben pisos gratis." in html and "Die Grenzen werden geschlossen." in html
+    assert html.count("/videos/") == 11
+    assert "See all" not in html
 
 
 async def test_a_merged_narrative_is_followed_in_its_target(
@@ -356,6 +403,40 @@ async def test_topic_and_keyword_alerts_are_carried_over_and_thresholds_dropped(
     assert by_name["Health"].conditions[0].filters == {"topic_id": [str(HEALTH)]}
     assert by_name["Vacunas"].conditions[0].filters == {"keyword": ["vacuna"]}
     assert by_name["Vacunas"].enabled is False
+
+
+async def test_threshold_alerts_on_one_narrative_follow_its_new_claims(
+    conn_factory: Any, auth_service: AuthService, organisation: Organisation, data: SearchData
+) -> None:
+    alice = await person(auth_service, organisation)
+    rows = [
+        ("Chemtrails views", "narrative_views", "specific", data["n_chem"], True),
+        ("Chemtrails claims", "narrative_claims_count", "specific", data["n_chem"], False),
+        ("Big ones", "narrative_views", "general", None, True),
+    ]
+    for name, alert_type, scope, narrative_id, enabled in rows:
+        await sql(
+            conn_factory,
+            """
+            INSERT INTO alerts (user_id, organisation_id, name, alert_type, scope, narrative_id, threshold, enabled)
+            VALUES (%s, %s, %s, %s, %s, %s, 1000, %s)
+            """,
+            (alice.id, organisation.id, name, alert_type, scope, narrative_id, enabled),
+        )
+    for migration in ("27.migrate-alerts-to-alert-rules", "28.migrate-narrative-thresholds-to-alert-rules"):
+        async with conn_factory() as conn:
+            await conn.execute(Path(f"core/migrations/{migration}.up.sql").read_text())
+
+    carried = await AlertService(conn_factory).list_own(organisation.id, alice.id)
+    by_name = {a.name: a for a in carried}
+    assert set(by_name) == {"Chemtrails views", "Chemtrails claims"}  # not the general one
+    for alert in by_name.values():
+        assert len(alert.conditions) == 1
+        assert alert.conditions[0].type == "new_claim_in_narrative"
+        assert alert.conditions[0].narrative_id == data["n_chem"]
+        assert alert.conditions[0].filters == {}
+    assert by_name["Chemtrails views"].enabled is True
+    assert by_name["Chemtrails claims"].enabled is False
 
 
 async def test_narratives_to_follow_by_title_first_then_by_their_claims(

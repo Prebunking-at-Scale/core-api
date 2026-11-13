@@ -41,9 +41,13 @@ and removes the links that change, so a link keeps its date.
 `uv run python -m core.cli send-alert-digest`, run by the `core-api-process-alerts`
 CronJob at 08:00 Europe/Madrid. Per person (active, in an active organisation), one
 English e-mail with their triggered alerts, newest first: new narratives, new claims in
-each followed narrative, new claims; each element once with the conditions it met; 5 per
-section and "See all" to `/alerts/{id}`. Reports are recorded in the same transaction as
-the e-mail is sent: if sending fails, the matches go out next time.
+each followed narrative, new claims; each element once with the conditions it met. Every
+element is listed, with no limit per section: the e-mail is the only place they appear
+(each condition still stops at `MATCH_CAP`, 10,000, and the rest go out next time). Under a new narrative that met a `new_narrative`
+condition with a `language` filter, the e-mail lists its connected narratives (those with
+a claim in any of its videos, by shared videos); without a language filter it lists none. It lists up to 5.
+Reports are recorded in the same transaction as the e-mail is sent: if sending fails, the
+matches go out next time.
 
 ## API
 
@@ -58,9 +62,11 @@ else is 404. Invalid input is 422 with the codes in `extra.errors`
 claims, topics and entities into another, points the conditions that followed it to
 the target, and deletes it.
 
-## Migration of today's alerts (27)
+## Migration of today's alerts (27, 28)
 
 Topic and keyword alerts become alerts with one `new_narrative` condition (the topic, or
-the keyword, now matched like the search: title or any claim). Threshold alerts are not
-carried over. Today's `alerts`, `alerts_triggered` and `alert_executions` are kept until
+the keyword, now matched like the search: title or any claim). Threshold alerts that
+follow one narrative (scope `specific`) become alerts with one `new_claim_in_narrative`
+condition on that narrative and no filters (28). Threshold alerts on every narrative
+(scope `general`) are not carried over. Today's `alerts`, `alerts_triggered` and `alert_executions` are kept until
 the new alerts have been checked in production.
