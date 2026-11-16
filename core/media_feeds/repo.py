@@ -202,7 +202,10 @@ class MediaFeedRepository:
                 },
             )
         except psycopg.errors.UniqueViolation:
-            raise ConflictError("keyword already exists")
+            raise ConflictError(
+                "This topic already has a keyword feed. "
+                "Edit that feed to change its keywords."
+            )
         except psycopg.errors.ForeignKeyViolation:
             raise ValueError(f"topic {topic_id} does not exist")
 

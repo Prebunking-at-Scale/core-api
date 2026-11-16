@@ -297,6 +297,7 @@ async def test_create_keyword_feed_conflict(
         json=keyword_feed_data,
     )
     assert response2.status_code == 409
+    assert "already has a keyword feed" in response2.json()["detail"]
 
 
 async def test_get_keyword_feeds_by_organisation(
