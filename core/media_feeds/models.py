@@ -11,11 +11,11 @@ from pydantic import BaseModel, Field, JsonValue, field_validator
 Platform = Literal["youtube", "instagram", "tiktok"]
 VALID_PLATFORMS: tuple[str, ...] = get_args(Platform)
 
-# Per-organisation caps on active feeds (AI-2290). Each is the largest
-# organisation in production on 2026-11-11 plus 50%, rounded up:
-# teyit had 586 active channels, delfi had 421 keywords.
-MAX_CHANNEL_FEEDS_PER_ORGANISATION = 900
-MAX_KEYWORDS_PER_ORGANISATION = 650
+# Per-organisation caps on active feeds (AI-2290). On 2026-11-11 the
+# largest organisations in production had 586 active channels (teyit) and
+# 421 keywords (delfi).
+MAX_CHANNEL_FEEDS_PER_ORGANISATION = 750
+MAX_KEYWORDS_PER_ORGANISATION = 750
 
 
 class MediaFeed(BaseModel, abc.ABC):
