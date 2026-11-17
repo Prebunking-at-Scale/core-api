@@ -40,7 +40,7 @@ async def check_channel_limit(repo: MediaFeedRepository, organisation_id: UUID) 
         raise ValidationException(
             f"This would bring your organisation to {count} channels, above the "
             f"limit of {MAX_CHANNEL_FEEDS_PER_ORGANISATION}. "
-            "Archive some channels before adding more."
+            "Archive some channels, or contact us to increase the limit."
         )
 
 
@@ -58,7 +58,7 @@ async def check_keyword_limit(repo: MediaFeedRepository, organisation_id: UUID) 
         raise ValidationException(
             f"This would bring your organisation to {count} keywords, above the "
             f"limit of {MAX_KEYWORDS_PER_ORGANISATION}. "
-            "Remove some keywords before adding more."
+            "Remove some keywords, or contact us to increase the limit."
         )
 
 
