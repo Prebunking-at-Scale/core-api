@@ -12,8 +12,8 @@ Platform = Literal["youtube", "instagram", "tiktok"]
 VALID_PLATFORMS: tuple[str, ...] = get_args(Platform)
 
 # Per-organisation caps on active feeds (AI-2290). On 2026-11-11 the
-# largest organisations in production had 586 active channels (teyit) and
-# 421 keywords (delfi).
+# largest organisations in production had 586 active channels and 421
+# keywords.
 MAX_CHANNEL_FEEDS_PER_ORGANISATION = 750
 MAX_KEYWORDS_PER_ORGANISATION = 600
 
