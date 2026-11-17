@@ -15,7 +15,7 @@ VALID_PLATFORMS: tuple[str, ...] = get_args(Platform)
 # largest organisations in production had 586 active channels (teyit) and
 # 421 keywords (delfi).
 MAX_CHANNEL_FEEDS_PER_ORGANISATION = 750
-MAX_KEYWORDS_PER_ORGANISATION = 500
+MAX_KEYWORDS_PER_ORGANISATION = 600
 
 
 class MediaFeed(BaseModel, abc.ABC):
