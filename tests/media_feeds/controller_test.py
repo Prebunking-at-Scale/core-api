@@ -3,9 +3,11 @@ import uuid
 
 from litestar import Litestar
 from litestar.testing import AsyncTestClient
+from pytest import MonkeyPatch, fixture
 
 from core.auth.models import Organisation
 from core.auth.service import AuthService
+from core.media_feeds import service
 from core.media_feeds.models import ChannelFeed, KeywordFeed
 from tests.auth.conftest import create_organisation
 from tests.media_feeds.conftest import (
@@ -295,6 +297,7 @@ async def test_create_keyword_feed_conflict(
         json=keyword_feed_data,
     )
     assert response2.status_code == 409
+    assert "already has a keyword feed" in response2.json()["detail"]
 
 
 async def test_get_keyword_feeds_by_organisation(
@@ -727,3 +730,156 @@ async def test_bulk_upload_channels_csv_invalid_platform(
     assert data["created"][0]["channel"] == "user1"
     assert len(data["errors"]) == 1
     assert "Invalid platform" in data["errors"][0]
+
+
+@fixture
+def small_limits(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setattr(service, "MAX_CHANNEL_FEEDS_PER_ORGANISATION", 2)
+    monkeypatch.setattr(service, "MAX_KEYWORDS_PER_ORGANISATION", 3)
+
+
+async def test_create_channel_feed_over_limit(
+    api_key_client: AsyncTestClient[Litestar],
+    organisation: Organisation,
+    small_limits: None,
+) -> None:
+    await create_channel_feed(api_key_client, organisation)
+    await create_channel_feed(api_key_client, organisation)
+
+    response = await api_key_client.post(
+        "/api/media_feeds/channels/from-url",
+        params={"organisation_id": str(organisation.id)},
+        json={"url": "https://www.youtube.com/@one_too_many"},
+    )
+    assert response.status_code == 400
+    assert "limit of 2" in response.json()["detail"]
+
+    feeds = await api_key_client.get(
+        "/api/media_feeds/channels",
+        params={"organisation_id": str(organisation.id)},
+    )
+    assert len(feeds.json()["data"]) == 2
+
+
+async def test_archived_channels_do_not_count_towards_limit(
+    api_key_client: AsyncTestClient[Litestar],
+    organisation: Organisation,
+    small_limits: None,
+) -> None:
+    first = await create_channel_feed(api_key_client, organisation)
+    await create_channel_feed(api_key_client, organisation)
+    await api_key_client.delete(
+        f"/api/media_feeds/channels/{first.id}",
+        params={"organisation_id": str(organisation.id)},
+    )
+
+    await create_channel_feed(api_key_client, organisation)
+
+
+async def test_bulk_upload_channels_over_limit_creates_nothing(
+    api_key_client: AsyncTestClient[Litestar],
+    organisation: Organisation,
+    small_limits: None,
+) -> None:
+    file_content = """https://www.instagram.com/user1
+https://www.tiktok.com/@user2
+https://www.youtube.com/@user3
+"""
+    files = {"data": ("channels.txt", io.BytesIO(file_content.encode()), "text/plain")}
+    response = await api_key_client.post(
+        "/api/media_feeds/channels/bulk-upload",
+        params={"organisation_id": str(organisation.id)},
+        files=files,
+    )
+    assert response.status_code == 400
+    assert "3 channels" in response.json()["detail"]
+
+    feeds = await api_key_client.get(
+        "/api/media_feeds/channels",
+        params={"organisation_id": str(organisation.id)},
+    )
+    assert feeds.json()["data"] == []
+
+
+async def test_bulk_upload_channels_duplicates_do_not_count_towards_limit(
+    api_key_client: AsyncTestClient[Litestar],
+    organisation: Organisation,
+    small_limits: None,
+) -> None:
+    file_content = """https://www.youtube.com/@user1
+https://www.youtube.com/@USER1
+https://www.youtube.com/@user2
+"""
+    files = {"data": ("channels.txt", io.BytesIO(file_content.encode()), "text/plain")}
+    response = await api_key_client.post(
+        "/api/media_feeds/channels/bulk-upload",
+        params={"organisation_id": str(organisation.id)},
+        files=files,
+    )
+    assert response.status_code == 201
+    assert len(response.json()["data"]["created"]) == 2
+
+
+async def test_create_keyword_feed_over_limit(
+    api_key_client: AsyncTestClient[Litestar],
+    organisation: Organisation,
+    small_limits: None,
+) -> None:
+    url = "/api/media_feeds/keywords"
+    params = {"organisation_id": str(organisation.id)}
+    response = await api_key_client.post(
+        url,
+        params=params,
+        json={"topic_id": str(CLIMATE_TOPIC_ID), "keywords": ["a", "b"]},
+    )
+    assert response.status_code == 201
+
+    response = await api_key_client.post(
+        url,
+        params=params,
+        json={"topic_id": str(HEALTH_TOPIC_ID), "keywords": ["c", "d"]},
+    )
+    assert response.status_code == 400
+    assert "4 keywords" in response.json()["detail"]
+    assert "limit of 3" in response.json()["detail"]
+
+
+async def test_update_keyword_feed_over_limit(
+    api_key_client: AsyncTestClient[Litestar],
+    organisation: Organisation,
+    small_limits: None,
+) -> None:
+    params = {"organisation_id": str(organisation.id)}
+    response = await api_key_client.post(
+        "/api/media_feeds/keywords",
+        params=params,
+        json={"topic_id": str(CLIMATE_TOPIC_ID), "keywords": ["a"]},
+    )
+    feed_id = response.json()["data"]["id"]
+
+    response = await api_key_client.patch(
+        f"/api/media_feeds/keywords/{feed_id}",
+        params=params,
+        json={"keywords": ["a", "b", "c", "d"]},
+    )
+    assert response.status_code == 400
+
+    feed = await api_key_client.get(
+        f"/api/media_feeds/keywords/{feed_id}", params=params
+    )
+    assert feed.json()["data"]["keywords"] == ["a"]
+
+
+async def test_get_organisation_feeds_includes_limits(
+    api_key_client: AsyncTestClient[Litestar],
+    organisation: Organisation,
+    small_limits: None,
+) -> None:
+    response = await api_key_client.get(
+        "/api/media_feeds",
+        params={"organisation_id": str(organisation.id)},
+    )
+    assert response.json()["data"]["limits"] == {
+        "max_channel_feeds": 2,
+        "max_keywords": 3,
+    }

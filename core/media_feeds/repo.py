@@ -28,6 +28,28 @@ class MediaFeedRepository:
         )
         return [MediaFeed(**row) for row in await self._session.fetchall()]
 
+    async def count_channel_feeds(self, organisation_id: UUID) -> int:
+        await self._session.execute(
+            """
+            SELECT count(*) AS n FROM channel_feeds
+            WHERE organisation_id = %(organisation_id)s AND NOT is_archived
+            """,
+            {"organisation_id": str(organisation_id)},
+        )
+        row = await self._session.fetchone()
+        return row["n"] if row else 0
+
+    async def count_keywords(self, organisation_id: UUID) -> int:
+        await self._session.execute(
+            """
+            SELECT coalesce(sum(cardinality(keywords)), 0) AS n FROM keyword_feeds
+            WHERE organisation_id = %(organisation_id)s AND NOT is_archived
+            """,
+            {"organisation_id": str(organisation_id)},
+        )
+        row = await self._session.fetchone()
+        return row["n"] if row else 0
+
     async def get_channel_feeds(
         self, organisation_id: UUID | None = None
     ) -> list[ChannelFeed]:
@@ -180,7 +202,10 @@ class MediaFeedRepository:
                 },
             )
         except psycopg.errors.UniqueViolation:
-            raise ConflictError("keyword already exists")
+            raise ConflictError(
+                "This topic already has a keyword feed. "
+                "Edit that feed to change its keywords."
+            )
         except psycopg.errors.ForeignKeyViolation:
             raise ValueError(f"topic {topic_id} does not exist")
 
